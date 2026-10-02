@@ -1,0 +1,71 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Checkpoints & model weights
+# (zipdepth_base.pth is intentionally tracked — see checkpoints/)
+checkpoints/**
+!checkpoints/zipdepth_base.pth
+!checkpoints/zipdepth_base_npu.pth
+*.pt
+*.onnx
+*.bin
+
+# Outputs
+output/
+eval_results/
+*_depth.mp4
+*_depth_frames/
+*_depth.jpg
+!assets/**/*_depth.jpg
+*.npy
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Logs
+runs/
+log/
+*.tfevents.*
+wandb/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Large release assets (attached to GitHub Releases, not in repo)
+assets/training_files.txt
+assets/training_files.txt.gz
+training_files.txt
+training_files.txt.gz
+
+# Internal / private scripts (not for public release)
+scripts/profiler.py
+scripts/backend_compare.py
+zipdepth/utils/profiler.py
+
+# Paper source (kept locally, not part of the code release)
+latex/
+
+# Misc
+*.tmp
+*.bak
