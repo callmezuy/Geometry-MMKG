@@ -36,7 +36,7 @@ SPARQL_HEADERS = {
 }
 
 DL_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
+    'User-Agent': 'DB15K-ImageDownloader/1.0 (Research Project; contact: mduy2204@gmail.com)'
 }
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -105,24 +105,34 @@ def batch_sparql_lookup(uri_to_imgid: dict) -> dict:
 
 def download_image(img_url: str, save_path: str) -> str:
     session = get_session()
-    try:
-        r = session.get(img_url, stream=True, timeout=TIMEOUT)
-        if r.status_code == 404:
-            return '404'
-        if r.status_code == 429:
-            return '429'
-        if not r.ok:
-            return str(r.status_code)
-        with open(save_path, 'wb') as f:
-            for chunk in r.iter_content(8192):
-                f.write(chunk)
-        # Sanity-check: reject tiny files (likely HTML error pages)
-        if os.path.getsize(save_path) < 1024:
-            os.remove(save_path)
-            return 'small_file'
-        return 'ok'
-    except Exception as e:
-        return type(e).__name__
+    for attempt in range(3):  # allow up to 3 retries
+        try:
+            r = session.get(img_url, stream=True, timeout=TIMEOUT)
+            if r.status_code == 404:
+                return '404'
+            if r.status_code == 429:
+                # Handle rate limiting properly
+                retry_after = int(r.headers.get('Retry-After', 15 * (attempt + 1)))
+                time.sleep(retry_after)
+                continue
+            if not r.ok:
+                time.sleep(5 * (attempt + 1))
+                continue
+                
+            with open(save_path, 'wb') as f:
+                for chunk in r.iter_content(8192):
+                    f.write(chunk)
+                    
+            # Sanity-check: reject tiny files (likely HTML error pages)
+            if os.path.getsize(save_path) < 1024:
+                os.remove(save_path)
+                return 'small_file'
+                
+            return 'ok'
+        except Exception as e:
+            time.sleep(5 * (attempt + 1))
+            
+    return '429_or_failed'
 
 
 def download_worker(args):

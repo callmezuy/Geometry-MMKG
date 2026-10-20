@@ -51,6 +51,14 @@ Merged-MMKG/
 # Jupyter
 .ipynb_checkpoints
 
-# Kaggle / Temp
+# Kaggle / Temp / Large Payload
 kaggle_working/
 scratch/
+ZipDepth/
+checkpoints/
+hf_weights/
+mkgformer-mmkg/
+*.zip
+*.tar
+*.tar.gz
+*.7z

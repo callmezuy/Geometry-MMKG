@@ -7,7 +7,7 @@ then downloads the actual Wikimedia Commons images.
 import os
 import time
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 from tqdm import tqdm
 
@@ -26,7 +26,7 @@ SPARQL_HEADERS = {
 }
 
 DL_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
+    'User-Agent': 'MKG-ImageDownloader/1.0 (Research Project; contact: mduy2204@gmail.com)'
 }
 
 _local = threading.local()
@@ -70,23 +70,28 @@ def batch_sparql_lookup(entities: list) -> dict:
 
 def download_image(img_url: str, save_path: str) -> str:
     session = get_session()
-    try:
-        r = session.get(img_url, stream=True, timeout=TIMEOUT)
-        if r.status_code == 404:
-            return '404'
-        if r.status_code == 429:
-            return '429'
-        if not r.ok:
-            return str(r.status_code)
-        with open(save_path, 'wb') as f:
-            for chunk in r.iter_content(8192):
-                f.write(chunk)
-        if os.path.getsize(save_path) < 1024:
-            os.remove(save_path)
-            return 'small_file'
-        return 'ok'
-    except Exception as e:
-        return type(e).__name__
+    for attempt in range(3):
+        try:
+            r = session.get(img_url, stream=True, timeout=TIMEOUT)
+            if r.status_code == 404:
+                return '404'
+            if r.status_code == 429:
+                retry_after = int(r.headers.get('Retry-After', 15 * (attempt + 1)))
+                time.sleep(retry_after)
+                continue
+            if not r.ok:
+                time.sleep(5 * (attempt + 1))
+                continue
+            with open(save_path, 'wb') as f:
+                for chunk in r.iter_content(8192):
+                    f.write(chunk)
+            if os.path.getsize(save_path) < 1024:
+                os.remove(save_path)
+                return 'small_file'
+            return 'ok'
+        except Exception as e:
+            time.sleep(5 * (attempt + 1))
+    return '429_or_failed'
 
 def download_worker(args):
     qid, img_url = args
@@ -186,13 +191,16 @@ def main():
         print(f'No image found   : {len(no_image_entities)}')
 
         # Phase 2: Wait for downloads to finish and tally results
-        for future in tqdm(futures, desc='Waiting for downloads to finish'):
-            entity, success, msg = future.result()
-            if success:
-                ok_count += 1
-            else:
-                fail_count += 1
-                flog.write(f'{entity}\t{msg}\n')
+        with tqdm(total=len(futures), desc='Downloading') as bar:
+            for future in as_completed(futures):
+                entity, success, msg = future.result()
+                if success:
+                    ok_count += 1
+                else:
+                    fail_count += 1
+                    flog.write(f'{entity}\t{msg}\n')
+                bar.update(1)
+                bar.set_postfix(ok=ok_count, fail=fail_count)
 
     with open(FAILED_LOG, 'a', encoding='utf-8') as flog:
         for e in no_image_entities:
