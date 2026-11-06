@@ -9,7 +9,8 @@ def evaluate_by_relation_type():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Using device: {device}')
     
-    DATA_DIR = r'd:\University\Thesis\Code\data\Spatial-MMSG'
+    CODE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    DATA_DIR = os.path.join(CODE_DIR, 'data', 'Spatial-VRD')
     
     # 1. Load Data
     print("Loading features and dataset...")

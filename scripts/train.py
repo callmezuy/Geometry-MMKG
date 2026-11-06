@@ -11,7 +11,8 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Using device: {device}')
     
-    DATA_DIR = r'd:\University\Thesis\Code\data\Spatial-MMSG'
+    CODE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    DATA_DIR = os.path.join(CODE_DIR, 'data', 'Spatial-VRD')
     
     # 1. Load Pre-Extracted Features
     print("Loading pre-extracted features into RAM...")
@@ -22,9 +23,11 @@ def main():
     # 2. Dataset
     print("Initializing Fast Datasets...")
     train_dataset = FastMMSGDataset(DATA_DIR, split='train')
+    valid_dataset = FastMMSGDataset(DATA_DIR, split='valid') if os.path.exists(os.path.join(DATA_DIR, 'valid.txt')) else None
     test_dataset = FastMMSGDataset(DATA_DIR, split='test')
     
     train_loader = DataLoader(train_dataset, batch_size=1024, shuffle=True, num_workers=0)
+    valid_loader = DataLoader(valid_dataset, batch_size=1024, shuffle=False, num_workers=0) if valid_dataset else None
     test_loader = DataLoader(test_dataset, batch_size=1024, shuffle=False, num_workers=0)
     
     print("Building Filtered Triplet Dictionary for Evaluation...")
@@ -96,9 +99,11 @@ def main():
         
         # Evaluate every 5 epochs
         if (epoch + 1) % 5 == 0:
-            print(f"--- Evaluating at Epoch {epoch+1} ---")
+            eval_split_name = "Validation" if valid_loader else "Test"
+            eval_loader = valid_loader if valid_loader else test_loader
+            print(f"--- Evaluating on {eval_split_name} at Epoch {epoch+1} ---")
             mrr, h1, h3, h10 = evaluate_link_prediction(
-                model, all_text, all_rgb, all_depth, test_loader, all_true_triplets, device
+                model, all_text, all_rgb, all_depth, eval_loader, all_true_triplets, device
             )
             print(f"Metrics -> MRR: {mrr:.4f} | Hits@1: {h1:.4f} | Hits@3: {h3:.4f} | Hits@10: {h10:.4f}")
             
@@ -107,7 +112,13 @@ def main():
                 print(f"New best model! Saving to best_model.pth")
                 torch.save(model.state_dict(), 'best_model.pth')
                 
-    print("Training complete! Saving final_model.pth")
+    print("\nTraining complete! Evaluating best model on Test Set...")
+    if os.path.exists('best_model.pth'):
+        model.load_state_dict(torch.load('best_model.pth', weights_only=False))
+    test_mrr, test_h1, test_h3, test_h10 = evaluate_link_prediction(
+        model, all_text, all_rgb, all_depth, test_loader, all_true_triplets, device
+    )
+    print(f"Final Test Metrics -> MRR: {test_mrr:.4f} | Hits@1: {test_h1:.4f} | Hits@3: {test_h3:.4f} | Hits@10: {test_h10:.4f}")
     torch.save(model.state_dict(), 'final_model.pth')
 
 if __name__ == '__main__':

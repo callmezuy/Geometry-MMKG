@@ -33,8 +33,10 @@ class FastMMSGDataset(Dataset):
         with open(os.path.join(data_dir, f'{split}.txt'), 'r', encoding='utf-8') as f:
             next(f)
             for line in f:
-                s, o, p = line.strip().split('\t')
-                self.triplets.append((self.entity2id[s], self.relation2id[p], self.entity2id[o]))
+                parts = line.strip().split('\t')
+                if len(parts) == 3:
+                    s, p, o = parts
+                    self.triplets.append((self.entity2id[s], self.relation2id[p], self.entity2id[o]))
                 
     def __len__(self):
         return len(self.triplets)
@@ -73,15 +75,17 @@ def get_all_true_triplets(data_dir):
             parts = line.strip().split('\t')
             relation2id[parts[0]] = int(parts[1])
 
-    for split in ['train.txt', 'test.txt']:
+    for split in ['train.txt', 'valid.txt', 'test.txt']:
         path = os.path.join(data_dir, split)
         if os.path.exists(path):
             with open(path, 'r', encoding='utf-8') as f:
                 next(f)
                 for line in f:
-                    s, o, p = line.strip().split('\t')
-                    h = entity2id[s]
-                    r = relation2id[p]
-                    t = entity2id[o]
-                    all_true[(h, r)].add(t)
+                    parts = line.strip().split('\t')
+                    if len(parts) == 3:
+                        s, p, o = parts
+                        h = entity2id[s]
+                        r = relation2id[p]
+                        t = entity2id[o]
+                        all_true[(h, r)].add(t)
     return all_true

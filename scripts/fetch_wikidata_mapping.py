@@ -5,8 +5,10 @@ import requests
 import urllib.parse
 from tqdm import tqdm
 
-IMAGES_DIR = r'd:\University\Thesis\Code\data\MKG-W\images'
-OUT_DICT = r'd:\University\Thesis\Code\data\MKG-W\wikidata_to_wiki_dict.json'
+CODE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+IMAGES_DIR = os.path.join(CODE_DIR, 'data', 'MKG-W', 'images')
+OUT_DICT = os.path.join(CODE_DIR, 'data', 'MKG-W', 'wikidata_to_wiki_dict.json')
 BATCH_SIZE = 100
 
 def get_session():

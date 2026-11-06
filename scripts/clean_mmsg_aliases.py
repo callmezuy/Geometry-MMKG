@@ -1,7 +1,8 @@
 import os
 import re
 
-DATA_DIR = r'd:\University\Thesis\Code\data\Spatial-MMSG'
+CODE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(CODE_DIR, 'data', 'Spatial-VRD')
 
 def get_base_relation(rel):
     rel = rel.lower().strip()
@@ -41,23 +42,25 @@ def process_file(filename, new_rel2id):
     for line in lines[1:]: # skip count header
         parts = line.strip().split('\t')
         if len(parts) == 3:
-            s, o, p = parts
+            s, p, o = parts
             base_p = get_base_relation(p)
             if base_p not in new_rel2id:
                 new_rel2id[base_p] = len(new_rel2id)
-            new_triplets.append((s, o, base_p))
+            new_triplets.append((s, base_p, o))
             
     with open(path, 'w', encoding='utf-8') as f:
         f.write(f"{len(new_triplets)}\n")
-        for s, o, p in new_triplets:
-            f.write(f"{s}\t{o}\t{p}\n")
+        for s, p, o in new_triplets:
+            f.write(f"{s}\t{p}\t{o}\n")
 
 def main():
     print("Cleaning MMSG Aliases...")
     
-    # Process Train and Test triplets
+    # Process Train, Valid, and Test triplets
     new_rel2id = {}
     process_file('train.txt', new_rel2id)
+    if os.path.exists(os.path.join(DATA_DIR, 'valid.txt')):
+        process_file('valid.txt', new_rel2id)
     process_file('test.txt', new_rel2id)
     
     # Write new relation2id.txt

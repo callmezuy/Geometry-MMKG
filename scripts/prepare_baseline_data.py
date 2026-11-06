@@ -2,7 +2,8 @@ import os
 import torch
 
 def main():
-    DATA_DIR = r'd:\University\Thesis\Code\data\Spatial-MMSG'
+    CODE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    DATA_DIR = os.path.join(CODE_DIR, 'data', 'Spatial-VRD')
     
     rgb_path = os.path.join(DATA_DIR, 'ent_rgb_emb.pt')
     depth_path = os.path.join(DATA_DIR, 'ent_depth_emb.pt')

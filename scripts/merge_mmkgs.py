@@ -5,8 +5,10 @@ import urllib.parse
 from tqdm import tqdm
 from PIL import Image
 
-DATA_DIR = r'd:\University\Thesis\Code\data'
-BENCHMARK_DIR = r'd:\University\Thesis\Code\baselines\SNAG\SNAG_MKGC\benchmarks'
+CODE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+DATA_DIR = os.path.join(CODE_DIR, 'data')
+BENCHMARK_DIR = os.path.join(CODE_DIR, 'baselines', 'SNAG', 'SNAG_MKGC', 'benchmarks')
 OUT_DIR = os.path.join(DATA_DIR, 'Merged-MMKG')
 OUT_IMG_DIR = os.path.join(OUT_DIR, 'images')
 

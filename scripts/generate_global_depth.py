@@ -6,10 +6,13 @@ from torchvision import transforms
 from tqdm import tqdm
 from zipdepth.model.architecture import create_model
 
+CODE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+THESIS_DIR = os.path.dirname(CODE_DIR)
+
 # Configs
-DATASET_DIR = r'd:\University\Thesis\Dataset\VRD\vrd'
+DATASET_DIR = os.path.join(THESIS_DIR, 'Dataset', 'VRD', 'vrd')
 IMAGE_DIRS = ['sg_train_images', 'sg_test_images']
-CHECKPOINT_PATH = r'd:\University\Thesis\Code\ZipDepth\checkpoints\zipdepth_base.pth'
+CHECKPOINT_PATH = os.path.join(CODE_DIR, 'ZipDepth', 'checkpoints', 'zipdepth_base.pth')
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 # ZipDepth transform

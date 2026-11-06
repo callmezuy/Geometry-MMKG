@@ -33,7 +33,7 @@ class SpatialMMSGDataset(Dataset):
         with open(os.path.join(data_dir, f'{split}.txt'), 'r', encoding='utf-8') as f:
             next(f) # skip count
             for line in f:
-                s, o, p = line.strip().split('\t')
+                s, p, o = line.strip().split('\t')
                 self.triplets.append((s, p, o)) # subject, predicate, object
                 
         # Image Transforms

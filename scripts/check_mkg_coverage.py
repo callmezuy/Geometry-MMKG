@@ -3,8 +3,10 @@ import time
 import requests
 from tqdm import tqdm
 
-MKGW_ENTITY = r'd:\University\Thesis\Code\SNAG\SNAG_MKGC\benchmarks\MKG-W\entity2id.txt'
-MKGY_ENTITY = r'd:\University\Thesis\Code\SNAG\SNAG_MKGC\benchmarks\MKG-Y\entity2id.txt'
+CODE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+MKGW_ENTITY = os.path.join(CODE_DIR, 'baselines', 'SNAG', 'SNAG_MKGC', 'benchmarks', 'MKG-W', 'entity2id.txt')
+MKGY_ENTITY = os.path.join(CODE_DIR, 'baselines', 'SNAG', 'SNAG_MKGC', 'benchmarks', 'MKG-Y', 'entity2id.txt')
 
 HEADERS = {'User-Agent': 'MKG-Research/1.0 (python-requests)'}
 BATCH_SIZE = 50

@@ -8,10 +8,12 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from zipdepth.model.architecture import create_model
 
+CODE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 # Configs
-DATASET_DIR = r'd:\University\Thesis\Code\data\Merged-MMKG'
+DATASET_DIR = os.path.join(CODE_DIR, 'data', 'Merged-MMKG')
 IMAGE_DIR = 'images'
-CHECKPOINT_PATH = r'd:\University\Thesis\Code\ZipDepth\checkpoints\zipdepth_base.pth'
+CHECKPOINT_PATH = os.path.join(CODE_DIR, 'ZipDepth', 'checkpoints', 'zipdepth_base.pth')
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 # ZipDepth transform

@@ -11,9 +11,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 from tqdm import tqdm
 
-INDEX_FILE   = r'd:\University\Thesis\Code\baselines\SNAG\SNAG_MKGC\benchmarks\MKG-W\entity2id.txt'
-OUTPUT_DIR   = r'd:\University\Thesis\Code\data\MKG-W\images'
-FAILED_LOG   = r'd:\University\Thesis\Code\data\MKG-W\images_failed.log'
+CODE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+INDEX_FILE   = os.path.join(CODE_DIR, 'baselines', 'SNAG', 'SNAG_MKGC', 'benchmarks', 'MKG-W', 'entity2id.txt')
+OUTPUT_DIR   = os.path.join(CODE_DIR, 'data', 'MKG-W', 'images')
+FAILED_LOG   = os.path.join(CODE_DIR, 'data', 'MKG-W', 'images_failed.log')
 
 SPARQL_URL   = 'https://query.wikidata.org/sparql'
 BATCH_SIZE   = 50
