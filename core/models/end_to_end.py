@@ -10,14 +10,21 @@ class GeometryMMKGModel(nn.Module):
     geometry-guided cross-attention fusion, GCN neighborhood aggregation,
     and Knowledge Graph scoring.
     """
-    def __init__(self, num_relations, embed_dim=768, gcn_dropout=0.1):
+    def __init__(self, num_relations, embed_dim=768, gcn_dropout=0.1, use_encoders=False):
         super().__init__()
         self.embed_dim = embed_dim
+        self.use_encoders = use_encoders
         
-        # 1. Encoders
-        self.text_encoder = TextEncoder(out_dim=embed_dim)
-        self.rgb_encoder = RGBEncoder(out_dim=embed_dim)
-        self.depth_encoder = DepthEncoder(out_dim=embed_dim)
+        # 1. Encoders (only instantiated when raw end-to-end extraction is needed;
+        # skipped in FastMMSGDataset mode where pre-extracted .pt embeddings are used)
+        if use_encoders:
+            self.text_encoder = TextEncoder(out_dim=embed_dim)
+            self.rgb_encoder = RGBEncoder(out_dim=embed_dim)
+            self.depth_encoder = DepthEncoder(out_dim=embed_dim)
+        else:
+            self.text_encoder = None
+            self.rgb_encoder = None
+            self.depth_encoder = None
         
         # 2. Fusion Module
         self.fusion_module = GeometryGuidedFusion(feature_dim=embed_dim)

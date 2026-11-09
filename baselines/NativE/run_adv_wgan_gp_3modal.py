@@ -27,10 +27,10 @@ if __name__ == "__main__":
     )
     # dataloader for test
     test_dataloader = TestDataLoader(
-        "./benchmarks/" + args.dataset + '/', "link")
-    img_emb = torch.load('./embeddings/' + args.dataset + '-visual.pth')
-    text_emb = torch.load('./embeddings/' + args.dataset + '-textual.pth')
-    num_emb = torch.load('./embeddings/' + args.dataset + '-numeric.pth')
+        "./benchmarks/" + args.dataset + '/', "link", False)
+    img_emb = torch.load('./embeddings/' + args.dataset + '-visual.pth', weights_only=False)
+    text_emb = torch.load('./embeddings/' + args.dataset + '-textual.pth', weights_only=False)
+    num_emb = torch.load('./embeddings/' + args.dataset + '-numeric.pth', weights_only=False)
     # define the model
     kge_score = AdvRelRotatEDB15K(
         ent_tot=train_dataloader.get_ent_tot(),
@@ -72,6 +72,6 @@ if __name__ == "__main__":
     kge_score.save_checkpoint(args.save)
 
     # test the model
-    # kge_score.load_checkpoint(args.save)
+    kge_score.load_checkpoint(args.save)
     tester = Tester(model=kge_score, data_loader=test_dataloader, use_gpu=True)
     tester.run_link_prediction(type_constrain=False)

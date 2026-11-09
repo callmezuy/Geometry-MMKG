@@ -27,9 +27,9 @@ if __name__ == "__main__":
     )
     # dataloader for test
     test_dataloader = TestDataLoader(
-        "./benchmarks/" + args.dataset + '/', "link")
-    img_emb = torch.load('./embeddings/' + args.dataset + '-visual.pth')
-    text_emb = torch.load('./embeddings/' + args.dataset + '-textual.pth')
+        "./benchmarks/" + args.dataset + '/', "link", False)
+    img_emb = torch.load('./embeddings/' + args.dataset + '-visual.pth', weights_only=False)
+    text_emb = torch.load('./embeddings/' + args.dataset + '-textual.pth', weights_only=False)
     # define the model
     kge_score = AdvRelRotatE(
         ent_tot=train_dataloader.get_ent_tot(),

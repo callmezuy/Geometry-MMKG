@@ -32,20 +32,9 @@ class AdvRelRotatEDB15K(Model):
             requires_grad=False
         )
 
-        self.img_dim = 256
-        self.text_dim = 256
-
-        img_pool = torch.nn.AvgPool2d(4, stride=4)
-        img_emb = img_pool(img_emb.view(-1, 64, 64))
-        img_emb = img_emb.view(img_emb.size(0), -1)
-
-        txt_pool = nn.AdaptiveAvgPool2d(output_size=(4, 64))
-        text_emb = txt_pool(text_emb.view(-1, 12, 64))
-        text_emb = text_emb.view(text_emb.size(0), -1)
-
-        num_pool = nn.AdaptiveAvgPool2d(output_size=(4, 64))
-        numeric_emb = txt_pool(numeric_emb.view(-1, 12, 64))
-        numeric_emb = numeric_emb.view(numeric_emb.size(0), -1)
+        self.img_dim = img_emb.shape[1]
+        self.text_dim = text_emb.shape[1]
+        self.numeric_dim = numeric_emb.shape[1]
 
         self.img_embeddings = nn.Embedding.from_pretrained(img_emb).requires_grad_(False)
         self.text_embeddings = nn.Embedding.from_pretrained(text_emb).requires_grad_(True)
@@ -68,7 +57,7 @@ class AdvRelRotatEDB15K(Model):
             nn.Linear(self.dim_e, self.dim_e)
         )
         self.numeric_proj = nn.Sequential(
-            nn.Linear(self.text_dim, self.dim_e),
+            nn.Linear(self.numeric_dim, self.dim_e),
             nn.ReLU(),
             nn.Linear(self.dim_e, self.dim_e)
         )
