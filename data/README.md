@@ -12,9 +12,9 @@ name as the folder the notebooks download into. File conventions are unchanged:
 | `Merged-MMKG/` | `callmezuy/unified-mmkg` | 48,798 / 1,395 / 6,022 | 429 | transductive | v1 splits, leakage removed |
 | `Spatial-VRD/` | `callmezuy/spatial-vrd` | 77,227 / 8,614 / 21,563 | 52 | inductive (split by image) | `sg_*_annotations.json` + `relation_review.tsv` |
 | `Spatial-VG/` | `callmezuy/spatial-vg` | 319,069 / 26,372 / 137,984 | 50 | inductive (official image split) | `VG-SGG.h5` + `VG-SGG-dicts.json` (VG150-curated, `no_part_whole`) |
-| `Spatial-VRD-Trans/` | (none yet) | 77,331 / 8,592 / 21,481 | 52 | transductive control | `Spatial-VRD/` v2 |
+| `Spatial-VRD-Trans/` | `callmezuy/spatial-vrd-trans` | 77,331 / 8,592 / 21,481 | 52 | transductive control | `Spatial-VRD/` v2 |
 
-Not yet uploaded: HF repos still hold v1 (see RESEARCH_PLAN.md, P0.4).
+Uploaded to HF on 12/11/2026: `main` = v2. Each repo has tags `v1` (original) and `v2`; pin with `snapshot_download(..., revision="v2")` for reproducibility.
 
 ## Extra files
 
@@ -23,7 +23,7 @@ Not yet uploaded: HF repos still hold v1 (see RESEARCH_PLAN.md, P0.4).
 - `Spatial-VRD/relation_review.tsv`: raw predicate → label (+ head/tail inversion). Edit it, then rebuild.
 - `Spatial-VRD/relation_audit.tsv`: what the old heuristic (`scripts/legacy/`) did to each raw predicate.
 - `Spatial-VRD-Trans/split_stats.json`: statistics of the transductive control split.
-- `_archive_v1/<name>/`: the v1 split files (+ `entity2id.txt`). Safe to delete once v1 is tagged on HF.
+- `_archive_v1/<name>/`: the v1 split files (+ `entity2id.txt`). Also available on HF at tag `v1`, so safe to delete.
 
 ## Rebuild (from `Code/`)
 

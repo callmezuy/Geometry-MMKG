@@ -10,7 +10,7 @@
 
 ## 1. Kiến Trúc Dữ Liệu & Hugging Face Remote Storage
 
-Dữ liệu local đã được làm sạch thành **v2** (11/11/2026, xem `data/README.md`). **Các repo HF vẫn đang giữ v1** cho tới khi làm xong P0.4 trong `RESEARCH_PLAN.md`. Bảng dưới đây là v2; số liệu v1 để trong ngoặc.
+Dữ liệu local đã được làm sạch thành **v2** (11/11/2026, xem `data/README.md`). Đã đẩy lên HF ngày 12/11/2026: nhánh `main` = v2, bản cũ giữ ở tag `v1`. Bảng dưới đây là v2; số liệu v1 để trong ngoặc.
 
 | Dataset (Local & HF) | Hugging Face Repo ID | Số Thực Thể (`entity2id.txt`) | Số Quan Hệ (`relation2id.txt`) | Train / Valid / Test Triplets | Đặc Trưng Trích Xuất Sẵn (`.pt`) |
 | :--- | :--- | :---: | :---: | :---: | :--- |
@@ -18,7 +18,7 @@ Dữ liệu local đã được làm sạch thành **v2** (11/11/2026, xem `data
 | **Spatial-VRD** | `callmezuy/spatial-vrd` | `93,809` | `52` (v1 thực tế là 782) | `77,227` / `8,614` / `21,563` (v1 `81,046` / `9,006` / `22,632`) | `ent_rgb_emb.pt`, `ent_depth_emb.pt`, `ent_text_emb.pt` (`[93809, 768]`) |
 | **Spatial-VG** *(VG150-curated `no_part_whole`)* | `callmezuy/spatial-vg` | `1,441,984` | `50` | `319,069` / `26,372` / `137,984` (v1 `379,944` / `42,217` / `178,919`) | `ent_rgb_emb.pt`, `ent_depth_emb.pt`, `ent_text_emb.pt` (`[1441984, 768]`, ~4.43 GB/file) |
 
-Thêm bộ đối chứng **Spatial-VRD-Trans** (transductive, `77,331` / `8,592` / `21,481`), chưa có repo HF.
+Thêm bộ đối chứng **Spatial-VRD-Trans** (transductive, `77,331` / `8,592` / `21,481`), repo HF `callmezuy/spatial-vrd-trans`.
 
 **Những thay đổi chính của v2:**
 - VRD/VG là thiết lập **inductive**: 100% thực thể valid/test không có trong train. Valid được chia theo ảnh; VG dùng split chính thức của H5.
