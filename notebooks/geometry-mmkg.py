@@ -117,7 +117,11 @@ def _(
     from core.data_engineering.fast_dataset import FastMMSGDataset, get_all_true_triplets
     from core.models.end_to_end import GeometryMMKGModel
     from core.models.kg_reasoning import JointLoss
-    from core.models.evaluation import evaluate_link_prediction
+    from core.models.evaluation import evaluate_link_prediction, format_metrics, save_ranks
+    from core.reproducibility import set_seed, seed_worker
+
+    SEED = 42  # same as NativE (-seed 42); change for the 3-seed runs (P4.5)
+    _gen = set_seed(SEED)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -133,7 +137,10 @@ def _(
     test_dataset = FastMMSGDataset(DATA_DIR, split="test")
 
     _bs = int(batch_size_ui.value)
-    train_loader = DataLoader(train_dataset, batch_size=_bs, shuffle=True, num_workers=2)
+    train_loader = DataLoader(
+        train_dataset, batch_size=_bs, shuffle=True, num_workers=2,
+        generator=_gen, worker_init_fn=seed_worker,
+    )
     valid_loader = DataLoader(valid_dataset, batch_size=_bs, shuffle=False, num_workers=2)
     test_loader = DataLoader(test_dataset, batch_size=_bs, shuffle=False, num_workers=2)
 
@@ -190,15 +197,12 @@ def _(
 
         if (_epoch + 1) % 5 == 0:
             print(f"--- Evaluating on VALIDATION set at Epoch {_epoch + 1} ---")
-            _val_mrr, _val_h1, _val_h3, _val_h10 = evaluate_link_prediction(
-                model, all_text, all_rgb, all_depth, valid_loader, all_true_triplets, device
+            _val = evaluate_link_prediction(
+                model, all_text, all_rgb, all_depth, valid_loader, all_true_triplets, device, desc="Valid"
             )
-            print(
-                f"Val Metrics -> MRR: {_val_mrr:.4f} | Hits@1: {_val_h1:.4f} | "
-                f"Hits@3: {_val_h3:.4f} | Hits@10: {_val_h10:.4f}"
-            )
-            if _val_mrr > best_val_mrr:
-                best_val_mrr = _val_mrr
+            print(f"Val Metrics -> {format_metrics(_val)}")
+            if _val["mrr"] > best_val_mrr:
+                best_val_mrr = _val["mrr"]
                 torch.save(model.state_dict(), best_ckpt_path)
                 print(f"Saved new best model to {best_ckpt_path}!")
 
@@ -206,23 +210,26 @@ def _(
     if os.path.exists(best_ckpt_path):
         model.load_state_dict(torch.load(best_ckpt_path, map_location=device, weights_only=False))
 
-    test_mrr, test_h1, test_h3, test_h10 = evaluate_link_prediction(
-        model, all_text, all_rgb, all_depth, test_loader, all_true_triplets, device
+    test_metrics = evaluate_link_prediction(
+        model, all_text, all_rgb, all_depth, test_loader, all_true_triplets, device, return_ranks=True, desc="Test"
     )
-    print(
-        f"FINAL TEST METRICS -> MRR: {test_mrr:.4f} | Hits@1: {test_h1:.4f} | "
-        f"Hits@3: {test_h3:.4f} | Hits@10: {test_h10:.4f}"
-    )
+    print(f"FINAL TEST METRICS -> {format_metrics(test_metrics)}")
+    ranks_path = os.path.join(WORK_DIR, f"ranks_geometry_mmkg_seed{SEED}_test.csv")
+    save_ranks(test_metrics["ranks"], ranks_path)  # input for scripts/compute_metrics.py
 
     mo.md(
         f"""
         ## 🏆 Kết Quả Đánh Giá Cuối Cùng Trên Tập Test (`Unified-MMKG`)
         | Metric | Giá trị |
         | :--- | :--- |
-        | **MRR** | `{test_mrr:.4f}` |
-        | **Hits@1** | `{test_h1:.4f}` |
-        | **Hits@3** | `{test_h3:.4f}` |
-        | **Hits@10** | `{test_h10:.4f}` |
+        | **MRR** (head + tail) | `{test_metrics['mrr']:.4f}` |
+        | **MR** | `{test_metrics['mr']:.1f}` |
+        | **Hits@1** | `{test_metrics['hits@1']:.4f}` |
+        | **Hits@3** | `{test_metrics['hits@3']:.4f}` |
+        | **Hits@10** | `{test_metrics['hits@10']:.4f}` |
+        | MRR tail / head | `{test_metrics['tail']['mrr']:.4f}` / `{test_metrics['head']['mrr']:.4f}` |
+
+        Ranks theo từng triplet: `{ranks_path}`
         """
     )
     return (
@@ -240,11 +247,8 @@ def _(
         num_relations,
         optimizer,
         test_dataset,
-        test_h1,
-        test_h10,
-        test_h3,
         test_loader,
-        test_mrr,
+        test_metrics,
         train_dataset,
         train_loader,
         valid_dataset,

@@ -2,6 +2,7 @@ from email.generator import Generator
 import torch
 import mmkgc
 from mmkgc.config import Trainer, Tester
+from mmkgc.config.ValidSelector import ValidSelector
 from mmkgc.module.model import AdvMixRotatE
 from mmkgc.module.loss import MarginLoss, SigmoidLoss
 from mmkgc.module.strategy import NegativeSampling
@@ -95,7 +96,11 @@ if __name__ == "__main__":
         checkpoint_dir=args.save
     )
 
-    trainer.run()
+    if args.select_on == "valid":
+        trainer.valid_selector = ValidSelector("./benchmarks/" + args.dataset + '/', every=args.valid_steps,
+                                               patience=args.patience, max_triples=args.valid_max,
+                                               seed=args.seed, log=logger.info)
+    trainer.run()  # with select_on=valid: best-validation weights; MRR in the file name is VALID MRR
 
     save_dir = f"{args.save}-MRR{trainer.Loss_log.get_acc()}"
     if not osp.exists(save_dir):
@@ -105,7 +110,7 @@ if __name__ == "__main__":
     # test the model
     kge_score.load_checkpoint(save_dir)
     tester = Tester(model=kge_score, data_loader=test_dataloader, use_gpu=True)
-    mrr, mr, hit10, hit3, hit1 = tester.run_link_prediction(type_constrain=False)
+    mrr, mr, hit10, hit3, hit1 = tester.run_link_prediction(type_constrain=False, rank_file=args.rank_file or None)
     logger.info(f"mrr:{mrr},\t mr:{mr},\t hit10:{hit10},\t hit3:{hit3},\t hit1:{hit1}")
     logger.info(f"{mrr}\t{mr}\t{hit10}\t{hit3}\t{hit1}")
     logger.info(" -------------------- finish! -------------------- ")

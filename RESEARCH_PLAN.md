@@ -84,7 +84,7 @@ Kết quả kỳ vọng: Δdepth ≈ 0 ở hàng MMKG và Δdepth > 0 ở hàng 
 6. **Mọi mô hình dump rank theo từng triplet** ra `ranks_<model>_<dataset>.csv` (`h, r, t, rank_head, rank_tail`). **Một script chung duy nhất** tính metric và phân tích theo nhóm quan hệ.
 7. Chọn checkpoint theo MRR trên valid, đánh giá trên test một lần.
 8. Seed cố định (42), chạy **3 seed** cho các cấu hình chính và báo mean ± std.
-9. Ghi rõ trong bài: VG validation dùng tập con 5.000 mẫu; NativE trên VG pool 768 → 256.
+9. Ghi rõ trong bài: VG validation dùng tập con 5.000 mẫu (GeometryMMKG) và 2.000 mẫu (NativE/SNAG, `-valid_max`); NativE trên VG pool 768 → 256.
 
 ---
 
@@ -97,7 +97,7 @@ P0.1–P0.3b làm bằng `scripts/clean_splits.py` (11/11/2026). **Bản v2 hi�
 - [x] **P0.1** Gán lại nhãn quan hệ cho Spatial-VRD **từ JSON gốc** (`scripts/build_vrd_relation_review.py`): 1.310 predicate gốc → **52 quan hệ**, loại 1.0% triplet, đảo chiều 115 triplet bị động. Đã sửa 91 triplet bị script cũ `clean_mmsg_aliases.py` gán sai (so khớp chuỗi con, mất thông tin hướng); chi tiết ở `data/Spatial-VRD/relation_audit.tsv`. Các quyết định cần duyệt đang theo đề xuất mặc định (cột `needs_review`).
 - [x] **P0.2** Loại triplet trùng trong từng split (VRD: 3.175 / 318 / 925; VG: 92.520 / 10.572 / 40.935).
 - [x] **P0.3** Loại rò rỉ: Merged-MMKG bỏ **3.586 / 4.981 triplet valid** (nằm trong train hoặc test), valid còn **1.395**. VRD/VG hết rò rỉ sau P0.3b.
-  - [ ] Kiểm tra NativE có dùng valid để chọn checkpoint không; nếu có thì chạy lại NativE trên Merged-MMKG v2.
+  - [x] NativE gốc **không dùng valid**: train cố định số epoch rồi test checkpoint cuối (`run_adv_wgan_gp.py`). Vì vậy kết quả NativE cũ không bị rò rỉ valid ảnh hưởng. **Nhưng kết quả này không còn dùng để so sánh**, vì cách chọn checkpoint khác GeometryMMKG. Từ P3.0, mọi model đều chọn checkpoint theo valid, nên NativE phải chạy lại.
   - [ ] Cân nhắc: valid 1.395 có đủ để chọn checkpoint không, hay tách thêm từ train.
   - [ ] Merged-MMKG có 6 quan hệ trong test không xuất hiện trong train (không thể dự đoán đúng). Quyết định giữ hay bỏ.
 - [x] **P0.3b** Chia lại valid theo ảnh: VRD theo tiền tố `image_id` (10% số ảnh train), VG dùng **split chính thức của H5**. Thực thể valid chưa thấy trong train: VRD 20.6% → **100%**, VG 31.1% → **100%**.
@@ -123,12 +123,17 @@ P0.1–P0.3b làm bằng `scripts/clean_splits.py` (11/11/2026). **Bản v2 hi�
 
 ### P1. Hạ tầng đánh giá
 
-- [ ] **P1.1** `core/models/evaluation.py`: thêm head prediction (`t − r` so với mọi thực thể), trả MR, trả mảng rank theo từng triplet.
-- [ ] **P1.2** Thêm seed (`random`, `numpy`, `torch`, `cuda`, `DataLoader generator`) vào 3 notebook `geometry-*.py`.
-- [ ] **P1.3** Viết `scripts/compute_metrics.py`: đọc các file rank, tính metric tổng và theo nhóm quan hệ, xuất bảng markdown/LaTeX.
-- [ ] **P1.4** NativE: tính filtered rank trong Python từ mảng score (trước khi gọi C++), dump ra file rank. Đối chiếu metric với tester C++ để xác nhận khớp.
-- [ ] **P1.5** MKGformer, SNAG: thêm hook dump rank tương tự.
-- [ ] **P1.6** Eval trên VG: để `all_h_entity` trên GPU (hoặc fp16) nếu VRAM đủ, tránh copy 4.4 GB từ CPU sang GPU ở mỗi batch.
+- [x] **P1.1** `core/models/evaluation.py`: xếp hạng cả head và tail, trả về dict (MRR/MR/Hits gộp hai chiều + từng chiều), `return_ranks`, `save_ranks()`. Kiểm tra bằng `tests/test_evaluation.py` (so với brute-force).
+- [x] **P1.2** `core/reproducibility.py` (`set_seed`, `seed_worker`); 3 notebook geometry và `scripts/train.py` dùng `SEED = 42` và lưu `ranks_geometry_<ds>_seed<SEED>_test.csv`.
+- [x] **P1.3** `scripts/compute_metrics.py`: metric tổng, theo nhóm (`relation_category.tsv`), theo từng quan hệ; `--reference` cho ΔMRR với khoảng tin cậy bootstrap ghép cặp. (Chưa xuất LaTeX.)
+- [x] **P1.4** NativE `Tester.run_link_prediction(rank_file=...)` + tham số `-rank_file`; in metric Python cạnh metric C++ để đối chiếu. Đã kiểm tra với lib giả theo đúng luật OpenKE; **cần xác nhận lại hai bộ số khớp nhau ở lần chạy thật đầu tiên**.
+- [x] **P1.5** SNAG: giống NativE. MKGformer (submodule upstream): `scripts/patch_mkgformer.py`, được notebook gọi trước khi chạy; ghi rank khi đặt `MKG_RANK_FILE`, rank theo luật đếm chặt (MKGformer gốc dùng argsort nên khi bằng điểm thì xếp tùy ý).
+- [x] **P1.6** Bảng thực thể đã fuse được giữ trên GPU nếu chiếm < 50% VRAM trống (`keep_on_gpu=None`), ngược lại để trên CPU.
+
+**Phát hiện khi làm P1 (cần quyết định trước P4):**
+- GeometryMMKG chỉ lấy mẫu âm phía tail (in-batch, hardest negative) trong khi giờ đánh giá cả head; module GCN được khởi tạo nhưng không dùng.
+- Notebook MKGformer cho MKGformer chạy **không có ảnh** (`dataset/FB15k-images` rỗng) và text thực thể giả (`"Entity <tên>"`). Như vậy MKGformer đang bị chạy kém đi so với thiết kế gốc, cần sửa trước khi lấy số để so sánh.
+- Đánh giá cả head và tail trên VG (138K triplet × 1.44M thực thể × 2 chiều) rất nặng; cần đo thời gian trên Molab trước.
 
 ### P2. Mô hình đề xuất
 
@@ -140,6 +145,29 @@ P0.1–P0.3b làm bằng `scripts/clean_splits.py` (11/11/2026). **Bản v2 hi�
 
 ### P3. Baseline
 
+**P3.0 Chuẩn reproduce baseline (12/11/2026).** Bảng dưới là các tiêu chí phải đạt trước khi đưa số baseline vào bài:
+
+| # | Tiêu chí | Trạng thái |
+|---|---|---|
+| 1 | Chạy lại được số của paper gốc trên dataset gốc bằng script gốc (sai lệch khoảng ±1 MRR). Mục đích: chứng minh code đã sửa (depth, rank_file, resume, ValidSelector) vẫn giống code gốc khi tắt các phần thêm | [ ] SNAG trên MKG-W, NativE trên DB15K, dùng `-select_on original` |
+| 2 | **Mọi model chọn checkpoint theo valid MRR, chỉ đụng tới test một lần** | [x] code (xem dưới); [ ] chạy lại NativE MMKG |
+| 3 | Cùng giao thức đánh giá (filtered, head+tail, không ràng buộc type, luật bằng điểm chặt) | [x] P1 |
+| 4 | Cùng feature (`ent_*_emb.pt`, 768 chiều) cho mọi model; ghi rõ là không dùng feature gốc của baseline | [x] dữ liệu; [ ] ghi trong bài |
+| 5 | Tuning siêu tham số với **cùng ngân sách** trên valid cho mọi model, kể cả GeometryMMKG; xuất phát từ config gốc của tác giả | [ ] |
+| 6 | 3 seed cho các ô chính, báo mean ± std; Δ kèm khoảng tin cậy bootstrap | [ ] |
+| 7 | Đặt tên phân biệt: `SNAG` (gốc, 3 modality) / `SNAG+D` (mình mở rộng thêm depth) / `SNAG-FO` (feature-only); tương tự cho NativE. Ghi mọi thay đổi vào phụ lục | [ ] |
+
+- [x] **P3.0a Rò rỉ test trong SNAG gốc.** `Trainer.run` cứ mỗi 100 epoch lại chạy Tester trên **test**, giữ `best_model_wts` có MRR test cao nhất và early-stop theo MRR test. NativE `WCGTrainerKuai16KGP` (4 modality) cũng in metric test trong lúc train.
+  - **Đã sửa:** thêm `mmkgc/config/ValidSelector.py`, file giống hệt nhau trong NativE và SNAG.
+    - Đánh giá valid bằng Python: filtered, head+tail, luật bằng điểm chặt.
+    - Giữ weights tốt nhất trong RAM (chỉ tham số học được, không chép bảng feature cố định), có tùy chọn early-stop và tập con có seed.
+  - **Tham số mới:** `-select_on {valid,original}` (mặc định `valid`), `-valid_steps` (10), `-patience` (0 = tắt, giữ nguyên ngân sách epoch như bản gốc), `-valid_max` (0 = toàn bộ; notebook VG dùng 2000).
+  - **Đã gắn vào:** `WCGTrainerGP`, `WCGTrainerDB15KGP`, `WCGTrainerKuai16KGP`, SNAG `Trainer` và các run script; notebook NativE truyền `-select_on=valid`.
+  - **Kiểm tra:** `tests/test_valid_selector.py` (rank khớp brute-force, khôi phục đúng epoch tốt nhất, patience hoạt động, hai bản copy giống nhau).
+  - **Chưa chạy end-to-end** với lib C++ thật: chỉ có trên Linux/Molab.
+- Ở chế độ `valid`, SNAG đặt tên checkpoint `-MRR<x>` theo **MRR valid**. Lưu ý: nếu file cùng tên đã tồn tại, `run_mmkgc.py` sẽ nạp file cũ (hành vi gốc). Nên xóa `checkpoint/` giữa các lần chạy.
+- [ ] **P3.0b** Chạy kiểm tra ở tiêu chí 1 (`-select_on original`). Báo số của mình bên cạnh số trong paper.
+
 - [ ] **P3.1** Feature-TransE (2-modal và 3-modal).
 - [ ] **P3.2** NativE feature-only cho dữ liệu inductive.
 - [ ] **P3.3** SNAG: chạy nguyên bản (MMKG, VRD-Trans) và feature-only (VRD/VG).
@@ -149,7 +177,7 @@ P0.1–P0.3b làm bằng `scripts/clean_splits.py` (11/11/2026). **Bản v2 hi�
 
 Ưu tiên theo thứ tự:
 
-- [ ] **P4.1** Merged-MMKG: GeometryMMKG + ablation; SNAG; MKGformer; Feature-TransE; NativE (chạy lại nếu P0.3 yêu cầu).
+- [ ] **P4.1** Merged-MMKG: GeometryMMKG + ablation; SNAG; MKGformer; Feature-TransE; NativE (**chạy lại** với `-select_on valid`, xem P3.0).
 - [ ] **P4.2** VRD-Trans: GeometryMMKG (full, w/o Depth); NativE nguyên bản 3 kịch bản; Feature-TransE.
 - [ ] **P4.3** VRD inductive: GeometryMMKG + ablation; NativE/SNAG feature-only; Feature-TransE.
 - [ ] **P4.4** VG inductive: GeometryMMKG (full, w/o Depth), NativE feature-only. Theo dõi RAM/VRAM ở lần eval đầu tiên.

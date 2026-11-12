@@ -159,6 +159,12 @@ class Trainer(object):
                 res += loss
             training_range.set_description("Epoch %d | loss: %f" % (epoch, res))
             
+            # [Geometry-MMKG] select on validation, never on test (ValidSelector.py)
+            if getattr(self, "valid_selector", None) is not None:
+                if self.valid_selector.due(epoch) and self.valid_selector.step(self.model.model, epoch):
+                    self.logger.info("Early stop on validation MRR at epoch %d" % epoch)
+                    break
+                continue
 
             # $DATA-$NUM_BATCH-$EMB_DIM-$NEG_NUM-$MARGIN-$LR
             if self.save_steps and self.checkpoint_dir and (epoch + 1) % self.save_steps == 0:
@@ -193,6 +199,11 @@ class Trainer(object):
                 self.logger.info(f"{mrr}\t{mr}\t{hit10}\t{hit3}\t{hit1}")
             # else:
             #     self.logger.info(f"Epoch {epoch} | loss: {res}")
+        if getattr(self, "valid_selector", None) is not None:
+            self.valid_selector.restore_best(self.model.model)
+            # downstream code (run_mmkgc.py) saves best_model_wts and names it by Loss_log
+            self.best_model_wts = copy.deepcopy(self.model.model.state_dict())
+            self.Loss_log.update_acc(self.valid_selector.best_mrr)
 
     def set_model(self, model):
         self.model = model

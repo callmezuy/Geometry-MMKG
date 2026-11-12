@@ -1,5 +1,6 @@
 import torch
 from mmkgc.config import Tester, WCGTrainerKuai16KGP
+from mmkgc.config.ValidSelector import ValidSelector
 from mmkgc.module.model import AdvRelRotatEKuai16K
 from mmkgc.module.loss import SigmoidLoss
 from mmkgc.module.strategy import NegativeSamplingGP
@@ -73,10 +74,13 @@ if __name__ == "__main__":
         tester=tester
     )
 
-    trainer.run()
+    if args.select_on == "valid":
+        trainer.valid_selector = ValidSelector("./benchmarks/" + args.dataset + '/', every=args.valid_steps,
+                                               patience=args.patience, max_triples=args.valid_max, seed=args.seed)
+    trainer.run()  # with select_on=valid the best-validation weights are restored here
     kge_score.save_checkpoint(args.save)
 
     # test the model
     kge_score.load_checkpoint(args.save)
     
-    tester.run_link_prediction(type_constrain=False)
+    tester.run_link_prediction(type_constrain=False, rank_file=args.rank_file or None)

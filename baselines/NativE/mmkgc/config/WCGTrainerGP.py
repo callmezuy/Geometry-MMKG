@@ -186,9 +186,18 @@ class WCGTrainerGP(object):
                 res_g += loss_g
             training_range.set_description("Epoch %d | D loss: %f, G loss %f" % (epoch, res, res_g))
 
+            # [Geometry-MMKG] select on validation, never on test (ValidSelector.py)
+            if getattr(self, "valid_selector", None) is not None:
+                if self.valid_selector.due(epoch) and self.valid_selector.step(self.model.model, epoch):
+                    print("Early stop on validation MRR at epoch %d" % epoch)
+                    break
+                continue
+
             if self.save_steps and self.checkpoint_dir and (epoch + 1) % self.save_steps == 0:
                 print("Epoch %d has finished, saving..." % (epoch))
                 self.model.save_checkpoint(os.path.join(self.checkpoint_dir + "-" + str(epoch) + ".ckpt"))
+        if getattr(self, "valid_selector", None) is not None:
+            self.valid_selector.restore_best(self.model.model)
 
     def set_model(self, model):
         self.model = model

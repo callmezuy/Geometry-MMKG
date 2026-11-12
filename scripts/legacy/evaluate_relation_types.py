@@ -1,3 +1,5 @@
+# LEGACY: tail-only evaluation with its own loop. Superseded by core/models/evaluation.py
+# (head + tail ranks, save_ranks) + scripts/compute_metrics.py (per-category metrics, bootstrap CI).
 import torch
 import os
 from torch.utils.data import DataLoader

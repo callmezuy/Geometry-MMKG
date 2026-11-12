@@ -42,7 +42,7 @@ def _(HfFileSystem, mo, os):
 
 
 @app.cell
-def _(HF_REPO_ID, os, snapshot_download, subprocess):
+def _(HF_REPO_ID, os, snapshot_download, subprocess, sys):
     # 1. Đảm bảo mã nguồn Geometry-MMKG (chứa baselines/MKGformer) có mặt trên Molab
     WORK_DIR = os.path.abspath(".")
     if os.path.exists(os.path.join(WORK_DIR, "baselines", "MKGformer")):
@@ -62,17 +62,11 @@ def _(HF_REPO_ID, os, snapshot_download, subprocess):
 
     MKG_DIR = os.path.join(REPO_ROOT, "baselines", "MKGformer", "MKG")
     if not os.path.exists(MKG_DIR):
-        subprocess.run(["git", "-C", REPO_ROOT, "submodule", "update", "--init", "--recursive"], check=False)
+        subprocess.run(["git", "-C", REPO_ROOT, "submodule", "update", "--init", "--recursive"], check=True)
 
-    # Đảm bảo tương thích PyTorch 2.6+ (weights_only=False khi nạp Lightning .ckpt)
-    _main_py = os.path.join(MKG_DIR, "main.py")
-    if os.path.exists(_main_py):
-        with open(_main_py, "r", encoding="utf-8") as _f:
-            _mc = _f.read()
-        _mc = _mc.replace('torch.load(args.checkpoint, map_location="cpu")', 'torch.load(args.checkpoint, map_location="cpu", weights_only=False)')
-        _mc = _mc.replace('torch.load(path)["state_dict"]', 'torch.load(path, weights_only=False)["state_dict"]')
-        with open(_main_py, "w", encoding="utf-8") as _f:
-            _f.write(_mc)
+    # Vá MKGformer (submodule upstream): weights_only=False cho PyTorch 2.6+, và ghi rank theo
+    # từng triplet (head + tail, luật đếm chặt như OpenKE) khi đặt biến môi trường MKG_RANK_FILE.
+    subprocess.run([sys.executable, os.path.join(REPO_ROOT, "scripts", "patch_mkgformer.py"), MKG_DIR], check=True)
 
     # 2. Tải dữ liệu Unified-MMKG từ Hugging Face Remote Storage
     DATA_DIR = os.path.join(WORK_DIR, "data", "Unified-MMKG")
@@ -200,7 +194,7 @@ def _(MKG_DIR, glob, mo, os, pretrain_bs_ui, pretrain_epochs_ui, subprocess):
 
 
 @app.cell
-def _(MKG_DIR, PRETRAIN_CKPT, finetune_bs_ui, finetune_epochs_ui, mo, subprocess):
+def _(MKG_DIR, PRETRAIN_CKPT, WORK_DIR, finetune_bs_ui, finetune_epochs_ui, mo, os, subprocess):
     print("=== PHASE 2: MKGformer Missing Entity Prediction / Link Prediction (pretrain=0) ===")
     _cmd_phase2 = [
         "python",
@@ -240,13 +234,18 @@ def _(MKG_DIR, PRETRAIN_CKPT, finetune_bs_ui, finetune_epochs_ui, mo, subprocess
     if PRETRAIN_CKPT:
         _cmd_phase2.extend(["--checkpoint", PRETRAIN_CKPT])
 
-    phase2_res = subprocess.run(_cmd_phase2, cwd=MKG_DIR, text=True, capture_output=True)
+    # Rank theo từng triplet cho scripts/compute_metrics.py (do scripts/patch_mkgformer.py thêm vào)
+    mkg_ranks_path = os.path.join(WORK_DIR, "ranks_mkgformer_mmkg_test.csv")
+    phase2_res = subprocess.run(
+        _cmd_phase2, cwd=MKG_DIR, text=True, capture_output=True,
+        env={**os.environ, "MKG_RANK_FILE": mkg_ranks_path},
+    )
     print(phase2_res.stdout)
     if phase2_res.returncode != 0:
         print("STDERR:", phase2_res.stderr)
 
     mo.md("### 🏆 Hoàn tất Phase 2 (Đánh giá Link Prediction cho MKGformer trên Unified-MMKG)!")
-    return (phase2_res,)
+    return mkg_ranks_path, phase2_res
 
 
 if __name__ == "__main__":

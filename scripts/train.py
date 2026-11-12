@@ -4,7 +4,8 @@ from torch.utils.data import DataLoader
 from core.data_engineering.fast_dataset import FastMMSGDataset, get_all_true_triplets
 from core.models.end_to_end import GeometryMMKGModel
 from core.models.kg_reasoning import JointLoss
-from core.models.evaluation import evaluate_link_prediction
+from core.models.evaluation import evaluate_link_prediction, format_metrics, save_ranks
+from core.reproducibility import set_seed
 import os
 
 def main():
@@ -26,7 +27,8 @@ def main():
     valid_dataset = FastMMSGDataset(DATA_DIR, split='valid') if os.path.exists(os.path.join(DATA_DIR, 'valid.txt')) else None
     test_dataset = FastMMSGDataset(DATA_DIR, split='test')
     
-    train_loader = DataLoader(train_dataset, batch_size=1024, shuffle=True, num_workers=0)
+    gen = set_seed(42)
+    train_loader = DataLoader(train_dataset, batch_size=1024, shuffle=True, num_workers=0, generator=gen)
     valid_loader = DataLoader(valid_dataset, batch_size=1024, shuffle=False, num_workers=0) if valid_dataset else None
     test_loader = DataLoader(test_dataset, batch_size=1024, shuffle=False, num_workers=0)
     
@@ -45,7 +47,7 @@ def main():
     EPOCHS = 50
     print(f"Starting fast training loop for {EPOCHS} epochs...")
     
-    best_h10 = 0.0
+    best_mrr = 0.0
     
     for epoch in range(EPOCHS):
         model.train()
@@ -102,23 +104,25 @@ def main():
             eval_split_name = "Validation" if valid_loader else "Test"
             eval_loader = valid_loader if valid_loader else test_loader
             print(f"--- Evaluating on {eval_split_name} at Epoch {epoch+1} ---")
-            mrr, h1, h3, h10 = evaluate_link_prediction(
+            m = evaluate_link_prediction(
                 model, all_text, all_rgb, all_depth, eval_loader, all_true_triplets, device
             )
-            print(f"Metrics -> MRR: {mrr:.4f} | Hits@1: {h1:.4f} | Hits@3: {h3:.4f} | Hits@10: {h10:.4f}")
+            print(f"Metrics -> {format_metrics(m)}")
             
-            if h10 > best_h10:
-                best_h10 = h10
+            # Checkpoint selection on validation MRR (RESEARCH_PLAN.md, section 4)
+            if m["mrr"] > best_mrr:
+                best_mrr = m["mrr"]
                 print(f"New best model! Saving to best_model.pth")
                 torch.save(model.state_dict(), 'best_model.pth')
                 
     print("\nTraining complete! Evaluating best model on Test Set...")
     if os.path.exists('best_model.pth'):
         model.load_state_dict(torch.load('best_model.pth', weights_only=False))
-    test_mrr, test_h1, test_h3, test_h10 = evaluate_link_prediction(
-        model, all_text, all_rgb, all_depth, test_loader, all_true_triplets, device
+    test_m = evaluate_link_prediction(
+        model, all_text, all_rgb, all_depth, test_loader, all_true_triplets, device, return_ranks=True
     )
-    print(f"Final Test Metrics -> MRR: {test_mrr:.4f} | Hits@1: {test_h1:.4f} | Hits@3: {test_h3:.4f} | Hits@10: {test_h10:.4f}")
+    print(f"Final Test Metrics -> {format_metrics(test_m)}")
+    save_ranks(test_m["ranks"], 'ranks_geometry_vrd_test.csv')
     torch.save(model.state_dict(), 'final_model.pth')
 
 if __name__ == '__main__':

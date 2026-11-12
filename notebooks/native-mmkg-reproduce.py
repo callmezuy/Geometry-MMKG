@@ -223,6 +223,8 @@ def _(
         f"-dim={int(dim_ui.value)}",
         "-adv_num=1",
         f"-save={DATASET_NAME}-Control",
+        f"-rank_file=ranks_native_{DATASET_NAME}_Control_test.csv",  # filtered head+tail ranks -> scripts/compute_metrics.py
+        "-select_on=valid", "-valid_steps=10",  # checkpoint = best validation MRR (ValidSelector.py)
         f"-neg_num={int(neg_num_ui.value)}",
         "-mu=0.0001",
         "-learning_rate=1e-4",
@@ -268,6 +270,8 @@ def _(
         f"-dim={int(dim_ui.value)}",
         "-adv_num=1",
         f"-save={DATASET_NAME}-Ablation-Mean",
+        f"-rank_file=ranks_native_{DATASET_NAME}_Ablation-Mean_test.csv",  # filtered head+tail ranks -> scripts/compute_metrics.py
+        "-select_on=valid", "-valid_steps=10",  # checkpoint = best validation MRR (ValidSelector.py)
         f"-neg_num={int(neg_num_ui.value)}",
         "-mu=0.0001",
         "-learning_rate=1e-4",
@@ -313,6 +317,8 @@ def _(
         f"-dim={int(dim_ui.value)}",
         "-adv_num=1",
         f"-save={DATASET_NAME}-Ablation-3Modal",
+        f"-rank_file=ranks_native_{DATASET_NAME}_Ablation-3Modal_test.csv",  # filtered head+tail ranks -> scripts/compute_metrics.py
+        "-select_on=valid", "-valid_steps=10",  # checkpoint = best validation MRR (ValidSelector.py)
         f"-neg_num={int(neg_num_ui.value)}",
         "-mu=0.0001",
         "-learning_rate=1e-4",

@@ -47,4 +47,4 @@ if __name__ == "__main__":
     # test the model
     kge_score.load_checkpoint(save_dir)
     tester = Tester(model=kge_score, data_loader=test_dataloader, use_gpu=True)
-    tester.run_link_prediction(type_constrain=False)
+    tester.run_link_prediction(type_constrain=False, rank_file=args.rank_file or None)
