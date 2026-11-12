@@ -1,0 +1,6 @@
+[submodule "baselines/MKGformer"]
+	path = baselines/MKGformer
+	url = https://github.com/zjunlp/MKGformer.git
+[submodule "baselines/KG-MM-Survey"]
+	path = baselines/KG-MM-Survey
+	url = https://github.com/zjukg/KG-MM-Survey.git
