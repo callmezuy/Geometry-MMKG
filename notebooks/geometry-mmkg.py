@@ -18,7 +18,7 @@ def _():
     mo.md(
         """
         # 🚀 Train GeometryMMKGModel on Unified-MMKG (Molab + Hugging Face Remote Storage)
-        Notebook này kết nối trực tiếp tới **Hugging Face Remote Storage** (`callmezuy/unified-mmkg`) thông qua `HfFileSystem` (tích hợp sẵn trên thanh công cụ *Files -> Remote Storage* của Marimo) và huấn luyện mô hình **GeometryMMKG** với đầy đủ 3 tập `train.txt`, `valid.txt`, `test.txt` chuẩn `(h, r, t)`.
+        Notebook này kết nối trực tiếp tới **Hugging Face Remote Storage** (`callmezuy/unified-mmkg`) thông qua `HfFileSystem` (tích hợp sẵn trên thanh công cụ *Files -> Remote Storage* của Marimo) và huấn luyện mô hình **GeometryMMKG** với đầy đủ 3 tập `train.txt`, `valid.txt`, `test.txt` chuẩn `(h, r, t)`. Dữ liệu **v2**: valid đã loại 3.586 triplet rò rỉ sang train/test (còn 1.395).
         """
     )
     return (

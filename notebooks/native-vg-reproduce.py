@@ -19,7 +19,7 @@ def _():
     mo.md(
         """
         # 🧪 Reproduce NativE Baseline & Ablations on Spatial-VG (Molab + HF Remote Storage)
-        Notebook này kết nối trực tiếp tới **Hugging Face Remote Storage** (`callmezuy/spatial-vg`) thông qua `HfFileSystem` và thực thi trọn bộ 3 kịch bản thực nghiệm của **NativE** trên bộ dữ liệu quy mô lớn **Spatial-VG** (1,441,984 thực thể, 50 quan hệ):
+        Notebook này kết nối trực tiếp tới **Hugging Face Remote Storage** (`callmezuy/spatial-vg`) thông qua `HfFileSystem` và thực thi trọn bộ 3 kịch bản thực nghiệm của **NativE** trên bộ dữ liệu quy mô lớn **Spatial-VG v2** (VG150-curated; 1,441,984 thực thể, 50 quan hệ; split chính thức theo ảnh, inductive):
         - Sử dụng cơ chế `mmap=True` kết hợp `AdaptiveAvgPool1d(256)` theo từng chunk trên CPU trước khi nạp vào NativE (như kiến trúc gốc của `AdvRelRotatEDB15K` giảm chiều về `256`), giúp giảm dung lượng mỗi bảng embedding từ `4.43 GB` xuống `1.47 GB` để tránh tràn VRAM/RAM khi huấn luyện 3-Modal trên 1.44 triệu thực thể.
         """
     )

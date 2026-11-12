@@ -18,7 +18,7 @@ def _():
     mo.md(
         """
         # 🧪 Reproduce NativE Baseline & Ablations on Spatial-VRD (Molab + HF Remote Storage)
-        Notebook này kết nối trực tiếp tới **Hugging Face Remote Storage** (`callmezuy/spatial-vrd`) thông qua `HfFileSystem` và thực thi trọn bộ 3 kịch bản thực nghiệm của **NativE** trên bộ **Spatial-VRD** (93,809 thực thể, 73 quan hệ):
+        Notebook này kết nối trực tiếp tới **Hugging Face Remote Storage** (`callmezuy/spatial-vrd`) thông qua `HfFileSystem` và thực thi trọn bộ 3 kịch bản thực nghiệm của **NativE** trên bộ **Spatial-VRD v2** (93,809 thực thể, 52 quan hệ; inductive, valid/test chia theo ảnh):
         1. **Control (2-Modal):** Visual (`RGB`) + Textual (`Text`) — không dùng Depth.
         2. **Ablation 1 (Early Fusion Mean):** Visual (`Mean(RGB + Depth)`) + Textual (`Text`).
         3. **Ablation 2 (Late Fusion 3-Modal):** Visual (`RGB`) + Textual (`Text`) + Numeric (`Depth`).

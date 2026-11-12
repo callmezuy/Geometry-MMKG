@@ -1,3 +1,6 @@
+# LEGACY (superseded by build_vrd_relation_review.py + clean_splits.py --vrd-review).
+# Kept only so audit_vrd_relations.py can reproduce the old labels. Uses substring
+# matching and mislabels ~91 triples; DO NOT run it on the data.
 import os
 import re
 

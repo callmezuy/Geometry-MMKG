@@ -18,7 +18,7 @@ def _():
     mo.md(
         """
         # 🚀 Train GeometryMMKGModel on Spatial-VRD (Molab + Hugging Face Remote Storage)
-        Notebook này kết nối trực tiếp tới **Hugging Face Remote Storage** (`callmezuy/spatial-vrd`) qua `HfFileSystem` và huấn luyện mô hình **GeometryMMKG** trên tập `Spatial-VRD` (93.809 thực thể, 73 quan hệ) với các tập `train.txt` (81.046), `valid.txt` (9.006), `test.txt` (22.632) chuẩn `(h, r, t)`.
+        Notebook này kết nối trực tiếp tới **Hugging Face Remote Storage** (`callmezuy/spatial-vrd`) qua `HfFileSystem` và huấn luyện mô hình **GeometryMMKG** trên tập `Spatial-VRD` **v2** (93.809 thực thể, 52 quan hệ) với các tập `train.txt` (77.227), `valid.txt` (8.614), `test.txt` (21.563) chuẩn `(h, r, t)`. Thiết lập **inductive**: valid/test chia theo ảnh, 100% thực thể valid/test không xuất hiện trong train (xem `RESEARCH_PLAN.md`).
         """
     )
     return (

@@ -18,7 +18,7 @@ def _():
     mo.md(
         """
         # 🚀 Train GeometryMMKGModel on Spatial-VG (1.44M Entities - Molab + HF Remote Storage)
-        Notebook này kết nối trực tiếp tới **Hugging Face Remote Storage** (`callmezuy/spatial-vg`) qua `HfFileSystem`, sử dụng `mmap=True` để nạp 3 ma trận đặc trưng 4.4 GB mà không tràn RAM, và huấn luyện **GeometryMMKG** trên tập `Spatial-VG` (1.441.984 thực thể, 50 quan hệ).
+        Notebook này kết nối trực tiếp tới **Hugging Face Remote Storage** (`callmezuy/spatial-vg`) qua `HfFileSystem`, sử dụng `mmap=True` để nạp 3 ma trận đặc trưng 4.4 GB mà không tràn RAM, và huấn luyện **GeometryMMKG** trên tập `Spatial-VG` **v2** (VG150-curated `no_part_whole`; 1.441.984 thực thể, 50 quan hệ; train 319.069 / valid 26.372 / test 137.984 theo split chính thức theo ảnh, inductive).
         """
     )
     return (
@@ -138,8 +138,11 @@ def _(
 
     _bs = int(batch_size_ui.value)
     train_loader = DataLoader(train_dataset, batch_size=_bs, shuffle=True, num_workers=2)
-    # Dùng 5.000 mẫu Validation trong các vòng lặp trung gian để kiểm tra nhanh trên 1.44M thực thể
-    fast_val_subset = Subset(valid_dataset, range(min(5000, len(valid_dataset))))
+    # Dùng 5.000 mẫu Validation (lấy ngẫu nhiên, seed cố định) trong các vòng lặp trung gian để kiểm tra nhanh.
+    # Lấy ngẫu nhiên vì valid v2 được sắp theo ảnh: range(5000) sẽ chỉ lấy vài trăm ảnh đầu.
+    import random as _random
+    _val_idx = sorted(_random.Random(42).sample(range(len(valid_dataset)), min(5000, len(valid_dataset))))
+    fast_val_subset = Subset(valid_dataset, _val_idx)
     valid_loader = DataLoader(fast_val_subset, batch_size=512, shuffle=False, num_workers=2)
     test_loader = DataLoader(test_dataset, batch_size=512, shuffle=False, num_workers=2)
 

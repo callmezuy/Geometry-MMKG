@@ -1,74 +1,95 @@
-# Tổng Hợp & Tóm Tắt Toàn Diện Tiến Độ Luận Văn (Conversation Summary)
+# Tổng Hợp Ngữ Cảnh Dự Án Luận Văn (Session Handoff Context)
 
-**Thời gian cập nhật:** 27/10/2026  
-**Đề tài:** Multi-Modal Knowledge Graph Completion with Geometric and Spatial Priors (Geometry-MMKG)  
-**Kho mã nguồn:** [Geometry-MMKG (GitHub)](https://github.com/callmezuy/Geometry-MMKG.git) (Branch `main`, commit `fae6fde`)
-
----
-
-## 1. Tối Ưu Hóa & Giải Quyết Các Vấn Đề Hạ Tầng Kaggle
-
-### A. Vấn đề tràn ổ đĩa Kaggle Working (Limit 19.5 GB vs Data 20 GB)
-* **Thực trạng:** Gói dữ liệu `mkgformer-mmkg` nặng ~20.3 GB (ảnh RGB chiếm 18 GB, trọng số HuggingFace `hf_weights` chiếm 1.5 GB). Nếu dùng lệnh `cp -r` sao chép vào `/kaggle/working`, dung lượng sẽ vượt mức cho phép (19.5 GB) ngay lập tức khiến tiến trình train bị hủy (`No space left on device`).
-* **Giải pháp:** Áp dụng **Linux Symbolic Link (`ln -s`)**:
-  * Chỉ sao chép mã nguồn `MKGformer` (~5 MB) vào `/kaggle/working` để phục vụ chỉnh sửa script Python.
-  * Các thư mục lớn gồm `images`, `hf_weights`, và dữ liệu TSV được tạo liên kết mềm (`ln -sfn`) trỏ trực tiếp từ `/kaggle/input/` sang cấu trúc thư mục mong đợi trong `/kaggle/working`.
-  * **Hiệu quả:** `/kaggle/working` chỉ chiếm ~10 MB, bảo toàn trọn vẹn ~19.5 GB ổ đĩa trống để lưu trữ checkpoints và nhật ký huấn luyện.
-
-### B. Cấu hình chạy Offline trên Kaggle
-* **Vấn đề `pip install`:** Lệnh `pip install -r requirements.txt` trong mã nguồn gốc MKGformer sẽ bị lỗi ngắt kết nối (`ConnectionError`) khi tắt mạng (`Internet: Off`), đồng thời chứa các gói phiên bản cũ (2021) có nguy cơ xung đột với driver CUDA của Kaggle.
-* **Xử lý:** Môi trường Kaggle GPU đã có sẵn đầy đủ `torch`, `torchvision`, `transformers`, `pytorch-lightning`, `scikit-learn`... nên đã vô hiệu hóa dòng lệnh `pip install` trong notebook.
-* **Bảo mật trọng số mô hình:** Toàn bộ trọng số của `bert-base-uncased` và `clip-vit-base-patch32` đã được chuyển đổi sang định dạng `safetensors` trong thư mục `hf_weights` nhằm vượt qua kiểm tra lỗ hổng bảo mật `torch.load` (CVE-2025-32434).
+**Cập nhật lần cuối:** 11/11/2026  
+**Kế hoạch hiện hành:** `RESEARCH_PLAN.md` (v2) · **Mục lục dữ liệu:** `data/README.md`  
+**Đề tài:** Multi-Modal Knowledge Graph Completion with Geometric and Spatial Priors (`Geometry-MMKG`)  
+**GitHub Repository:** `https://github.com/callmezuy/Geometry-MMKG.git` (Branch `main`, Commit mới nhất: `ed293a1`)  
+**Workspace Local:** `d:\University\Thesis\Code`
 
 ---
 
-## 2. Quy Hoạch & Chuẩn Hóa Notebooks
+## 1. Kiến Trúc Dữ Liệu & Hugging Face Remote Storage
 
-Toàn bộ các file Jupyter Notebook trong thư mục `notebooks/` đã được đổi tên theo cú pháp thống nhất: `[tên model]_[tên dataset]_[Reproduce (nếu là baseline)]`:
+Dữ liệu local đã được làm sạch thành **v2** (11/11/2026, xem `data/README.md`). **Các repo HF vẫn đang giữ v1** cho tới khi làm xong P0.4 trong `RESEARCH_PLAN.md`. Bảng dưới đây là v2; số liệu v1 để trong ngoặc.
 
-| Tên File Notebook | Mô hình | Tập Dữ Liệu | Mục Đích |
-| :--- | :--- | :--- | :--- |
-| [mkgformer-mmkg-reproduce.ipynb](file:///d:/University/Thesis/Code/notebooks/mkgformer-mmkg-reproduce.ipynb) | MKGformer | Merged-MMKG | Tái hiện baseline MKGformer (Offline + Symlink) |
-| [native-mmkg-reproduce.ipynb](file:///d:/University/Thesis/Code/notebooks/native-mmkg-reproduce.ipynb) | NativE | Merged-MMKG | Tái hiện baseline NativE trên Merged-MMKG |
-| [native-vrd-reproduce.ipynb](file:///d:/University/Thesis/Code/notebooks/native-vrd-reproduce.ipynb) | NativE | Spatial-VRD | Tái hiện baseline NativE trên tập VRD |
-| [geometry-mmkg.ipynb](file:///d:/University/Thesis/Code/notebooks/geometry-mmkg.ipynb) | GeometryMMKG | Merged-MMKG | Huấn luyện mô hình GeometryMMKG đề xuất |
-| [geometry-vrd.ipynb](file:///d:/University/Thesis/Code/notebooks/geometry-vrd.ipynb) | GeometryMMKG | Spatial-VRD | Huấn luyện mô hình GeometryMMKG trên Spatial-VRD |
-| [vg150-curated-extraction.ipynb](file:///d:/University/Thesis/Code/notebooks/vg150-curated-extraction.ipynb) | Feature Extractor | VG150 Curated | Trích xuất đặc trưng ViT, RoBERTa và ZipDepth |
+| Dataset (Local & HF) | Hugging Face Repo ID | Số Thực Thể (`entity2id.txt`) | Số Quan Hệ (`relation2id.txt`) | Train / Valid / Test Triplets | Đặc Trưng Trích Xuất Sẵn (`.pt`) |
+| :--- | :--- | :---: | :---: | :---: | :--- |
+| **Unified-MMKG** *(Local: `Merged-MMKG`)* | `callmezuy/unified-mmkg` | `15,458` | `429` | `48,798` / `1,395` (v1 `4,981`, rò rỉ) / `6,022` | `ent_rgb_emb.pt`, `ent_depth_emb.pt`, `ent_text_emb.pt` (`[15458, 768]`) |
+| **Spatial-VRD** | `callmezuy/spatial-vrd` | `93,809` | `52` (v1 thực tế là 782) | `77,227` / `8,614` / `21,563` (v1 `81,046` / `9,006` / `22,632`) | `ent_rgb_emb.pt`, `ent_depth_emb.pt`, `ent_text_emb.pt` (`[93809, 768]`) |
+| **Spatial-VG** *(VG150-curated `no_part_whole`)* | `callmezuy/spatial-vg` | `1,441,984` | `50` | `319,069` / `26,372` / `137,984` (v1 `379,944` / `42,217` / `178,919`) | `ent_rgb_emb.pt`, `ent_depth_emb.pt`, `ent_text_emb.pt` (`[1441984, 768]`, ~4.43 GB/file) |
 
----
+Thêm bộ đối chứng **Spatial-VRD-Trans** (transductive, `77,331` / `8,592` / `21,481`), chưa có repo HF.
 
-## 3. Quản Lý Dữ Liệu & Giải Phóng Dung Lượng Ổ Đĩa Local
+**Những thay đổi chính của v2:**
+- VRD/VG là thiết lập **inductive**: 100% thực thể valid/test không có trong train. Valid được chia theo ảnh; VG dùng split chính thức của H5.
+- Đã loại triplet trùng lặp và triplet rò rỉ giữa các split.
+- VRD được gán lại nhãn từ JSON gốc (`relation_review.tsv`). VG dùng tên predicate thật thay cho ID số.
+- **Spatial-VG được tạo từ VG150-curated (Neau et al., ICCVW 2023), không phải VG150 chuẩn.**
 
-### A. Tình trạng các thư mục dữ liệu tại `Code/data/Merged-MMKG/` (~51 GB)
-* **`images_depth/` (~32 GB):** Đã hoàn thành nhiệm vụ trích xuất vector đặc trưng `ent_depth_emb.pt` (47 MB). Cả 3 mô hình (`GeometryMMKG`, `NativE`, `MKGformer`) khi huấn luyện đều chỉ đọc file vector `.pt`, hoàn toàn không sử dụng lại thư mục này $\rightarrow$ **Có thể xóa để giải phóng 32 GB**.
-* **`images/` (~18 GB):** `GeometryMMKG` và `NativE` chạy trực tiếp bằng `ent_rgb_emb.pt`. Chỉ có `MKGformer` cần ảnh RGB, tuy nhiên toàn bộ 15.458 ảnh đã được đóng gói sẵn vào `mkgformer-mmkg.zip` (20.3 GB) $\rightarrow$ **Có thể xóa thư mục thô này để giải phóng thêm 18 GB**.
-* **Dung lượng sau khi dọn:** Thư mục `Merged-MMKG` chỉ còn ~140 MB (gồm các file `.pt` và `.txt`), siêu nhẹ và đủ điều kiện chạy thực nghiệm.
-
-### B. Thư mục `d:\University\Thesis\Dataset` (~22 GB)
-* Chứa dữ liệu gốc ban đầu (`VG`: 16 GB, `VRD`: ~6 GB, `VG_curated`: 130 MB).
-* Codebase hiện tại đã chuyển toàn bộ dữ liệu đã tiền xử lý vào `Code/data/` (`Spatial-VG`, `Spatial-VRD`, `Merged-MMKG`). Các pipeline trên Kaggle đều gắn trực tiếp với Public Datasets của Kaggle, do đó thư mục local này hoàn toàn có thể xóa hoặc đưa lên Drive lưu trữ.
-
-### C. Ý nghĩa của script `scripts/construct_spatial_mmsg.py`
-* Là script cốt lõi chuyển đổi bài toán Scene Graph từ tập thô VRD sang Knowledge Graph đa phương thức không gian.
-* Đọc các nhãn quan hệ, cắt 93.806 bounding boxes của từng vật thể ở cả kênh **RGB** và **Depth map** tương ứng, sinh ra các file định danh: `entity2id.txt`, `relation2id.txt`, `train.txt`, `test.txt` (hiện đặt trong `Code/data/Spatial-VRD/`).
+### Quy ước định dạng file trong cả 3 bộ dữ liệu:
+1. **Nhóm file văn bản (`train.txt`, `valid.txt`, `test.txt`):**
+   - Dòng đầu tiên là tổng số dòng (`count header`).
+   - Các dòng tiếp theo tuân thủ nghiêm ngặt chuẩn **`Head \t Relation \t Tail` (`s \t p \t o`)**.
+   - Được sử dụng trực tiếp bởi `FastMMSGDataset` (`core/data_engineering/fast_dataset.py`) và `MMSGDataset` (`core/data_engineering/dataset.py`) của mô hình đề xuất **GeometryMMKG**.
+2. **Nhóm file số nguyên OpenKE (`train2id.txt`, `valid2id.txt`, `test2id.txt`):**
+   - Dòng đầu tiên là tổng số dòng (`count header`).
+   - Các dòng tiếp theo tuân thủ chuẩn C++ OpenKE **`head_id \t tail_id \t relation_id` (`h \t t \t r`)**.
+   - Được sử dụng trực tiếp bởi **NativE** (`baselines/NativE/mmkgc/base/Reader.h`) và script chuyển đổi sang **MKGformer**.
 
 ---
 
-## 4. Định Hướng Kiến Trúc: GeometryMMKG V1 vs. V2
+## 2. Hệ Thống Thực Nghiệm Trên Molab (`molab.marimo.io`)
 
-* **Bản chất nâng cấp V2 (KG Reasoning & Multi-Modal Fusion):**
-  * Nâng cấp hàm chấm điểm hình học: Chuyển sang **RotatE** trong không gian số phức ($h \circ r \approx t$).
-  * Nâng cấp hàm mất mát: Sử dụng **Self-Adversarial Negative Sampling Loss** để tự động gán trọng số phạt các mẫu âm khó.
-  * Tinh chỉnh cơ chế Attention Gating giữa các phương thức (Text, RGB, Depth).
-* **Việc tái sử dụng Embedding:**
-  * Toàn bộ vector nhúng `ent_rgb_emb.pt`, `ent_depth_emb.pt`, `ent_text_emb.pt` hiện có **được tái sử dụng 100% cho V2**, không cần xử lý lại ảnh raw.
-  * Chỉ khi thay đổi mô hình nền tảng thị giác (ví dụ sang DINOv2 hoặc Depth-Anything-V2) thì mới cần forward lại ảnh raw, và công việc này sẽ được phân bổ thực thi trên Kaggle GPU.
+Đã chuyển đổi luồng thực nghiệm từ Kaggle `.ipynb` sang **7 Marimo Reactive Notebooks (`.py`)** tại `Code/notebooks/`, kết nối trực tiếp tới **Hugging Face Remote Storage** qua `hf_fs = HfFileSystem()` và `snapshot_download`:
+
+### A. Mô hình đề xuất (`GeometryMMKG`)
+1. `notebooks/geometry-mmkg.py` — Huấn luyện & đánh giá trên `callmezuy/unified-mmkg`.
+2. `notebooks/geometry-vrd.py` — Huấn luyện & đánh giá trên `callmezuy/spatial-vrd`.
+3. `notebooks/geometry-vg.py` — Huấn luyện & đánh giá trên `callmezuy/spatial-vg` (nạp `.pt` với `mmap=True`, đánh giá validation mỗi 5 epochs bằng chunked `torch.cdist` + CPU RAM offloading để không bao giờ bị GPU OOM với 1.44M thực thể).
+
+### B. Baseline `NativE` (Chạy đủ 3 kịch bản: Control 2-Modal, Ablation 1 Early Fusion Mean, Ablation 2 Late Fusion 3-Modal)
+4. `notebooks/native-mmkg-reproduce.py` — Trên `callmezuy/unified-mmkg`.
+5. `notebooks/native-vrd-reproduce.py` — Trên `callmezuy/spatial-vrd`.
+6. `notebooks/native-vg-reproduce.py` — Trên `callmezuy/spatial-vg` (tự động pool chiều `768 -> 256` theo từng chunk trên CPU với `mmap=True` trước khi lưu `.pth` để giảm dung lượng mỗi bảng từ `4.43 GB` xuống `1.47 GB`, chống tràn VRAM).
+
+### C. Baseline `MKGformer` (Phase 1 Entity Modeling `pretrain=1` + Phase 2 Link Prediction `pretrain=0`)
+7. `notebooks/mkgformer-mmkg-reproduce.py` — Tự động chuyển đổi `callmezuy/unified-mmkg` sang format TSV (`train.tsv`, `dev.tsv`, `test.tsv`, `entities.txt`, `relations.txt`, `entity2text.txt`, `relation2text.txt`), chạy Phase 1 và tự động tìm `.ckpt` tốt nhất trong `output/` để chạy tiếp Phase 2.
 
 ---
 
-## 5. Trạng Thái Đồng Bộ Git
+## 3. Các Tối Ưu Hóa Kỹ Thuật & Đảm Bảo Công Bằng Đánh Giá (Commit `ed293a1`)
 
-* Đã cấu hình [.gitignore](file:///d:/University/Thesis/Code/.gitignore) chặn các tệp nén lớn (`*.zip`, `mkgformer-mmkg/`, `ZipDepth/`, `checkpoints/`, `hf_weights/`).
-* Đã hoàn tất commit và push lên nhánh `main` của repo từ xa:
-  * Commit ID: `fae6fde`
-  * Trạng thái Working Tree: Hoàn toàn sạch (`clean`).
+1. **`core/models/evaluation.py` (`evaluate_link_prediction`):**
+   - Thay vòng lặp từng mẫu bằng phép tính khoảng cách vector hóa theo từng khối `torch.cdist(..., p=1)` (`entity_chunk_size=32768`).
+   - Tự động offload bảng thực thể đã hợp nhất (`all_entity_embs`) sang CPU RAM khi `num_entities > 250,000` (giúp đánh giá `Spatial-VG` 1.44M thực thể chỉ tốn ~120 MB VRAM cho mỗi chunk).
+2. **`core/models/end_to_end.py` (`GeometryMMKGModel`):**
+   - Thêm tham số `use_encoders=False` khi huấn luyện từ đặc trưng `.pt` trích xuất sẵn để bỏ qua việc tải/khởi tạo `roberta-base`, `ResNet50` và `MiDaS`.
+3. **`baselines/NativE/`:**
+   - `AdvRelRotatEDB15K.py`: Tự động nhận diện `self.img_dim = img_emb.shape[1]`, `self.text_dim = text_emb.shape[1]`, `self.numeric_dim = numeric_emb.shape[1]` thay vì fix cứng `4096 -> 256` của VGG16 cũ.
+   - `run_adv_wgan_gp.py` & `run_adv_wgan_gp_3modal.py` & `BaseModule.py`: Truyền `type_constrain=False` vào `TestDataLoader(..., "link", False)` (khớp với `tester.run_link_prediction(type_constrain=False)` gốc của tác giả NativE), bật lại `kge_score.load_checkpoint(args.save)` trước khi test ở bản 3-modal, và thêm `weights_only=False` cho `torch.load` trên PyTorch 2.6+.
+4. **Đảm bảo tính công bằng (Fair Comparison):**
+   - Cả 3 mô hình (`GeometryMMKG`, `NativE`, `MKGformer`) đều đánh giá **Filtered Link Prediction** trên toàn bộ tập thực thể $N$ mà **không dùng bất kỳ bộ lọc Type Constraint nào** (`type_constrain=False`).
+
+---
+
+## 4. Trạng Thái Kết Quả Thực Nghiệm & Công Việc Tiếp Theo
+
+### Kết quả đã có (chạy trên dữ liệu v1):
+* **NativE trên `Unified-MMKG` (`Merged-MMKG`, 1000 Epochs)** — lưu tại `experiment_results/native_mmkg_results.md` (chạy ngày `05/10/2026` trên bộ `*2id.txt` và `.pt` giữ nguyên từ `04/10/2026`):
+  * **Control (RGB + Text):** `MRR = 0.384820` | `MR = 913.64` | `Hits@1 = 0.303388` | `Hits@3 = 0.429508` | `Hits@10 = 0.532962`
+  * **Ablation 1 (Mean RGB+Depth + Text):** `MRR = 0.381977` | `MR = 936.28` | `Hits@1 = 0.300232` | `Hits@3 = 0.427018` | `Hits@10 = 0.530306`
+  * **Ablation 2 (3-Modal RGB+Depth+Text):** `MRR = 0.382994` | `MR = 926.93` | `Hits@1 = 0.301063` | `Hits@3 = 0.427350` | `Hits@10 = 0.533128`
+
+> ⚠️ Kết quả NativE ở trên được chạy với valid v1, trong đó 72% triplet bị rò rỉ sang train/test. Cần kiểm tra NativE có dùng valid để chọn checkpoint không; nếu có thì phải chạy lại trên v2 (P0.3 trong `RESEARCH_PLAN.md`).
+
+### Các thực nghiệm cần chạy mới (xem thứ tự ưu tiên P1–P4 trong `RESEARCH_PLAN.md`):
+1. **GeometryMMKG** trên cả 3 bộ (`geometry-mmkg.py`, `geometry-vrd.py`, `geometry-vg.py`) theo quy trình chọn best model trên `valid.txt` rồi đánh giá trên `test.txt`.
+2. **NativE** trên 2 bộ không gian mới (`native-vrd-reproduce.py`, `native-vg-reproduce.py`).
+3. **MKGformer** trên `Unified-MMKG` (`mkgformer-mmkg-reproduce.py`).
+
+---
+
+## 5. Quy Tắc Làm Việc (User Preferences)
+* Sử dụng đường dẫn tương đối (relative paths) trong tất cả các script của dự án.
+* Không ghi đè dữ liệu gốc: script làm sạch luôn ghi ra `--dst` khác `--src`.
+* **Luôn liệt kê và báo cáo chi tiết mọi thay đổi trong commit cho người dùng kiểm tra trước khi chạy lệnh `git push`**.
