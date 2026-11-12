@@ -15,7 +15,8 @@ class AdvRelRotatEDB15K(Model):
         epsilon=2.0,
         img_emb=None,
         text_emb=None,
-        numeric_emb=None
+        numeric_emb=None,
+        orig_pool=False
     ):
 
         super(AdvRelRotatEDB15K, self).__init__(ent_tot, rel_tot)
@@ -31,6 +32,19 @@ class AdvRelRotatEDB15K(Model):
             torch.Tensor([(self.margin + self.epsilon) / self.dim_e]),
             requires_grad=False
         )
+
+        # [Geometry-MMKG] orig_pool=True restores the upstream pooling (needed to reproduce the
+        # paper on DB15K: image 4096 -> 256, text/numeric 768 -> 256). Our datasets use 768-d
+        # features for every modality and keep them unpooled (orig_pool=False).
+        if orig_pool:
+            img_pool = nn.AvgPool2d(4, stride=4)
+            img_emb = img_pool(img_emb.view(-1, 64, 64))
+            img_emb = img_emb.view(img_emb.size(0), -1)
+            txt_pool = nn.AdaptiveAvgPool2d(output_size=(4, 64))
+            text_emb = txt_pool(text_emb.view(-1, 12, 64))
+            text_emb = text_emb.view(text_emb.size(0), -1)
+            numeric_emb = txt_pool(numeric_emb.view(-1, 12, 64))  # upstream reuses txt_pool here
+            numeric_emb = numeric_emb.view(numeric_emb.size(0), -1)
 
         self.img_dim = img_emb.shape[1]
         self.text_dim = text_emb.shape[1]

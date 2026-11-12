@@ -24,6 +24,8 @@ def get_args():
     arg.add_argument('-valid_steps', type=int, default=10, help='evaluate on valid every N epochs')
     arg.add_argument('-patience', type=int, default=0, help='early stop after N evaluations without improvement (0 = off)')
     arg.add_argument('-valid_max', type=int, default=0, help='evaluate on a seeded random subset of N valid triples (0 = all)')
+    arg.add_argument('-orig_pool', type=int, default=0,
+                     help='3-modal only: 1 = upstream feature pooling to 256-d (paper reproduction on DB15K)')
     arg.add_argument('-missing_rate', type=float, default=0.8)
     arg.add_argument('-postfix', type=str, default='')
     arg.add_argument('-con_temp', type=float, default=0)

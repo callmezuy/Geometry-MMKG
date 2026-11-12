@@ -52,6 +52,10 @@ Thêm bộ đối chứng **Spatial-VRD-Trans** (transductive, `77,331` / `8,592
 5. `notebooks/native-vrd-reproduce.py` — Trên `callmezuy/spatial-vrd`.
 6. `notebooks/native-vg-reproduce.py` — Trên `callmezuy/spatial-vg` (tự động pool chiều `768 -> 256` theo từng chunk trên CPU với `mmap=True` trước khi lưu `.pth` để giảm dung lượng mỗi bảng từ `4.43 GB` xuống `1.47 GB`, chống tràn VRAM).
 
+`native-mmkg-reproduce.py` (12/11/2026): ghim dữ liệu `revision="v2"`; mặc định chạy 1000 epoch như config gốc; log hiện ra theo thời gian thực; training chỉ bắt đầu khi bấm nút ▶, nên đổi tham số không tự chạy lại; kết quả tự đẩy lên HF `callmezuy/geometry-mmkg-results`. Tên file rank: `ranks_native_Unified-MMKG_<variant>_seed42_test.csv`.
+
+8. `notebooks/native-db15k-sanity.py`: P3.0b, chạy NativE trên DB15K bằng embedding gốc của tác giả (Google Drive) để so với số trong paper.
+
 ### C. Baseline `MKGformer` (Phase 1 Entity Modeling `pretrain=1` + Phase 2 Link Prediction `pretrain=0`)
 7. `notebooks/mkgformer-mmkg-reproduce.py` — Tự động chuyển đổi `callmezuy/unified-mmkg` sang format TSV (`train.tsv`, `dev.tsv`, `test.tsv`, `entities.txt`, `relations.txt`, `entity2text.txt`, `relation2text.txt`), chạy Phase 1 và tự động tìm `.ckpt` tốt nhất trong `output/` để chạy tiếp Phase 2.
 

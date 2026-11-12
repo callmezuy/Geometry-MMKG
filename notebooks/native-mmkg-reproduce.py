@@ -7,34 +7,27 @@ app = marimo.App(width="medium")
 @app.cell
 def _():
     import os
-    import re
     import sys
     import shutil
     import subprocess
     import marimo as mo
     import torch
-    from huggingface_hub import HfFileSystem, snapshot_download
+    from huggingface_hub import HfApi, HfFileSystem, snapshot_download
 
     mo.md(
         """
         # 🧪 Reproduce NativE Baseline & Ablations on Unified-MMKG (Molab + HF Remote Storage)
-        Notebook này kết nối trực tiếp tới **Hugging Face Remote Storage** (`callmezuy/unified-mmkg`) thông qua `HfFileSystem` và thực thi trọn bộ 3 kịch bản thực nghiệm của **NativE**:
-        1. **Control (2-Modal):** Visual (`RGB`) + Textual (`Text`) — không dùng Depth.
+        Notebook này kết nối tới **Hugging Face Remote Storage** (`callmezuy/unified-mmkg`, ghim tag `v2`) và chạy 3 kịch bản thực nghiệm của **NativE**:
+        1. **Control (2-Modal):** Visual (`RGB`) + Textual (`Text`), không dùng Depth.
         2. **Ablation 1 (Early Fusion Mean):** Visual (`Mean(RGB + Depth)`) + Textual (`Text`).
         3. **Ablation 2 (Late Fusion 3-Modal):** Visual (`RGB`) + Textual (`Text`) + Numeric (`Depth`).
+
+        Giao thức (CONTRIBUTING.md mục 4): chọn checkpoint theo MRR valid (`-select_on=valid`), test một lần,
+        ghi rank từng triplet ra CSV cho `scripts/compute_metrics.py`. Log, rank CSV và checkpoint của mỗi kịch bản
+        được **đẩy lên HF ngay khi chạy xong** (cần secret `HF_TOKEN` có quyền ghi).
         """
     )
-    return (
-        HfFileSystem,
-        mo,
-        os,
-        re,
-        shutil,
-        snapshot_download,
-        subprocess,
-        sys,
-        torch,
-    )
+    return HfApi, HfFileSystem, mo, os, shutil, snapshot_download, subprocess, sys, torch
 
 
 @app.cell
@@ -42,20 +35,21 @@ def _(HfFileSystem, mo, os):
     # Khởi tạo HfFileSystem ở biến toàn cục để Marimo tự động nhận diện vào tab Remote Storage
     hf_fs = HfFileSystem()
     HF_REPO_ID = "callmezuy/unified-mmkg"
+    DATA_REVISION = "v2"  # ghim phiên bản dữ liệu để tái lập được (data/README.md)
     HF_STORAGE_PATH = f"datasets/{HF_REPO_ID}"
 
     _remote_files = [os.path.basename(p) for p in hf_fs.ls(HF_STORAGE_PATH, detail=False)]
     mo.md(
         f"""
-        ### 🔗 Kết nối Remote Storage thành công: `{HF_STORAGE_PATH}`
+        ### 🔗 Kết nối Remote Storage thành công: `{HF_STORAGE_PATH}` (revision `{DATA_REVISION}`)
         **Các tệp trên Hugging Face:** `{', '.join(_remote_files)}`
         """
     )
-    return HF_REPO_ID, HF_STORAGE_PATH, hf_fs
+    return DATA_REVISION, HF_REPO_ID, HF_STORAGE_PATH, hf_fs
 
 
 @app.cell
-def _(HF_REPO_ID, os, re, shutil, snapshot_download, subprocess, torch):
+def _(DATA_REVISION, HF_REPO_ID, os, shutil, snapshot_download, subprocess, torch):
     # 1. Đảm bảo mã nguồn Geometry-MMKG (chứa baselines/NativE) có mặt trên Molab
     WORK_DIR = os.path.abspath(".")
     if os.path.exists(os.path.join(WORK_DIR, "baselines", "NativE")):
@@ -72,20 +66,26 @@ def _(HF_REPO_ID, os, re, shutil, snapshot_download, subprocess, torch):
             )
         else:
             subprocess.run(["git", "-C", REPO_ROOT, "pull"], check=False)
+    _commit = subprocess.run(
+        ["git", "-C", REPO_ROOT, "rev-parse", "--short", "HEAD"], text=True, capture_output=True
+    ).stdout.strip()
+    print(f"Geometry-MMKG code at commit {_commit}")
 
     NATIVE_DIR = os.path.join(REPO_ROOT, "baselines", "NativE")
+    os.makedirs(os.path.join(NATIVE_DIR, "checkpoint"), exist_ok=True)
 
-    # 2. Tải dữ liệu Unified-MMKG từ Hugging Face Remote Storage
+    # 2. Tải dữ liệu Unified-MMKG (v2) từ Hugging Face
     DATA_DIR = os.path.join(WORK_DIR, "data", "Unified-MMKG")
     os.makedirs(DATA_DIR, exist_ok=True)
-    print(f"Syncing dataset from {HF_REPO_ID} to {DATA_DIR}...")
+    print(f"Syncing dataset {HF_REPO_ID}@{DATA_REVISION} to {DATA_DIR}...")
     snapshot_download(
         repo_id=HF_REPO_ID,
         repo_type="dataset",
+        revision=DATA_REVISION,
         local_dir=DATA_DIR,
     )
 
-    # 3. Chuẩn bị thư mục benchmarks/Unified-MMKG và embeddings/ trong NativE
+    # 3. Chuẩn bị benchmarks/Unified-MMKG và embeddings/ trong NativE
     DATASET_NAME = "Unified-MMKG"
     BENCHMARK_DIR = os.path.join(NATIVE_DIR, "benchmarks", DATASET_NAME)
     EMB_DIR = os.path.join(NATIVE_DIR, "embeddings")
@@ -95,34 +95,10 @@ def _(HF_REPO_ID, os, re, shutil, snapshot_download, subprocess, torch):
     for _fname in os.listdir(DATA_DIR):
         if _fname.endswith(".txt"):
             shutil.copy2(os.path.join(DATA_DIR, _fname), os.path.join(BENCHMARK_DIR, _fname))
+    for _split in ["train2id.txt", "valid2id.txt", "test2id.txt"]:
+        assert os.path.exists(os.path.join(BENCHMARK_DIR, _split)), f"Thiếu {_split} trong {HF_REPO_ID}@{DATA_REVISION}"
 
-    # Tự động sinh train2id.txt, valid2id.txt, test2id.txt nếu chưa có
-    if not os.path.exists(os.path.join(BENCHMARK_DIR, "train2id.txt")):
-        print("Generating OpenKE *2id.txt files from (h, r, t) text files...")
-        _ent2id = {}
-        with open(os.path.join(BENCHMARK_DIR, "entity2id.txt"), "r", encoding="utf-8") as _f:
-            for _line in _f.readlines()[1:]:
-                _parts = _line.strip().split("\t")
-                if len(_parts) >= 2:
-                    _ent2id[_parts[0]] = _parts[1]
-        _rel2id = {}
-        with open(os.path.join(BENCHMARK_DIR, "relation2id.txt"), "r", encoding="utf-8") as _f:
-            for _line in _f.readlines()[1:]:
-                _parts = _line.strip().split("\t")
-                if len(_parts) >= 2:
-                    _rel2id[_parts[0]] = _parts[1]
-        for _split in ["train", "valid", "test"]:
-            _rows = []
-            with open(os.path.join(BENCHMARK_DIR, f"{_split}.txt"), "r", encoding="utf-8") as _f:
-                for _line in _f:
-                    _p = _line.strip().split("\t")
-                    if len(_p) == 3 and _p[0] in _ent2id and _p[1] in _rel2id and _p[2] in _ent2id:
-                        _rows.append(f"{_ent2id[_p[0]]}\t{_ent2id[_p[2]]}\t{_rel2id[_p[1]]}\n")
-            with open(os.path.join(BENCHMARK_DIR, f"{_split}2id.txt"), "w", encoding="utf-8") as _f:
-                _f.write(f"{len(_rows)}\n")
-                _f.writelines(_rows)
-
-    # 4. Chuẩn bị các file embedding .pth đúng chuẩn tên của NativE (-visual.pth, -textual.pth, -numeric.pth)
+    # 4. Embedding .pth theo tên NativE yêu cầu (-visual.pth, -textual.pth, -numeric.pth)
     print("Preparing NativE modality embeddings (.pth)...")
     _rgb_path = os.path.join(DATA_DIR, "ent_rgb_emb.pt")
     _txt_path = os.path.join(DATA_DIR, "ent_text_emb.pt")
@@ -139,7 +115,7 @@ def _(HF_REPO_ID, os, re, shutil, snapshot_download, subprocess, torch):
     torch.save(_mean_tensor, os.path.join(EMB_DIR, f"{DATASET_NAME}-mean-visual.pth"))
     del _rgb_tensor, _dep_tensor, _mean_tensor
 
-    # 5. Biên dịch C++ Data Loader (Base.so) cho kiến trúc CPU của Molab
+    # 5. Biên dịch C++ Data Loader (Base.so)
     _mmkgc_dir = os.path.join(NATIVE_DIR, "mmkgc")
     _make_sh = os.path.join(_mmkgc_dir, "make.sh")
     with open(_make_sh, "r", encoding="utf-8") as _f:
@@ -148,95 +124,67 @@ def _(HF_REPO_ID, os, re, shutil, snapshot_download, subprocess, torch):
         _f.write(_sh_content)
     print("Compiling C++ OpenKE Base.so in mmkgc...")
     subprocess.run(["bash", "make.sh"], cwd=_mmkgc_dir, check=True)
-
-    # 6. Đảm bảo patch tương thích chiều embedding & PyTorch 2.6+ trong NativE
-    _adv_db15k_py = os.path.join(_mmkgc_dir, "module", "model", "AdvRelRotatEDB15K.py")
-    with open(_adv_db15k_py, "r", encoding="utf-8") as _f:
-        _code = _f.read()
-    if "img_pool = torch.nn.AvgPool2d" in _code:
-        _code = re.sub(
-            r"self\.img_dim = 256.*?self\.img_embeddings = nn\.Embedding\.from_pretrained",
-            "self.img_dim = img_emb.shape[1]\n        self.text_dim = text_emb.shape[1]\n        self.numeric_dim = numeric_emb.shape[1]\n\n        self.img_embeddings = nn.Embedding.from_pretrained",
-            _code,
-            flags=re.DOTALL,
-        )
-        _code = _code.replace(
-            "self.numeric_proj = nn.Sequential(\n            nn.Linear(self.text_dim, self.dim_e)",
-            "self.numeric_proj = nn.Sequential(\n            nn.Linear(self.numeric_dim, self.dim_e)",
-        )
-        with open(_adv_db15k_py, "w", encoding="utf-8") as _f:
-            _f.write(_code)
-
-    for _run_script in ["run_adv_wgan_gp.py", "run_adv_wgan_gp_3modal.py"]:
-        _script_path = os.path.join(NATIVE_DIR, _run_script)
-        with open(_script_path, "r", encoding="utf-8") as _f:
-            _sc = _f.read()
-        _sc = _sc.replace('"link")', '"link", False)')
-        _sc = _sc.replace("# kge_score.load_checkpoint(args.save)", "kge_score.load_checkpoint(args.save)")
-        with open(_script_path, "w", encoding="utf-8") as _f:
-            _f.write(_sc)
+    # Các patch cũ (bỏ pooling, type_constrain=False, load_checkpoint) đã nằm sẵn trong repo, không cần sửa lúc chạy.
 
     print("NativE environment & Unified-MMKG data setup complete!")
-    return BENCHMARK_DIR, DATA_DIR, DATASET_NAME, EMB_DIR, NATIVE_DIR, REPO_ROOT, WORK_DIR
+    return BENCHMARK_DIR, DATASET_NAME, DATA_DIR, EMB_DIR, NATIVE_DIR, REPO_ROOT, WORK_DIR
+
+
+@app.cell
+def _(DATASET_NAME, HfApi, WORK_DIR, os, subprocess, sys):
+    # Kết quả: log + rank CSV + checkpoint của từng kịch bản, đẩy lên HF ngay sau khi chạy xong.
+    SEED = 42
+    RESULTS_REPO = "callmezuy/geometry-mmkg-results"  # dataset repo private, tự tạo nếu chưa có
+    RESULTS_DIR = os.path.join(WORK_DIR, "results", "native", DATASET_NAME)
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+
+    def run_streaming(cmd, cwd, log_path):
+        """Chạy lệnh, in log ra màn hình theo thời gian thực và ghi đồng thời vào log_path."""
+        print("$ " + " ".join(cmd), flush=True)
+        with open(log_path, "w", encoding="utf-8") as _log:
+            _proc = subprocess.Popen(
+                [sys.executable if cmd[0] == "python" else cmd[0]] + cmd[1:],
+                cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+                env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            )
+            for _line in _proc.stdout:
+                print(_line, end="", flush=True)
+                _log.write(_line)
+                _log.flush()
+            return _proc.wait()
+
+    def push_results(subdir):
+        """Đẩy RESULTS_DIR lên HF (results/native/<dataset>/). Lỗi upload không làm hỏng kết quả local."""
+        try:
+            _api = HfApi()
+            _api.create_repo(RESULTS_REPO, repo_type="dataset", private=True, exist_ok=True)
+            _api.upload_folder(
+                repo_id=RESULTS_REPO, repo_type="dataset", folder_path=RESULTS_DIR,
+                path_in_repo=subdir, commit_message=f"Add {subdir} results",
+            )
+            print(f"⬆️  Uploaded {RESULTS_DIR} -> {RESULTS_REPO}/{subdir}")
+        except Exception as _e:
+            print(f"⚠️  Upload lên HF thất bại ({_e}). Hãy tải thủ công thư mục {RESULTS_DIR} trước khi tắt session.")
+
+    return RESULTS_DIR, RESULTS_REPO, SEED, push_results, run_streaming
 
 
 @app.cell
 def _(mo):
-    epochs_ui = mo.ui.number(start=10, stop=500, step=10, value=150, label="Epochs")
+    epochs_ui = mo.ui.number(start=10, stop=2000, step=10, value=1000, label="Epochs")
     batch_size_ui = mo.ui.dropdown(options=[256, 512, 1024, 2048], value=1024, label="Batch Size")
     dim_ui = mo.ui.dropdown(options=[100, 128, 200, 250], value=250, label="Embedding Dim")
     margin_ui = mo.ui.number(start=2, stop=24, step=1, value=12, label="Margin")
     neg_num_ui = mo.ui.dropdown(options=[32, 64, 128], value=128, label="Negative Samples")
+    train_btn = mo.ui.run_button(label="▶ Train 3 kịch bản")
 
-    mo.hstack([epochs_ui, batch_size_ui, dim_ui, margin_ui, neg_num_ui])
-    return batch_size_ui, dim_ui, epochs_ui, margin_ui, neg_num_ui
-
-
-@app.cell
-def _(
-    DATASET_NAME,
-    EMB_DIR,
-    NATIVE_DIR,
-    batch_size_ui,
-    dim_ui,
-    epochs_ui,
-    margin_ui,
-    mo,
-    neg_num_ui,
-    os,
-    shutil,
-    subprocess,
-):
-    print("=== [1/3] Running CONTROL NativE (2 Modalities: Visual=RGB, Textual=Text) ===")
-    shutil.copy2(
-        os.path.join(EMB_DIR, f"{DATASET_NAME}-rgb-visual.pth"),
-        os.path.join(EMB_DIR, f"{DATASET_NAME}-visual.pth"),
-    )
-
-    _cmd_ctrl = [
-        "python",
-        "run_adv_wgan_gp.py",
-        f"-dataset={DATASET_NAME}",
-        f"-batch_size={int(batch_size_ui.value)}",
-        f"-margin={int(margin_ui.value)}",
-        f"-epoch={int(epochs_ui.value)}",
-        f"-dim={int(dim_ui.value)}",
-        "-adv_num=1",
-        f"-save={DATASET_NAME}-Control",
-        f"-rank_file=ranks_native_{DATASET_NAME}_Control_test.csv",  # filtered head+tail ranks -> scripts/compute_metrics.py
-        "-select_on=valid", "-valid_steps=10",  # checkpoint = best validation MRR (ValidSelector.py)
-        f"-neg_num={int(neg_num_ui.value)}",
-        "-mu=0.0001",
-        "-learning_rate=1e-4",
-        "-lrg=1e-4",
-    ]
-    ctrl_res = subprocess.run(_cmd_ctrl, cwd=NATIVE_DIR, text=True, capture_output=True)
-    print(ctrl_res.stdout)
-    if ctrl_res.returncode != 0:
-        print("STDERR:", ctrl_res.stderr)
-
-    mo.md(f"### ✅ Hoàn tất kịch bản 1: Control (`{DATASET_NAME}-Control`)")
-    return (ctrl_res,)
+    mo.vstack([
+        mo.md("Mặc định = config gốc của NativE cho DB15K (`baselines/NativE/scripts/run_db15k.sh`). "
+              "Đặt xong tham số rồi mới bấm nút: đổi tham số **không** tự chạy lại training."),
+        mo.hstack([epochs_ui, batch_size_ui, dim_ui, margin_ui, neg_num_ui]),
+        train_btn,
+    ])
+    return batch_size_ui, dim_ui, epochs_ui, margin_ui, neg_num_ui, train_btn
 
 
 @app.cell
@@ -244,93 +192,103 @@ def _(
     DATASET_NAME,
     EMB_DIR,
     NATIVE_DIR,
+    RESULTS_DIR,
+    SEED,
     batch_size_ui,
     dim_ui,
     epochs_ui,
     margin_ui,
-    mo,
     neg_num_ui,
     os,
+    push_results,
+    run_streaming,
     shutil,
-    subprocess,
 ):
-    print("=== [2/3] Running ABLATION 1 (Early Fusion: Visual=Mean(RGB+Depth), Textual=Text) ===")
-    shutil.copy2(
-        os.path.join(EMB_DIR, f"{DATASET_NAME}-mean-visual.pth"),
-        os.path.join(EMB_DIR, f"{DATASET_NAME}-visual.pth"),
-    )
+    def run_native(variant, script, visual_src):
+        """Một kịch bản NativE: chọn file visual, train (chọn checkpoint theo valid), test một lần, đẩy kết quả."""
+        shutil.copy2(
+            os.path.join(EMB_DIR, f"{DATASET_NAME}-{visual_src}.pth"),
+            os.path.join(EMB_DIR, f"{DATASET_NAME}-visual.pth"),
+        )
+        _tag = f"{DATASET_NAME}_{variant}_seed{SEED}"
+        _ckpt = os.path.join(NATIVE_DIR, "checkpoint", f"native_{_tag}.ckpt")
+        _cmd = [
+            "python", script,
+            f"-dataset={DATASET_NAME}",
+            f"-batch_size={int(batch_size_ui.value)}",
+            f"-margin={int(margin_ui.value)}",
+            f"-epoch={int(epochs_ui.value)}",
+            f"-dim={int(dim_ui.value)}",
+            "-adv_num=1",
+            f"-save={_ckpt}",
+            f"-rank_file={os.path.join(RESULTS_DIR, f'ranks_native_{_tag}_test.csv')}",
+            "-select_on=valid", "-valid_steps=10",  # checkpoint = best validation MRR (ValidSelector.py)
+            f"-seed={SEED}",
+            f"-neg_num={int(neg_num_ui.value)}",
+            "-mu=0.0001",
+            "-learning_rate=1e-4",
+            "-lrg=1e-4",
+        ]
+        _rc = run_streaming(_cmd, NATIVE_DIR, os.path.join(RESULTS_DIR, f"native_{_tag}.log"))
+        if _rc == 0 and os.path.exists(_ckpt):
+            shutil.copy2(_ckpt, os.path.join(RESULTS_DIR, os.path.basename(_ckpt)))
+        else:
+            print(f"❌ {variant} thất bại (exit code {_rc}), xem log ở trên.")
+        push_results(f"native/{DATASET_NAME}")
+        return _rc
 
-    _cmd_mean = [
-        "python",
-        "run_adv_wgan_gp.py",
-        f"-dataset={DATASET_NAME}",
-        f"-batch_size={int(batch_size_ui.value)}",
-        f"-margin={int(margin_ui.value)}",
-        f"-epoch={int(epochs_ui.value)}",
-        f"-dim={int(dim_ui.value)}",
-        "-adv_num=1",
-        f"-save={DATASET_NAME}-Ablation-Mean",
-        f"-rank_file=ranks_native_{DATASET_NAME}_Ablation-Mean_test.csv",  # filtered head+tail ranks -> scripts/compute_metrics.py
-        "-select_on=valid", "-valid_steps=10",  # checkpoint = best validation MRR (ValidSelector.py)
-        f"-neg_num={int(neg_num_ui.value)}",
-        "-mu=0.0001",
-        "-learning_rate=1e-4",
-        "-lrg=1e-4",
-    ]
-    mean_res = subprocess.run(_cmd_mean, cwd=NATIVE_DIR, text=True, capture_output=True)
-    print(mean_res.stdout)
-    if mean_res.returncode != 0:
-        print("STDERR:", mean_res.stderr)
-
-    mo.md(f"### ✅ Hoàn tất kịch bản 2: Ablation 1 - Early Fusion Mean (`{DATASET_NAME}-Ablation-Mean`)")
-    return (mean_res,)
+    return (run_native,)
 
 
 @app.cell
-def _(
-    DATASET_NAME,
-    EMB_DIR,
-    NATIVE_DIR,
-    batch_size_ui,
-    dim_ui,
-    epochs_ui,
-    margin_ui,
-    mo,
-    neg_num_ui,
-    os,
-    shutil,
-    subprocess,
-):
-    print("=== [3/3] Running ABLATION 2 (Late Fusion 3-Modal: Visual=RGB, Textual=Text, Numeric=Depth) ===")
-    shutil.copy2(
-        os.path.join(EMB_DIR, f"{DATASET_NAME}-rgb-visual.pth"),
-        os.path.join(EMB_DIR, f"{DATASET_NAME}-visual.pth"),
+def _(mo, run_native, train_btn):
+    mo.stop(not train_btn.value, mo.md("⏸ Bấm **▶ Train 3 kịch bản** để bắt đầu."))
+    print("=== [1/3] CONTROL NativE (2 Modalities: Visual=RGB, Textual=Text) ===")
+    ctrl_rc = run_native("Control", "run_adv_wgan_gp.py", "rgb-visual")
+    mo.md(f"### {'✅' if ctrl_rc == 0 else '❌'} Kịch bản 1: Control (exit code {ctrl_rc})")
+    return (ctrl_rc,)
+
+
+@app.cell
+def _(ctrl_rc, mo, run_native, train_btn):
+    mo.stop(not train_btn.value)
+    _ = ctrl_rc  # chạy sau kịch bản 1 (các kịch bản dùng chung file -visual.pth)
+    print("=== [2/3] ABLATION 1 (Early Fusion: Visual=Mean(RGB+Depth), Textual=Text) ===")
+    mean_rc = run_native("Ablation-Mean", "run_adv_wgan_gp.py", "mean-visual")
+    mo.md(f"### {'✅' if mean_rc == 0 else '❌'} Kịch bản 2: Ablation 1 - Early Fusion Mean (exit code {mean_rc})")
+    return (mean_rc,)
+
+
+@app.cell
+def _(mean_rc, mo, run_native, train_btn):
+    mo.stop(not train_btn.value)
+    _ = mean_rc
+    print("=== [3/3] ABLATION 2 (Late Fusion 3-Modal: Visual=RGB, Textual=Text, Numeric=Depth) ===")
+    modal3_rc = run_native("Ablation-3Modal", "run_adv_wgan_gp_3modal.py", "rgb-visual")
+    mo.md(f"### {'✅' if modal3_rc == 0 else '❌'} Kịch bản 3: Ablation 2 - Late Fusion 3-Modal (exit code {modal3_rc})")
+    return (modal3_rc,)
+
+
+@app.cell
+def _(RESULTS_DIR, RESULTS_REPO, mo, modal3_rc):
+    _ = modal3_rc
+    mo.md(
+        f"""
+        ### 📦 Kết quả
+        Local: `{RESULTS_DIR}` · HF: `{RESULTS_REPO}` (thư mục `native/Unified-MMKG/`).
+
+        1. Kiểm tra dòng `Rank check ... C++: ... | Python: ...` trong log: hai bộ số phải khớp (P1.4).
+        2. Tính số báo cáo trên máy local (CONTRIBUTING.md mục 4):
+        ```
+        python scripts/compute_metrics.py --data data/Merged-MMKG \\
+            --ranks control=ranks_native_Unified-MMKG_Control_seed42_test.csv \\
+                    mean=ranks_native_Unified-MMKG_Ablation-Mean_seed42_test.csv \\
+                    3modal=ranks_native_Unified-MMKG_Ablation-3Modal_seed42_test.csv \\
+            --reference control --by-relation
+        ```
+        """
     )
-
-    _cmd_3modal = [
-        "python",
-        "run_adv_wgan_gp_3modal.py",
-        f"-dataset={DATASET_NAME}",
-        f"-batch_size={int(batch_size_ui.value)}",
-        f"-margin={int(margin_ui.value)}",
-        f"-epoch={int(epochs_ui.value)}",
-        f"-dim={int(dim_ui.value)}",
-        "-adv_num=1",
-        f"-save={DATASET_NAME}-Ablation-3Modal",
-        f"-rank_file=ranks_native_{DATASET_NAME}_Ablation-3Modal_test.csv",  # filtered head+tail ranks -> scripts/compute_metrics.py
-        "-select_on=valid", "-valid_steps=10",  # checkpoint = best validation MRR (ValidSelector.py)
-        f"-neg_num={int(neg_num_ui.value)}",
-        "-mu=0.0001",
-        "-learning_rate=1e-4",
-        "-lrg=1e-4",
-    ]
-    modal3_res = subprocess.run(_cmd_3modal, cwd=NATIVE_DIR, text=True, capture_output=True)
-    print(modal3_res.stdout)
-    if modal3_res.returncode != 0:
-        print("STDERR:", modal3_res.stderr)
-
-    mo.md(f"### ✅ Hoàn tất kịch bản 3: Ablation 2 - Late Fusion 3-Modal (`{DATASET_NAME}-Ablation-3Modal`)")
-    return (modal3_res,)
+    return
 
 
 if __name__ == "__main__":

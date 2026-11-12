@@ -42,6 +42,7 @@ if __name__ == "__main__":
         img_emb=img_emb,
         text_emb=text_emb,
         numeric_emb=num_emb,
+        orig_pool=bool(args.orig_pool),
     )
     print(kge_score)
     # define the loss function

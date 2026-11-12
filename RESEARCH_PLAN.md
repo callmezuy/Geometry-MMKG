@@ -167,6 +167,8 @@ P0.1–P0.3b làm bằng `scripts/clean_splits.py` (11/11/2026). **Bản v2 hi�
   - **Chưa chạy end-to-end** với lib C++ thật: chỉ có trên Linux/Molab.
 - Ở chế độ `valid`, SNAG đặt tên checkpoint `-MRR<x>` theo **MRR valid**. Lưu ý: nếu file cùng tên đã tồn tại, `run_mmkgc.py` sẽ nạp file cũ (hành vi gốc). Nên xóa `checkpoint/` giữa các lần chạy.
 - [ ] **P3.0b** Chạy kiểm tra ở tiêu chí 1 (`-select_on original`). Báo số của mình bên cạnh số trong paper.
+  - (12/11/2026) Đã chuẩn bị NativE/DB15K: notebook `notebooks/native-db15k-sanity.py` tải embedding gốc từ Google Drive của tác giả (visual `[12842, 4096]`, textual/numeric `[12842, 768]`) và chạy đúng `scripts/run_db15k.sh` với `-select_on=original -orig_pool=1`. Commit `ed293a1` đã bỏ bước pooling gốc của `AdvRelRotatEDB15K` để dùng đặc trưng 768 chiều của mình; cờ mới `-orig_pool=1` bật lại pooling đó (4096/768 → 256), mặc định là `0`. Số mục tiêu (arXiv 2406.17605, Table 2/3, NativE "All"): **MRR 37.16 · H@1 28.01 · H@3 42.25 · H@10 54.13**. **Chưa chạy.**
+  - [ ] SNAG trên MKG-W: chưa chuẩn bị.
 
 - [ ] **P3.1** Feature-TransE (2-modal và 3-modal).
 - [ ] **P3.2** NativE feature-only cho dữ liệu inductive.
@@ -183,6 +185,7 @@ P0.1–P0.3b làm bằng `scripts/clean_splits.py` (11/11/2026). **Bản v2 hi�
 - [ ] **P4.4** VG inductive: GeometryMMKG (full, w/o Depth), NativE feature-only. Theo dõi RAM/VRAM ở lần eval đầu tiên.
 - [ ] **P4.5** Chạy 3 seed cho các cấu hình chính.
 - [ ] **P4.6** Đẩy checkpoint `.pth` và file rank lên HF sau mỗi lần chạy (storage của Molab có thể không bền).
+  - Đã làm cho notebook NativE MMKG và DB15K: log, rank CSV và checkpoint được tự động đẩy lên dataset repo private `callmezuy/geometry-mmkg-results` (`native/<dataset>/`) ngay khi mỗi kịch bản chạy xong. Cần secret `HF_TOKEN` có quyền ghi trên Molab. Các notebook còn lại chưa có.
 
 ### P5. Phân tích
 
