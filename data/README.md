@@ -23,7 +23,7 @@ Uploaded to HF on 12/11/2026: `main` = v2. Each repo has tags `v1` (original) an
 - `Spatial-VRD/relation_review.tsv`: raw predicate → label (+ head/tail inversion). Edit it, then rebuild.
 - `Spatial-VRD/relation_audit.tsv`: what the old heuristic (`scripts/legacy/`) did to each raw predicate.
 - `Spatial-VRD-Trans/split_stats.json`: statistics of the transductive control split.
-- `_archive_v1/<name>/`: the v1 split files (+ `entity2id.txt`). Also available on HF at tag `v1`, so safe to delete.
+- v1 split files are no longer kept locally; download them from HF at tag `v1` if needed (e.g. for `scripts/audit_vrd_relations.py --stored`).
 
 ## Rebuild (from `Code/`)
 
@@ -33,7 +33,7 @@ python scripts/clean_splits.py --src data/Spatial-VRD --dst data/_build/Spatial-
     --vrd-review data/Spatial-VRD/relation_review.tsv --valid-group image-prefix --valid-ratio 0.1
 python scripts/clean_splits.py --src data/Spatial-VG --dst data/_build/Spatial-VG \
     --vg-h5 data/Spatial-VG/VG-SGG.h5 --vg-dicts data/Spatial-VG/VG-SGG-dicts.json
-python scripts/clean_splits.py --src data/_archive_v1/Merged-MMKG --dst data/_build/Merged-MMKG
+python scripts/clean_splits.py --src <v1 Merged-MMKG from HF tag v1> --dst data/_build/Merged-MMKG
 # then move the files from data/_build/<name>/ into data/<name>/, and:
 python scripts/make_transductive_split.py --src data/Spatial-VRD --dst data/Spatial-VRD-Trans
 ```

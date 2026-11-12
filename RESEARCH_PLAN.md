@@ -92,7 +92,7 @@ Kết quả kỳ vọng: Δdepth ≈ 0 ở hàng MMKG và Δdepth > 0 ở hàng 
 
 ### P0. Sửa dữ liệu (làm trước mọi thí nghiệm)
 
-P0.1–P0.3b làm bằng `scripts/clean_splits.py` (11/11/2026). **Bản v2 hiện là dữ liệu chính tại `data/<tên>/`** (cùng tên với repo HF); các file split v1 được lưu ở `data/_archive_v1/`. Chi tiết trong `clean_stats.json` của mỗi thư mục; cấu trúc và lệnh tái tạo ở `data/README.md`.
+P0.1–P0.3b làm bằng `scripts/clean_splits.py` (11/11/2026). **Bản v2 hiện là dữ liệu chính tại `data/<tên>/`** (cùng tên với repo HF); các file split v1 chỉ còn trên HF (tag `v1`). Chi tiết trong `clean_stats.json` của mỗi thư mục; cấu trúc và lệnh tái tạo ở `data/README.md`.
 
 - [x] **P0.1** Gán lại nhãn quan hệ cho Spatial-VRD **từ JSON gốc** (`scripts/build_vrd_relation_review.py`): 1.310 predicate gốc → **52 quan hệ**, loại 1.0% triplet, đảo chiều 115 triplet bị động. Đã sửa 91 triplet bị script cũ `clean_mmsg_aliases.py` gán sai (so khớp chuỗi con, mất thông tin hướng); chi tiết ở `data/Spatial-VRD/relation_audit.tsv`. Các quyết định cần duyệt đang theo đề xuất mặc định (cột `needs_review`).
 - [x] **P0.2** Loại triplet trùng trong từng split (VRD: 3.175 / 318 / 925; VG: 92.520 / 10.572 / 40.935).

@@ -1,64 +1,52 @@
-# Geometry-Guided Multi-Modal Knowledge Graph (MMKG)
+# Geometry-MMKG: Depth-Aware Multi-Modal Knowledge Graph Completion
 
-This repository contains the implementation for the thesis on **Geometry-Guided Modality Fusion for Multi-Modal Knowledge Graphs (MMKGs)**. 
+Thesis code. **Research question:** is depth needed for multi-modal knowledge graphs, and if so, how should it be fused?
+The hypothesis is that depth helps scene-graph KGs (MMSG, where entities share one viewing space)
+more than concept-level KGs (MMKG), and that an adaptive depth-gated fusion works on both.
 
-Unlike traditional MMKG models (like SNAG, NativE, MKGformer) that only leverage Text and 2D Visual (RGB) modalities, this project introduces the **Spatial/Depth modality** to enhance entity representations. By capturing spatial geometry, the model disambiguates visually similar entities (e.g., distinguishing a 2D painting of a car from a 3D physical car).
+The proposed model, **GeometryMMKG**, fuses Text, RGB and Depth features of each entity
+(gated RGB–Depth fusion followed by cross-attention with text) and scores triples with TransE.
+The baselines are NativE, SNAG and MKGformer.
 
-## Core Contributions
-1. **Spatial-MMSG Dataset**: A novel dataset constructed from Visual Genome & VRD, providing millions of triplets where each entity strictly possesses Text, RGB, and Depth representations.
-2. **AlexNet-BN Depth Encoder**: A custom CNN initialized from scratch to strictly learn spatial features (bypassing ImageNet texture bias).
-3. **Geometry-Guided Fusion**: A gated cross-attention mechanism that dynamically balances semantic visual features and spatial structural features before aligning them with text.
+**Start here:** [CONTRIBUTING.md](CONTRIBUTING.md) (onboarding and rules) and [RESEARCH_PLAN.md](RESEARCH_PLAN.md) (design, protocol, tasks and status).
 
-## Project Structure
+## Datasets (v2)
+
+| Dataset | HF repo | Train / Valid / Test | Setting |
+|---|---|---|---|
+| Merged-MMKG | `callmezuy/unified-mmkg` | 48,798 / 1,395 / 6,022 | transductive |
+| Spatial-VRD | `callmezuy/spatial-vrd` | 77,227 / 8,614 / 21,563 | inductive (split by image) |
+| Spatial-VG | `callmezuy/spatial-vg` | 319,069 / 26,372 / 137,984 | inductive (official image split) |
+| Spatial-VRD-Trans | `callmezuy/spatial-vrd-trans` | 77,331 / 8,592 / 21,481 | transductive control |
+
+Every entity has pre-extracted 768-d `ent_{text,rgb,depth}_emb.pt` features. Details, file formats and rebuild commands are in [data/README.md](data/README.md).
+
+## Layout
 
 ```
-├── core/
-│   ├── data_engineering/
-│   │   ├── dataset.py            # Standard dataset (loads raw images/text)
-│   │   └── fast_dataset.py       # Fast dataset (loads pre-extracted .pt features)
-│   ├── features/
-│   │   └── encoders.py           # Text (RoBERTa), RGB (ResNet50), Depth (AlexNet-BN)
-│   ├── fusion/
-│   │   └── geometry_guided_fusion.py # Gating & Cross-Attention module
-│   └── models/
-│       ├── end_to_end.py         # Main overarching GeometryMMKGModel
-│       ├── evaluation.py         # Standard KG metrics (MRR, Hits@1, Hits@10)
-│       └── kg_reasoning.py       # Graph Convolution, TransE Scorer, Joint Loss
-├── scripts/
-│   ├── download_db15k_images.py  # Image downloader for standard datasets
-│   ├── construct_spatial_mmsg.py # Constructs the Spatial-MMSG dataset
-│   ├── extract_features.py       # Pre-extracts features for fast training
-│   └── prepare_baseline_data.py  # Blends RGB/Depth for SOTA ablation studies
-├── baselines/                    # Contains SOTA model codes (SNAG, NativE, etc.)
-├── train.py                      # Main training pipeline
-├── requirements.txt
-└── README.md
+core/            dataset, encoders, fusion, GeometryMMKG model, unified evaluation, seeding
+notebooks/       Marimo notebooks run on Molab (GeometryMMKG, NativE, MKGformer)
+scripts/         data building/cleaning, train.py, compute_metrics.py, patch_mkgformer.py
+baselines/       NativE, SNAG (vendored, modified), MKGformer (git submodule)
+tests/           brute-force checks of the evaluation code
+ZipDepth/        depth estimator used to extract depth features
 ```
 
-## Installation
+## Quick start
 
 ```bash
+git clone --recurse-submodules https://github.com/callmezuy/Geometry-MMKG.git
 pip install -r requirements.txt
+python tests/test_evaluation.py && python tests/test_valid_selector.py
+python scripts/train.py                     # GeometryMMKG on data/Spatial-VRD (local)
+python scripts/compute_metrics.py --data data/Spatial-VRD --ranks geometry=<ranks.csv>
 ```
 
-## Usage Pipeline
+Experiments are run with the notebooks in `notebooks/` on [Molab](https://molab.marimo.io); they download data from HF and code from this repo's `main` branch.
 
-**1. Data Construction**
-```bash
-python scripts/construct_spatial_mmsg.py
-```
-**2. Feature Pre-Extraction (For Kaggle/Fast Training)**
-```bash
-python scripts/extract_features.py
-```
-**3. Prepare Baseline Features (Ablation)**
-```bash
-python scripts/prepare_baseline_data.py
-```
-**4. Train Model**
-```bash
-python train.py
-```
+## Evaluation protocol (all models)
 
-## Baselines & Ablation Studies
-This repository is configured to benchmark against standard MMKG models. For baseline reproduction, we generate `ent_rgb_depth_mean_emb.pt` and `ent_rgb_depth_concat_emb.pt` to feed into unmodified SOTA codebases (SNAG, NativE), proving that our **Geometry-Guided Fusion** outperforms naive addition of the depth modality.
+- Filtered link prediction over **all** entities, **head and tail** ranked, no type constraint, strict tie rule.
+- Checkpoint chosen on **validation MRR**; test is evaluated once.
+- Every model writes per-triple ranks; all reported numbers come from `scripts/compute_metrics.py`
+  (overall, per relation category, per relation, and paired-bootstrap ΔMRR).

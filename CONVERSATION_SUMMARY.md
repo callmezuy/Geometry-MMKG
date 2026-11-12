@@ -1,9 +1,9 @@
 # Tổng Hợp Ngữ Cảnh Dự Án Luận Văn (Session Handoff Context)
 
-**Cập nhật lần cuối:** 11/11/2026  
-**Kế hoạch hiện hành:** `RESEARCH_PLAN.md` (v2) · **Mục lục dữ liệu:** `data/README.md`  
+**Cập nhật lần cuối:** 12/11/2026  
+**Kế hoạch hiện hành:** `RESEARCH_PLAN.md` (v2) · **Mục lục dữ liệu:** `data/README.md` · **Hướng dẫn collaborator:** `CONTRIBUTING.md`  
 **Đề tài:** Multi-Modal Knowledge Graph Completion with Geometric and Spatial Priors (`Geometry-MMKG`)  
-**GitHub Repository:** `https://github.com/callmezuy/Geometry-MMKG.git` (Branch `main`, Commit mới nhất: `ed293a1`)  
+**GitHub Repository:** `https://github.com/callmezuy/Geometry-MMKG.git` (Branch `main`; xem `git log` để biết commit mới nhất)  
 **Workspace Local:** `d:\University\Thesis\Code`
 
 ---
@@ -57,18 +57,20 @@ Thêm bộ đối chứng **Spatial-VRD-Trans** (transductive, `77,331` / `8,592
 
 ---
 
-## 3. Các Tối Ưu Hóa Kỹ Thuật & Đảm Bảo Công Bằng Đánh Giá (Commit `ed293a1`)
+## 3. Hạ Tầng Đánh Giá & Đảm Bảo Công Bằng
 
-1. **`core/models/evaluation.py` (`evaluate_link_prediction`):**
-   - Thay vòng lặp từng mẫu bằng phép tính khoảng cách vector hóa theo từng khối `torch.cdist(..., p=1)` (`entity_chunk_size=32768`).
-   - Tự động offload bảng thực thể đã hợp nhất (`all_entity_embs`) sang CPU RAM khi `num_entities > 250,000` (giúp đánh giá `Spatial-VG` 1.44M thực thể chỉ tốn ~120 MB VRAM cho mỗi chunk).
-2. **`core/models/end_to_end.py` (`GeometryMMKGModel`):**
+**Giao thức hiện hành (từ commit `7b256e9`, P1 + P3.0):**
+- `core/models/evaluation.py` xếp hạng **cả head lẫn tail**, filtered trên toàn bộ entity, bằng điểm thì xếp chặt, và trả về dict. Tính bằng `torch.cdist(p=1)` theo từng khối. Bảng entity được giữ trên GPU nếu chiếm dưới 50% VRAM còn trống, ngược lại để trên CPU. Kiểm tra bằng `tests/test_evaluation.py`.
+- Mọi mô hình ghi rank theo từng triplet. Số liệu báo cáo chỉ lấy từ `scripts/compute_metrics.py` (theo nhóm quan hệ, ΔMRR kèm khoảng tin cậy bootstrap).
+- Mọi mô hình chọn checkpoint theo **MRR trên valid**. SNAG gốc chọn theo test (rò rỉ), còn NativE gốc chạy cố định số epoch. Cả hai giờ dùng `mmkgc/config/ValidSelector.py` (`-select_on valid`). Kiểm tra bằng `tests/test_valid_selector.py`.
+
+**Các tối ưu trước đó (commit `ed293a1`), vẫn còn hiệu lực:**
+1. **`core/models/end_to_end.py` (`GeometryMMKGModel`):**
    - Thêm tham số `use_encoders=False` khi huấn luyện từ đặc trưng `.pt` trích xuất sẵn để bỏ qua việc tải/khởi tạo `roberta-base`, `ResNet50` và `MiDaS`.
-3. **`baselines/NativE/`:**
+2. **`baselines/NativE/`:**
    - `AdvRelRotatEDB15K.py`: Tự động nhận diện `self.img_dim = img_emb.shape[1]`, `self.text_dim = text_emb.shape[1]`, `self.numeric_dim = numeric_emb.shape[1]` thay vì fix cứng `4096 -> 256` của VGG16 cũ.
    - `run_adv_wgan_gp.py` & `run_adv_wgan_gp_3modal.py` & `BaseModule.py`: Truyền `type_constrain=False` vào `TestDataLoader(..., "link", False)` (khớp với `tester.run_link_prediction(type_constrain=False)` gốc của tác giả NativE), bật lại `kge_score.load_checkpoint(args.save)` trước khi test ở bản 3-modal, và thêm `weights_only=False` cho `torch.load` trên PyTorch 2.6+.
-4. **Đảm bảo tính công bằng (Fair Comparison):**
-   - Cả 3 mô hình (`GeometryMMKG`, `NativE`, `MKGformer`) đều đánh giá **Filtered Link Prediction** trên toàn bộ tập thực thể $N$ mà **không dùng bất kỳ bộ lọc Type Constraint nào** (`type_constrain=False`).
+3. **Không dùng type constraint** (`type_constrain=False`) ở mọi mô hình.
 
 ---
 
@@ -80,7 +82,7 @@ Thêm bộ đối chứng **Spatial-VRD-Trans** (transductive, `77,331` / `8,592
   * **Ablation 1 (Mean RGB+Depth + Text):** `MRR = 0.381977` | `MR = 936.28` | `Hits@1 = 0.300232` | `Hits@3 = 0.427018` | `Hits@10 = 0.530306`
   * **Ablation 2 (3-Modal RGB+Depth+Text):** `MRR = 0.382994` | `MR = 926.93` | `Hits@1 = 0.301063` | `Hits@3 = 0.427350` | `Hits@10 = 0.533128`
 
-> ⚠️ Kết quả NativE ở trên được chạy với valid v1, trong đó 72% triplet bị rò rỉ sang train/test. Cần kiểm tra NativE có dùng valid để chọn checkpoint không; nếu có thì phải chạy lại trên v2 (P0.3 trong `RESEARCH_PLAN.md`).
+> ⚠️ Các số trên **không dùng để so sánh**: chạy trên dữ liệu v1, chọn checkpoint bằng cách chạy cố định số epoch, và chưa có file rank để tính qua `compute_metrics.py`. NativE phải chạy lại với `-select_on valid` (P3.0, P4.1 trong `RESEARCH_PLAN.md`).
 
 ### Các thực nghiệm cần chạy mới (xem thứ tự ưu tiên P1–P4 trong `RESEARCH_PLAN.md`):
 1. **GeometryMMKG** trên cả 3 bộ (`geometry-mmkg.py`, `geometry-vrd.py`, `geometry-vg.py`) theo quy trình chọn best model trên `valid.txt` rồi đánh giá trên `test.txt`.
