@@ -1,0 +1,6 @@
+# Reviewed placeholder images of the official MKG-Y image store (MMRNS Drive, MKG-Y_img.zip; RESEARCH_PLAN.md P0.12).
+# Reviewed by eye 18/11/2026: every md5 shared by >= 2 MKG-Y entities (35 hashes: administrative maps shared by villages
+# of one region, posters, portraits) and every image with RGB std < 12 (32 images: black / blank frames, sparse map tiles,
+# dark album covers). None shows a placeholder (blank, "unavailable" notice, broken-image icon, site default) apart from
+# the near-uniform frames that the uniform rule (RGB std < 3) already flags, so the list is empty.
+md5	kind	n_entities	example	note

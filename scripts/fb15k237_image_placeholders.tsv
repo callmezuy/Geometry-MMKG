@@ -1,0 +1,64 @@
+# Reviewed placeholder images of the MKGformer FB15k image store (RESEARCH_PLAN.md P0.10).
+# Reviewed by eye 18/11/2026: every md5 shared by >= 3 FB15k-237 entities (372 hashes) and the 200 nearest dHash neighbours
+# of the exemplars, plus every image with RGB std 1-8 (std < 3 is caught by the uniform rule); listed = shows no content of the entity (blank, "unavailable" notice, broken-image icon, site default).
+# Used by scripts/build_fb15k237_img.py as exact matches and as exemplars for near-duplicate (dHash) matching.
+md5	kind	n_entities	example	note
+09f7c306a11a9d88cb2c6a0e5e565ee9	broken_image	510	FB15k-images/m.012qdp/bing_13.jpg	generic broken-photo icon
+f1c1d315a030a2c3d100d75f87382d7c	unavailable_notice	152	FB15k-images/m.0kj34/bing_22.jpg	tinypic: image no longer available
+137bfd4864f4b4267fcd40e42c9d781e	blank	46	FB15k-images/m.04pk9/bing_9.jpg	blank image
+6306797e8db1b9387242a4372482b163	video_default	45	FB15k-images/m.04cppj/bing_18.jpg	colour-bar default video thumbnail
+15de453608ad687177327724e550788d	unavailable_notice	42	FB15k-images/m.0196kn/bing_0.jpg	copertina non disponibile (cover not available)
+d38e725bbcd6af7e21d450a90ca8e61b	video_default	35	FB15k-images/m.04v7kt/bing_2.jpg	colour-bar default video thumbnail
+fbadf1b34a86b1fc3ee031c4dc29e153	site_default	25	FB15k-images/m.0272_vz/bing_5.jpg	MTV grey logo default thumbnail
+4e72e6535c1b14b216d6fb86149340a3	unavailable_notice	22	FB15k-images/m.03nbbv/bing_5.jpg	original image no longer available
+41649afc86c96083ef808d6b650c23bc	unavailable_notice	21	FB15k-images/m.031rp3/bing_15.jpg	image unavailable
+68c9ff12b7b8cd0e32b022c5fb801fc0	video_default	18	FB15k-images/m.0zlt9/bing_9.jpg	colour-bar default video thumbnail
+2775f338c469b19c338c4e0ea410271c	blank	13	FB15k-images/m.01yvvn/bing_12.jpg	1x1 pixel
+0131450d1667e22871b834ce5f2d1a54	site_default	13	FB15k-images/m.024rdh/bing_16.jpg	The Wrap site logo
+ef5d10b7f37fc13df3855c23c4fd44a0	site_default	11	FB15k-images/m.086k8/bing_12.jpg	The Wrap site logo
+e94f76d2732335bec1f30f8214488a22	site_default	10	FB15k-images/m.02l96k/bing_18.jpg	Magento default product image
+091c106ba81ff84fa34fc48ac35566ea	site_default	10	FB15k-images/m.01vw87c/bing_11.jpg	MTV grey logo default thumbnail
+969876363c1da124a572c29b8ffa9cb3	blank	8	FB15k-images/m.04m8fy/bing_23.jpg	black image
+6d7b54abdff06a1a948e5e2b9bb4e4da	unavailable_notice	8	FB15k-images/m.035_2h/bing_0.jpg	original image no longer available
+1ffd79561934452f5b3393fa409aaadb	broken_image	8	FB15k-images/m.02mscn/bing_23.jpg	clasf camera placeholder
+9584d16ccc62e47fb57b1c42aa088381	site_default	7	FB15k-images/m.01wmgrf/bing_0.jpg	MTV grey logo default thumbnail
+2eaad90595bdcd9d99b27136aac4735a	blank	7	FB15k-images/m.09r3f/bing_2.jpg	blank image
+5a8dc667bfd3577288ffa8a5a9a2aead	unavailable_notice	7	FB15k-images/m.02b10w/bing_8.jpg	this image is no longer available
+8659d18deb076c5de5d6de0eccdbf4d8	site_default	7	FB15k-images/m.05pcn59/bing_3.jpg	MTV grey logo default thumbnail
+d0c3c0fd651d0ffa0221e66409966cf2	broken_image	7	FB15k-images/m.0d90m/bing_4.jpg	broken-image placeholder
+d48bb2932881395c1e94f1dcad30943f	broken_image	7	FB15k-images/m.0g2dz/bing_13.jpg	broken-image icon
+a8c1387517782b7ec1a756d432cde52e	unavailable_notice	6	FB15k-images/m.048z7l/bing_18.jpg	Bild folgt in Kuerze (image coming soon)
+027e3140719d7e2ead619fb80d953776	site_default	6	FB15k-images/m.023r2x/bing_10.jpg	Gear4music shop logo
+6253835f2aeae420b080f9038dafef66	site_default	5	FB15k-images/m.017236/bing_1.jpg	timeanddate.com default banner (Current Local Time in)
+eb8af34fcd348e9ee76834a7911ae529	unavailable_notice	5	FB15k-images/m.02vw1w2/bing_14.jpg	404 not found page
+e999beba38c64fc854757e6e84bb259a	site_default	5	FB15k-images/m.01w8n89/bing_16.jpg	MTV grey logo default thumbnail
+aff656676c6825f634fa7fccd8b2f58d	video_default	5	FB15k-images/m.02sb1w/bing_4.jpg	colour-bar default video thumbnail
+0d89aec37b82d1913f3974b261c3ab73	unavailable_notice	5	FB15k-images/m.0x2p/bing_22.jpg	MISSING placeholder
+3179e37a28e2f0640a5a1ec6fd533ff0	unavailable_notice	4	FB15k-images/m.0f38nv/bing_6.jpg	image not currently available (vtmusic)
+59ca2ce18e5e92d4fc30559ed1d8c836	unavailable_notice	4	FB15k-images/m.025tkqy/bing_8.jpg	Image Coming Soon
+7571432dd94e557556a3e92f4ddb3214	site_default	4	FB15k-images/m.0127s7/bing_11.jpg	MTV grey logo default thumbnail
+bf48dc763896fa1ee731470eb02d27ce	video_default	4	FB15k-images/m.05fw6t/bing_18.jpg	colour-bar default video thumbnail
+1e0a83f24f22a221fdcce0b1e33599d1	site_default	3	FB15k-images/m.05ztrmj/bing_18.jpg	MTV grey logo default thumbnail
+25f39ce422d4d2a2ccf12cdb34db9654	site_default	3	FB15k-images/m.0wq3z/bing_8.jpg	timeanddate.com default banner (14-Day Weather Forecast for)
+7025f300d4dc20f617f706c0f722a713	site_default	3	FB15k-images/m.0df4y/bing_4.jpg	timeanddate.com default banner (Weather in)
+933f7a691654a059bf533166ac6cb7b4	junk	3	FB15k-images/m.037ts6/bing_0.jpg	text banner KLIK HIER NIET
+bd1268ea794d2931fcb4d524defe02fb	unavailable_notice	3	FB15k-images/m.04wmvz/bing_21.jpg	error page: incomplete request, site not found
+c097d6310fda585eaf0e71affd9213f9	site_default	3	FB15k-images/m.0qpqn/bing_2.jpg	timeanddate.com default banner (Sun and Moon Info for)
+e8050ed2d5b5733b007a0529058e2454	site_default	3	FB15k-images/m.04cf_l/bing_4.jpg	MTV grey logo default thumbnail
+a503dce798774987abdd1c188ce68615	broken_image	1	FB15k-images/m.04ck0_/bing_6.jpg	broken-photo placeholder (seen in the near-duplicate review)
+45591ec061abcbd29ba5cbe0cc36b082	site_default	1	FB15k-images/m.01sqd7/bing_4.jpg	MTV grey logo default thumbnail (seen in the near-duplicate review)
+2e346e5f02445f5960d965834360ffe5	broken_image	1	FB15k-images/m.01pwz/bing_2.jpg	broken-photo placeholder (seen in the near-duplicate review)
+1b886f118a2771bf829334411a1e9477	unavailable_notice	1	FB15k-images/m.0b1zz/bing_19.jpg	IMAGE COMING SOON (seen in the near-duplicate review)
+470be4c8857767b5a396780667ad97e3	broken_image	2	FB15k-images/m.05jcn8/bing_7.jpg	crossed-out camera icon (seen in the near-duplicate review)
+6c185b9a8a64917801dcd2a33ebed6f3	broken_image	1	FB15k-images/m.0k20s/bing_22.jpg	crossed-out camera icon (seen in the near-duplicate review)
+02818298d13d1b1ad022e14bb4163251	unavailable_notice	2	FB15k-images/m.019y_2/bing_20.jpg	grey "no image" picture icon (seen in the low-variance review)
+e712e3e747619be50035baded7b5e25a	unavailable_notice	1	FB15k-images/m.01vdm0/bing_14.jpg	No Image (seen in the low-variance review)
+f65950563e35d0394fadda566ccbb376	unavailable_notice	1	FB15k-images/m.02bh_v/bing_12.jpg	No Photo (seen in the low-variance review)
+83544605d53405ddf5bfa983e22e5f38	unavailable_notice	1	FB15k-images/m.0l35f/bing_6.jpg	404 file not found (seen in the low-variance review)
+52d003edff1c34aa151652abaa42f6c6	unavailable_notice	1	FB15k-images/m.04xn_/bing_5.jpg	404 file not found (seen in the low-variance review)
+4ac62b55d50fc57faf23ede70ab1caca	unavailable_notice	1	FB15k-images/m.01n1pp/bing_16.jpg	404 file not found (seen in the low-variance review)
+f384b9bc811cb69d6f28cc489a082f83	broken_image	1	FB15k-images/m.0jwmp/bing_19.jpg	grey picture-icon pattern (seen in the RGB std 3-5 review)
+1763870dc6dcad101cbf306aa9863ea4	site_default	1	FB15k-images/m.0c8tk/bing_24.jpg	The Financial Express site logo (seen in the RGB std 3-5 review)
+c123183ffea51807a423c5ffe43899ed	broken_image	1	FB15k-images/m.01242_/google_9.jpg	film-reel default icon (seen in the RGB std 3-5 review)
+9ac16c5f125a3d27e65d934af6c0a192	blank	1	FB15k-images/m.0jgm8/google_5.jpg	blank light grey-blue frame (seen in the RGB std 3-5 review)
+45d2e401bd60b670b6ff1bff8300d909	unavailable_notice	1	FB15k-images/m.02kc4sf/bing_0.jpg	BRAK ZDJECIA (no photo) (seen in the RGB std 3-5 review)
