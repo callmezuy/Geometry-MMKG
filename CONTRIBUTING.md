@@ -29,7 +29,7 @@ notebooks/                           Marimo notebook chạy trên Molab (tải d
 scripts/
   train.py                           train GeometryMMKG local (Spatial-VRD)
   compute_metrics.py                 NGUỒN DUY NHẤT của số liệu báo cáo
-  clean_splits.py, build_vrd_relation_review.py, make_transductive_split.py   dựng dữ liệu v2
+  clean_splits.py, build_vrd_relation_review.py, make_transductive_split.py   dựng dữ liệu v2/v3
   patch_mkgformer.py                 patch submodule MKGformer lúc chạy
   legacy/                            script cũ, không dùng cho thí nghiệm mới
 baselines/
@@ -49,7 +49,7 @@ pip install -r requirements.txt
 python tests/test_evaluation.py && python tests/test_valid_selector.py
 ```
 
-Dữ liệu: notebook tự tải về bằng `snapshot_download`. Để chạy local, tải repo HF vào `data/<tên>/` (bảng trong `data/README.md`). Muốn số liệu tái lập được thì ghim `revision="v2"`.
+Dữ liệu: notebook tự tải về bằng `snapshot_download`. Để chạy local, tải repo HF vào `data/<tên>/` (bảng trong `data/README.md`). Muốn số liệu tái lập được thì ghim `revision="v3"`.
 
 Notebook trên Molab tải code từ GitHub `main`, nên **code chỉ có tác dụng trên Molab sau khi đã push**.
 

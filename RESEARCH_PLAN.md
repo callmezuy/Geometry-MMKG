@@ -101,16 +101,16 @@ P0.1–P0.3b làm bằng `scripts/clean_splits.py` (11/11/2026). **Bản v2 hi�
 - [x] **P0.2** Loại triplet trùng trong từng split (VRD: 3.175 / 318 / 925; VG: 92.520 / 10.572 / 40.935).
 - [x] **P0.3** Loại rò rỉ: Merged-MMKG bỏ **3.586 / 4.981 triplet valid** (nằm trong train hoặc test), valid còn **1.395**. VRD/VG hết rò rỉ sau P0.3b.
   - [x] NativE gốc **không dùng valid**: train cố định số epoch rồi test checkpoint cuối (`run_adv_wgan_gp.py`). Vì vậy kết quả NativE cũ không bị rò rỉ valid ảnh hưởng. **Nhưng kết quả này không còn dùng để so sánh**, vì cách chọn checkpoint khác GeometryMMKG. Từ P3.0, mọi model đều chọn checkpoint theo valid, nên NativE phải chạy lại.
-  - [ ] Cân nhắc: valid 1.395 có đủ để chọn checkpoint không, hay tách thêm từ train.
+  - [x] ~~Cân nhắc: valid 1.395 có đủ để chọn checkpoint không, hay tách thêm từ train.~~ **v3 (18/11/2026):** valid v2 chỉ có **40 triplet DB15K** (DB15K chiếm 77% test), nên chọn checkpoint gần như chỉ dựa vào MKG-W/MKG-Y; 9.5% thực thể valid không có trong train. Đã lấy lại valid **5.001** từ train + valid v2, phân tầng theo nguồn cho khớp test, giữ nguyên test (`make_transductive_split.py --keep-test --stratify source --valid-size 5000`). Train còn 45.192. Kết quả trên Merged-MMKG v2 (NativE Control seed 42, 18/11) không dùng để so sánh.
   - [ ] Merged-MMKG có 6 quan hệ trong test không xuất hiện trong train (không thể dự đoán đúng). Quyết định giữ hay bỏ.
 - [x] **P0.3b** Chia lại valid theo ảnh: VRD theo tiền tố `image_id` (10% số ảnh train), VG dùng **split chính thức của H5**. Thực thể valid chưa thấy trong train: VRD 20.6% → **100%**, VG 31.1% → **100%**.
 
-| Dataset (v2) | Train | Valid | Test | Quan hệ | Cách tạo |
+| Dataset (v3) | Train | Valid | Test | Quan hệ | Cách tạo |
 |---|---:|---:|---:|---:|---|
 | Spatial-VRD | 77.227 | 8.614 | 21.563 | 52 | JSON gốc + `relation_review.tsv`; valid chia theo ảnh (10%) |
 | Spatial-VG | 319.069 | 26.372 | 137.984 | 50 | `VG-SGG.h5` curated; **split chính thức theo ảnh** (0/1/2) |
-| Merged-MMKG | 48.798 | 1.395 | 6.022 | 429 | loại trùng + rò rỉ |
-| Spatial-VRD-Trans | 77.331 | 8.592 | 21.481 | 52 | đối chứng transductive từ Spatial-VRD v2 |
+| Merged-MMKG | 45.192 | 5.001 | 6.022 | 429 | loại trùng + rò rỉ; **v3**: valid lấy lại, phân tầng theo nguồn |
+| Spatial-VRD-Trans | 77.371 | 8.578 | 21.455 | 52 | đối chứng transductive từ Spatial-VRD v2; **v3**: phân tầng theo quan hệ |
 
 **Cập nhật 11/11/2026, nguồn gốc dữ liệu MMSG (quan trọng cho phần viết bài):**
 - **Spatial-VG** được tạo từ **VG150-curated, biến thể `no_part_whole`** (Neau et al., ICCVW 2023, repo `Maelic/VG_curated`), **không phải VG150 chuẩn** (Xu et al., 2017). Đã xác minh: dựng lại triplet từ `VG-SGG.h5` khớp chính xác tập test (178.919) và train+valid cũ. File H5 và dicts nằm ở `data/Spatial-VG/`.
@@ -122,6 +122,7 @@ P0.1–P0.3b làm bằng `scripts/clean_splits.py` (11/11/2026). **Bản v2 hi�
 - [x] **P0.5** Tạo split đối chứng từ VRD đã sạch:
   `python scripts/make_transductive_split.py --src data/Spatial-VRD --dst data/Spatial-VRD-Trans`
   0 thực thể valid/test chưa thấy trong train; test phủ 72/73 quan hệ.
+  - [x] **v3 (18/11/2026)** Bản v2 lệch nhóm quan hệ: test 79.5% GEOMETRIC, train 66.9% (triplet POSSESSIVE hay dính thực thể bậc 1 nên ít được tách ra). Như vậy so sánh VRD với VRD-Trans bị nhiễu bởi phân bố quan hệ chứ không chỉ bởi inductive/transductive. Chạy lại với `--stratify relation`: GEOMETRIC train/test 70.3/70.5%, POSSESSIVE 25.1/24.9% (khớp Spatial-VRD 70.4/70.3%). Thống kê đầy đủ: `experiment_results/dataset_stats.md`.
 - [ ] **P0.6** *(Tùy chọn)* Tạo `Merged-MMKG-Ind`: giữ lại một tập thực thể, đưa mọi triplet chứa chúng vào test.
 
 ### P1. Hạ tầng đánh giá
@@ -182,7 +183,7 @@ P0.1–P0.3b làm bằng `scripts/clean_splits.py` (11/11/2026). **Bản v2 hi�
 
 Ưu tiên theo thứ tự:
 
-- [ ] **P4.1** Merged-MMKG: GeometryMMKG + ablation; SNAG; MKGformer; Feature-TransE; NativE (**chạy lại** với `-select_on valid`, xem P3.0).
+- [ ] **P4.1** Merged-MMKG: GeometryMMKG + ablation; SNAG; MKGformer; Feature-TransE; NativE (**chạy lại** với `-select_on valid`, xem P3.0). Chạy trên **v3**. Lượt NativE trên v2 (18/11, seed 42, Control MRR 0.3843, P1.4 rank check khớp) chỉ là kiểm tra hạ tầng.
 - [ ] **P4.2** VRD-Trans: GeometryMMKG (full, w/o Depth); NativE nguyên bản 3 kịch bản; Feature-TransE.
 - [ ] **P4.3** VRD inductive: GeometryMMKG + ablation; NativE/SNAG feature-only; Feature-TransE.
 - [ ] **P4.4** VG inductive: GeometryMMKG (full, w/o Depth), NativE feature-only. Theo dõi RAM/VRAM ở lần eval đầu tiên.

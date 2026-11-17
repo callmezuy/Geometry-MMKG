@@ -17,7 +17,7 @@ def _():
     mo.md(
         """
         # 🧪 Reproduce NativE Baseline & Ablations on Unified-MMKG (Molab + HF Remote Storage)
-        Notebook này kết nối tới **Hugging Face Remote Storage** (`callmezuy/unified-mmkg`, ghim tag `v2`) và chạy 3 kịch bản thực nghiệm của **NativE**:
+        Notebook này kết nối tới **Hugging Face Remote Storage** (`callmezuy/unified-mmkg`, ghim tag `v3`) và chạy 3 kịch bản thực nghiệm của **NativE**:
         1. **Control (2-Modal):** Visual (`RGB`) + Textual (`Text`), không dùng Depth.
         2. **Ablation 1 (Early Fusion Mean):** Visual (`Mean(RGB + Depth)`) + Textual (`Text`).
         3. **Ablation 2 (Late Fusion 3-Modal):** Visual (`RGB`) + Textual (`Text`) + Numeric (`Depth`).
@@ -35,7 +35,7 @@ def _(HfFileSystem, mo, os):
     # Khởi tạo HfFileSystem ở biến toàn cục để Marimo tự động nhận diện vào tab Remote Storage
     hf_fs = HfFileSystem()
     HF_REPO_ID = "callmezuy/unified-mmkg"
-    DATA_REVISION = "v2"  # ghim phiên bản dữ liệu để tái lập được (data/README.md)
+    DATA_REVISION = "v3"  # ghim phiên bản dữ liệu để tái lập được (data/README.md)
     HF_STORAGE_PATH = f"datasets/{HF_REPO_ID}"
 
     _remote_files = [os.path.basename(p) for p in hf_fs.ls(HF_STORAGE_PATH, detail=False)]
@@ -74,7 +74,7 @@ def _(DATA_REVISION, HF_REPO_ID, os, shutil, snapshot_download, subprocess, torc
     NATIVE_DIR = os.path.join(REPO_ROOT, "baselines", "NativE")
     os.makedirs(os.path.join(NATIVE_DIR, "checkpoint"), exist_ok=True)
 
-    # 2. Tải dữ liệu Unified-MMKG (v2) từ Hugging Face
+    # 2. Tải dữ liệu Unified-MMKG (v3) từ Hugging Face
     DATA_DIR = os.path.join(WORK_DIR, "data", "Unified-MMKG")
     os.makedirs(DATA_DIR, exist_ok=True)
     print(f"Syncing dataset {HF_REPO_ID}@{DATA_REVISION} to {DATA_DIR}...")

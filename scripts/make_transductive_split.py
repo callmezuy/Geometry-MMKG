@@ -17,7 +17,18 @@ Procedure
    remaining training triples (remaining degree >= 1).
 3. Split the held-out pool into valid / test.
 
-Guarantees: every entity and relation in valid/test occurs in train.
+Stratification (--stratify, v3): step 2 caps the held-out count per stratum
+(relation, relation category, or source prefix "SRC::rel"), so every stratum
+loses the same share to valid/test and the category mix of train, valid and test
+match. Without it (v2) degree-1 heavy POSSESSIVE triples were held out less
+often, so test was 80% GEOMETRIC against 67% in train.
+
+--keep-test (transductive MMKG): test stays exactly as in --src; only valid is
+re-drawn from train + valid, with strata sized to the test distribution
+(e.g. --stratify source: valid has the DB15K / MKG-W / MKG-Y mix of test).
+
+Guarantees: every entity and relation in valid/test occurs in train
+(with --keep-test: every valid entity, and every test entity that was in train before).
 Entity2id / relation2id and all pre-extracted .pt features stay identical, so
 the feature files of the source dataset can be reused as-is.
 
@@ -28,7 +39,9 @@ Output (same conventions as the source datasets):
   split_stats.json
 
 Usage (from the Code/ directory):
-  python scripts/make_transductive_split.py --src data/Spatial-VRD --dst data/Spatial-VRD-Trans
+  python scripts/make_transductive_split.py --src data/Spatial-VRD --dst data/Spatial-VRD-Trans --stratify relation
+  python scripts/make_transductive_split.py --src data/Merged-MMKG --dst data/_build/Merged-MMKG \
+      --keep-test --stratify source --valid-size 5000
 """
 import argparse
 import json
@@ -38,7 +51,7 @@ import shutil
 from collections import Counter
 
 SPLITS = ["train", "valid", "test"]
-COPY_FILES = ["entity2id.txt", "relation2id.txt", "entity2text.txt"]
+COPY_FILES = ["entity2id.txt", "relation2id.txt", "entity2text.txt", "relation_category.tsv"]
 
 
 def read_id_map(path):
@@ -72,7 +85,25 @@ def write_openke(path, triples, ent2id, rel2id):
             f.write(f"{ent2id[s]}\t{ent2id[o]}\t{rel2id[p]}\n")
 
 
-def make_split(triples, valid_ratio, test_ratio, seed):
+def stratum_fn(mode, category_tsv):
+    if mode == "none":
+        return lambda p: "all"
+    if mode == "relation":
+        return lambda p: p
+    if mode == "source":
+        return lambda p: p.split("::", 1)[0]
+    cat = {}
+    with open(category_tsv, "r", encoding="utf-8") as f:
+        next(f)
+        for line in f:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) >= 3:
+                cat[parts[0]] = parts[2]
+    return lambda p: cat[p]
+
+
+def hold_out(triples, targets, stratum, seed):
+    """Greedy: move (h, r, t) out of train while its stratum is below target and h, t, r keep train degree >= 1."""
     ent_deg = Counter()
     rel_cnt = Counter()
     for s, p, o in triples:
@@ -80,26 +111,52 @@ def make_split(triples, valid_ratio, test_ratio, seed):
         ent_deg[o] += 1
         rel_cnt[p] += 1
 
-    target_holdout = int(round(len(triples) * (valid_ratio + test_ratio)))
     order = list(range(len(triples)))
     random.Random(seed).shuffle(order)
-
+    taken = Counter()
     holdout_idx = set()
     for i in order:
-        if len(holdout_idx) >= target_holdout:
-            break
         s, p, o = triples[i]
+        g = stratum(p)
+        if taken[g] >= targets.get(g, 0):
+            continue
         need_s = 2 if s == o else 1  # self-loop removes two occurrences of s
         if ent_deg[s] - need_s >= 1 and (s == o or ent_deg[o] - 1 >= 1) and rel_cnt[p] - 1 >= 1:
             holdout_idx.add(i)
+            taken[g] += 1
             ent_deg[s] -= 1
             ent_deg[o] -= 1
             rel_cnt[p] -= 1
 
     train = [triples[i] for i in range(len(triples)) if i not in holdout_idx]
     holdout = [triples[i] for i in order if i in holdout_idx]  # keep shuffled order
-    n_valid = int(round(len(holdout) * valid_ratio / (valid_ratio + test_ratio)))
-    return train, holdout[:n_valid], holdout[n_valid:]
+    return train, holdout
+
+
+def make_split(triples, valid_ratio, test_ratio, seed, stratum):
+    frac = valid_ratio + test_ratio
+    sizes = Counter(stratum(p) for _, p, _ in triples)
+    targets = {g: int(round(n * frac)) for g, n in sizes.items()}
+    train, holdout = hold_out(triples, targets, stratum, seed)
+    # split the held-out pool into valid / test inside each stratum, so both keep the same mix
+    by_g = {}
+    for t in holdout:
+        by_g.setdefault(stratum(t[1]), []).append(t)
+    valid, test = [], []
+    for g in sorted(by_g):
+        h = by_g[g]
+        n_valid = int(round(len(h) * valid_ratio / frac))
+        valid += h[:n_valid]
+        test += h[n_valid:]
+    return train, valid, test
+
+
+def make_valid_keep_test(pool, test, valid_size, seed, stratum):
+    """Draw valid from pool (train + valid) with the stratum mix of test; test is untouched."""
+    tc = Counter(stratum(p) for _, p, _ in test)
+    targets = {g: int(round(valid_size * n / len(test))) for g, n in tc.items()}
+    train, valid = hold_out(pool, targets, stratum, seed)
+    return train, valid, list(test)
 
 
 def summarize(name, split_triples, train_ents, orig_test_set):
@@ -120,7 +177,13 @@ def main():
     ap.add_argument("--valid-ratio", type=float, default=0.08)
     ap.add_argument("--test-ratio", type=float, default=0.20)
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--stratify", choices=["none", "relation", "category", "source"], default="none",
+                    help="cap held-out triples per stratum (v3 uses relation for MMSG, source for MMKG)")
+    ap.add_argument("--category-tsv", default=None, help="relation_category.tsv (default: <src>/relation_category.tsv)")
+    ap.add_argument("--keep-test", action="store_true", help="keep test of --src, only re-draw valid")
+    ap.add_argument("--valid-size", type=int, default=None, help="with --keep-test: number of valid triples")
     args = ap.parse_args()
+    stratum = stratum_fn(args.stratify, args.category_tsv or os.path.join(args.src, "relation_category.tsv"))
 
     ent2id = read_id_map(os.path.join(args.src, "entity2id.txt"))
     rel2id = read_id_map(os.path.join(args.src, "relation2id.txt"))
@@ -128,7 +191,9 @@ def main():
     per_split = {sp: read_triples(os.path.join(args.src, f"{sp}.txt")) for sp in SPLITS}
     pooled, seen = [], set()
     n_dup = 0
-    for sp in SPLITS:
+    if args.keep_test:  # test triples are fixed; the pool is train + valid minus anything in test
+        seen = set(per_split["test"])
+    for sp in (["train", "valid"] if args.keep_test else SPLITS):
         for t in per_split[sp]:
             if t in seen:
                 n_dup += 1
@@ -138,15 +203,22 @@ def main():
     # deterministic base order before seeded shuffle
     pooled.sort()
 
-    train, valid, test = make_split(pooled, args.valid_ratio, args.test_ratio, args.seed)
+    if args.keep_test:
+        assert args.valid_size, "--keep-test needs --valid-size"
+        train, valid, test = make_valid_keep_test(pooled, per_split["test"], args.valid_size, args.seed, stratum)
+    else:
+        train, valid, test = make_split(pooled, args.valid_ratio, args.test_ratio, args.seed, stratum)
 
     # ---- sanity checks ----
     train_ents = {e for s, _, o in train for e in (s, o)}
     train_rels = {p for _, p, _ in train}
-    for name, sp in [("valid", valid), ("test", test)]:
+    pool_ents = {e for s, _, o in pooled for e in (s, o)}
+    pool_rels = {p for _, p, _ in pooled}
+    assert train_ents == pool_ents and train_rels == pool_rels, "an entity/relation lost all train triples"
+    for name, sp in [("valid", valid)] + ([] if args.keep_test else [("test", test)]):
         assert all(s in train_ents and o in train_ents for s, _, o in sp), f"{name}: unseen entity"
         assert all(p in train_rels for _, p, _ in sp), f"{name}: unseen relation"
-    assert len(train) + len(valid) + len(test) == len(pooled)
+    assert len(train) + len(valid) == len(pooled) - (0 if args.keep_test else len(test))
     assert not (set(train) & set(valid)) and not (set(train) & set(test)) and not (set(valid) & set(test))
 
     # ---- write ----
@@ -176,14 +248,20 @@ def main():
     stats = {
         "source": os.path.normpath(args.src),
         "seed": args.seed,
+        "stratify": args.stratify,
+        "keep_test": args.keep_test,
+        "valid_size": args.valid_size,
+        "strata_share": {sp: {g: round(c / len(d), 4) for g, c in sorted(Counter(stratum(p) for _, p, _ in d).items())}
+                         for sp, d in [("train", train), ("valid", valid), ("test", test)]
+                         } if args.stratify in ("category", "source") else None,
         "target_ratios": {"valid": args.valid_ratio, "test": args.test_ratio},
         "pooled_triples": len(pooled),
         "duplicates_removed": n_dup,
         "entities_in_triples": len(ent_deg_all),
         "entities_degree_1": sum(1 for v in ent_deg_all.values() if v == 1),
         "achieved_ratios": {
-            "valid": round(len(valid) / len(pooled), 4),
-            "test": round(len(test) / len(pooled), 4),
+            "valid": round(len(valid) / (len(train) + len(valid) + len(test)), 4),
+            "test": round(len(test) / (len(train) + len(valid) + len(test)), 4),
         },
         "train": summarize("train", train, train_ents, orig_test),
         "valid": summarize("valid", valid, train_ents, orig_test),

@@ -10,7 +10,7 @@
 
 ## 1. Kiến Trúc Dữ Liệu & Hugging Face Remote Storage
 
-Dữ liệu local đã được làm sạch thành **v2** (11/11/2026, xem `data/README.md`). Đã đẩy lên HF ngày 12/11/2026: nhánh `main` = v2, bản cũ giữ ở tag `v1`. Bảng dưới đây là v2; số liệu v1 để trong ngoặc.
+Dữ liệu local đã được làm sạch thành **v2** (11/11/2026, xem `data/README.md`). Đã đẩy lên HF ngày 12/11/2026: nhánh `main` = v2, bản cũ giữ ở tag `v1`. Bảng dưới đây là v2; số liệu v1 để trong ngoặc. **v3 (18/11/2026)** chỉ đổi Merged-MMKG (valid 5.001 phân tầng theo nguồn, train 45.192, test giữ nguyên) và Spatial-VRD-Trans (phân tầng theo quan hệ: 77.371 / 8.578 / 21.455); lý do và số liệu ở `data/README.md` và `experiment_results/dataset_stats.md`.
 
 | Dataset (Local & HF) | Hugging Face Repo ID | Số Thực Thể (`entity2id.txt`) | Số Quan Hệ (`relation2id.txt`) | Train / Valid / Test Triplets | Đặc Trưng Trích Xuất Sẵn (`.pt`) |
 | :--- | :--- | :---: | :---: | :---: | :--- |
