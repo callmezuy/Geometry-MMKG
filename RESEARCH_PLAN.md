@@ -1,6 +1,6 @@
 # Kế Hoạch Nghiên Cứu & Danh Sách Công Việc (v2)
 
-**Cập nhật:** 10/11/2026
+**Cập nhật:** 18/11/2026 (duyệt thiết kế dữ liệu v4: bỏ Merged-MMKG, dùng FB15k-237-IMG + FB15K-237-ind của BLP/CMR; duyệt danh sách baseline mức 1; xem P0.8, mục 3.2)
 **Thay thế:** Implementation Plan cũ (4 giai đoạn: Nạp dữ liệu → Benchmark → Phân tích → Viết bài)
 **Lý do sửa:** Phát hiện VRD/VG là thiết lập *inductive* (100% thực thể test không có trong train), trong khi Unified-MMKG là *transductive*. Nếu so sánh trực tiếp, hiệu ứng của Depth bị trộn lẫn với hiệu ứng của chế độ đánh giá.
 
@@ -30,20 +30,24 @@ Mọi kết luận về Depth phải dựa trên Δdepth. Không dùng kết qu�
 
 | | Transductive | Inductive |
 |---|---|---|
-| **MMKG** (thực thể độc lập) | `Merged-MMKG` (chính) | `Merged-MMKG-Ind` (tùy chọn) |
+| **MMKG** (thực thể độc lập) | `FB15k-237-IMG` (chính); `MKG-Y` (phụ) | `FB15K-237-ind` (split của BLP, dùng trong CMR) |
 | **MMSG** (chung không gian nhìn) | `Spatial-VRD-Trans` (đối chứng) | `Spatial-VRD`, `Spatial-VG` (chính) |
 
 Kết quả kỳ vọng: Δdepth ≈ 0 ở hàng MMKG và Δdepth > 0 ở hàng MMSG, **ở cả hai cột**.
+
+*(18/11/2026: Merged-MMKG và Merged-MMKG-Ind bị bỏ, lý do ở P0.8.)*
 
 ### 2.3. Vai trò từng dataset
 
 | Dataset | Chế độ | Vai trò |
 |---|---|---|
-| Merged-MMKG | Transductive | Benchmark chính cho MMKG; mọi baseline chạy nguyên bản |
+| FB15k-237-IMG | Transductive | Benchmark chính cho MMKG; benchmark chuẩn, so được với số trong paper (MKGformer và các bài sau); mọi baseline chạy nguyên bản |
+| MKG-Y | Transductive | Bộ phụ cho MMKG (thay DB15K ngày 18/11/2026, P0.12a–b). Ảnh chính thức của MMRNS phủ 95,0% thực thể; thuộc họ benchmark báo MRR nên so được với số công bố của NativE, SNAG, AdaMF-MAT, MyGO, MoMoK. Split giữ nguyên của MMRNS |
+| DB15K | — | Chỉ dùng cho P3.0b (tái lập NativE bằng đặc trưng gốc của tác giả). Không dùng cho thí nghiệm depth: ảnh gốc không còn, chỉ khôi phục được 67% |
+| FB15K-237-ind | Inductive | Ô MMKG × inductive của ma trận. Split của BLP (Daza et al., 2021), được CMR (Zhao et al., SIGIR 2024) thêm ảnh và mô tả; 11.633 / 1.454 / 1.454 thực thể train / valid / test, thực thể valid và test chưa thấy khi train. Giao thức của CMR trùng giao thức mục 4 (xếp hạng đầy đủ, filtered, head + tail), nên so được với số công bố của CMR, MoSE-MI, BLP, StATIK. *(Thay cho GraIL v1–v4 ngày 18/11/2026: GraIL chỉ có số của mô hình thuần cấu trúc, chấm trên 50 mẫu âm.)* |
 | Spatial-VRD | Inductive | Benchmark chính cho MMSG |
 | Spatial-VG | Inductive | Chứng minh khả năng mở rộng (1.44M thực thể) |
 | Spatial-VRD-Trans | Transductive | **Đối chứng**: tách hiệu ứng inductive khỏi hiệu ứng Depth; baseline chạy nguyên bản |
-| Merged-MMKG-Ind | Inductive | Tùy chọn: lấp ô còn lại của ma trận |
 
 ---
 
@@ -59,16 +63,36 @@ Kết quả kỳ vọng: Δdepth ≈ 0 ở hàng MMKG và Δdepth > 0 ở hàng 
 | Fusion = mean(RGB, Depth) | RQ2 |
 | Fusion = trọng số cố định (scalar học được) | RQ2: gating thích nghi có tốt hơn trọng số tĩnh không |
 | + BBox geometry (tùy chọn) | Đối chứng: lợi ích đến từ Depth hay chỉ từ hình học 2D |
+| Thiếu ảnh = vector hằng, không mặt nạ (dataset có thực thể thiếu ảnh) | Công bằng với baseline: tách lợi ích của cơ chế xử lý thiếu ảnh khỏi phần còn lại của mô hình |
 
 ### 3.2. Baseline
 
-| Baseline | Merged-MMKG | VRD-Trans | VRD / VG (inductive) |
-|---|---|---|---|
-| NativE (3 kịch bản) | Nguyên bản ✅ đã có | Nguyên bản | Bản *feature-only* (ghi rõ "adapted") |
-| SNAG | Nguyên bản | Nguyên bản | Bản *feature-only* |
-| MKGformer | Nguyên bản | Nguyên bản | Không chạy; giải thích: entity-as-token, không inductive, không mở rộng tới 1.44M |
-| Feature-TransE (RGB+Text / RGB+Depth+Text, MLP) | Có | Có | Có: baseline đơn giản cùng đặc trưng, cô lập đóng góp của Router |
-| Baseline thêm sau | Nguyên bản | Nguyên bản | Feature-only nếu là transductive |
+**Mức 1 (duyệt 18/11/2026, làm trước; 3 seed ở các ô chính):**
+
+| Baseline | FB15k-237-IMG, MKG-Y | VRD-Trans | FB15K-237-ind, VRD / VG (inductive) | Δdepth? |
+|---|---|---|---|---|
+| NativE (3 kịch bản) | Nguyên bản (kết quả cũ trên Merged-MMKG bị bỏ) | Nguyên bản | Bản *feature-only* (ghi rõ "adapted") | Có |
+| SNAG (COLING 2025) | Nguyên bản | Nguyên bản | Bản *feature-only* | Có |
+| MoMoK (ICLR 2025) | Nguyên bản | Nguyên bản | Bản *feature-only* | Có: mỗi modality một expert, depth thành một expert riêng |
+| MKGformer (SIGIR 2022) | Nguyên bản (FB15k-237-IMG là dataset gốc; so với số arXiv v5 đã sửa lỗi: H@1 0,256 · H@3 0,367 · H@10 0,504 · MR 221, paper không báo MRR) | Nguyên bản | Không chạy; giải thích: entity-as-token, không inductive, không mở rộng tới 1.44M | Không: đọc ảnh thô, làm mốc tham chiếu |
+| CMR (SIGIR 2024) | Không bắt buộc | Không bắt buộc | Nguyên bản trên FB15K-237-ind (số paper: MRR 0,371 · H@1 0,269 · H@10 0,567) và Spatial-VRD; VG không chạy (bi-encoder PLM + ViT trên 1,44M thực thể quá nặng) | Không: đọc ảnh thô, làm mốc tham chiếu. CMR gốc điền vector ngẫu nhiên cho thực thể thiếu ảnh; giữ nguyên (mục dưới, ý 3) và ghi rõ |
+| Feature-TransE (RGB+Text / RGB+Depth+Text, MLP) | Có | Có | Có: baseline đơn giản cùng đặc trưng, cô lập đóng góp của Router | Có |
+
+Δdepth giữa các mô hình được kiểm chứng trên NativE, SNAG, MoMoK, Feature-TransE và GeometryMMKG. MKGformer và CMR là mốc so sánh với mặt bằng chung của lĩnh vực, không có bản thêm depth.
+
+**Mức 2 (để sau, chỉ làm nếu còn GPU; 1 seed):** AdaMF-MAT (COLING 2024; sinh vector đối kháng cho modality thiếu, liên quan mục dưới), IKRL và TBKGC (đã có sẵn trong `baselines/NativE/mmkgc/module/model/`, chạy gần như không tốn công), BLP-TransE (mốc chỉ dùng text cho FB15K-237-ind). MyGO lên mức 2 nếu code tách token đã được phát hành.
+
+**Chỉ trích số từ paper, không chạy lại** (ghi lý do một dòng trong bài): RSME, TransAE, VBKGC, OTKGE, IMF, QEB, VISTA, LAFA, SGMPT, MyGO (nếu không lên mức 2), MCKGC (không có code hoặc không đưa depth vào được); KICGPT, MKGL, K-ON, GLTW, ELMM (dùng LLM, ngoài ngân sách tính toán); GraIL, NBFNet, ULTRA (thuần cấu trúc, không dùng modality); StATIK, StAR, kNN-KGE (chỉ dùng text; số trên FB15K-237-ind lấy từ CMR).
+
+**Lưu ý so số với paper:** hai họ benchmark tách biệt. Họ FB15k-237-IMG (MKGformer, RSME, SGMPT, LAFA, ELMM) thường chỉ báo Hits@k và MR. Họ DB15K / MKG-W / MKG-Y của MMRNS (NativE, SNAG, AdaMF-MAT, MyGO, MoMoK) báo MRR. Khi đối chiếu số paper chỉ so cùng dataset và cùng metric. Trên MKG-Y, baseline gốc dùng đặc trưng của tác giả còn mình dùng đặc trưng DINOv2 (tiêu chí 4 của P3.0), nên số của mình có thể lệch số paper; phần tái lập với đặc trưng gốc nằm ở P3.0 tiêu chí 1.
+
+**Thiếu ảnh (sửa 18/11/2026: xử lý ở tầng dữ liệu, không sửa kiến trúc baseline).** Depth suy ra từ RGB nên thực thể thiếu ảnh thì thiếu cả RGB lẫn depth. Không bỏ thực thể, không suy đoán bù.
+1. **Baseline dùng bảng đặc trưng (NativE, SNAG, Feature-TransE, ...):** dùng chung một bảng đặc trưng; mọi thực thể thiếu ảnh nhận **cùng một vector hằng** = trung bình đặc trưng của các thực thể có ảnh (tính trên thực thể train, riêng cho RGB và depth). Nhiều ảnh cho một thực thể: lấy trung bình đặc trưng DINOv2 (thuộc bước trích xuất đặc trưng, nằm trong tiêu chí 4 của P3.0). Không sửa code mô hình: lớp chiếu học được biến vector hằng `c` thành `Wc + b`, gần tương đương một vector "thiếu" học được.
+2. **Không dùng vector ngẫu nhiên riêng cho từng thực thể** (cách hay gặp trong các bộ MMKG): ở chế độ transductive nó đóng vai trò embedding theo ID miễn phí, và bản có depth nhận thêm một bảng ID như vậy, làm Δdepth dương giả.
+3. **Baseline đọc ảnh thô (MKGformer, ...):** giữ nguyên cách gốc (MKGformer: ảnh toàn 0 cho thực thể thiếu ảnh, chọn ngẫu nhiên tối đa 7 ảnh chia 1 chính / 3 phụ / 3 RCNN).
+4. **GeometryMMKG:** vector "thiếu" học được + mặt nạ có/không, fusion bỏ qua modality thiếu (P2.6). Đây là **thiết kế của mô hình đề xuất**, không phải quy tắc chung. Kèm ablation dùng cùng vector hằng như baseline, không mặt nạ (mục 3.1), để phần chênh lệch với baseline không bị quy cho cách xử lý thiếu ảnh.
+
+Δdepth (RQ1) không bị ảnh hưởng bởi lựa chọn này vì luôn so trong cùng một mô hình: bản có và không có depth thiếu ở cùng thực thể và được xử lý như nhau.
 
 **Feature-only adaptation:** thay embedding theo ID bằng `e = MLP(đặc trưng modal)`, giữ nguyên hàm score và cách fusion gốc. Báo thêm một dòng bản nguyên gốc (ID embedding ngẫu nhiên cho thực thể chưa thấy) để tham khảo.
 
@@ -77,15 +101,16 @@ Kết quả kỳ vọng: Δdepth ≈ 0 ở hàng MMKG và Δdepth > 0 ở hàng 
 ## 4. Giao thức đánh giá thống nhất
 
 1. **Filtered link prediction**, xếp hạng **cả head và tail**, lấy trung bình.
-2. Không gian ứng viên = toàn bộ `entity2id` (N), không dùng type constraint.
+2. Không gian ứng viên = toàn bộ `entity2id` (N), không dùng type constraint. FB15K-237-ind cũng vậy: ứng viên gồm cả thực thể đã thấy và chưa thấy, đúng như CMR.
 3. Filter set = train ∪ valid ∪ test (toàn bộ triplet đúng).
 4. Xử lý trường hợp bằng điểm: thống nhất một cách duy nhất cho mọi mô hình (đề xuất: rank = 1 + số ứng viên có điểm *cao hơn hẳn*, giống OpenKE).
 5. Metric: MRR, MR, Hits@1/3/10.
 6. **Mọi mô hình dump rank theo từng triplet** ra `ranks_<model>_<dataset>.csv` (`h, r, t, rank_head, rank_tail`). **Một script chung duy nhất** tính metric và phân tích theo nhóm quan hệ.
 7. Chọn checkpoint theo MRR trên valid, đánh giá trên test một lần.
 8. Seed cố định (42), chạy **3 seed (42, 43, 44)** cho các cấu hình chính và báo mean ± std.
-   - **Cấu hình chính** = các cặp có Depth / không Depth của mỗi mô hình trên Merged-MMKG, Spatial-VRD và VRD-Trans (các ô dùng để kết luận Δdepth).
-   - **Chỉ 1 seed (42):** kiểm tra tái lập paper (P3.0b), ablation fusion phụ (RQ2) nếu thiếu GPU, và Spatial-VG.
+   - **Cấu hình chính** = các cặp có Depth / không Depth của mỗi mô hình trên FB15k-237-IMG, FB15K-237-ind, Spatial-VRD và VRD-Trans (các ô dùng để kết luận Δdepth).
+   - **Chỉ 1 seed (42):** kiểm tra tái lập paper (P3.0b), ablation fusion phụ (RQ2) nếu thiếu GPU, MKG-Y và Spatial-VG.
+10. Với dataset có thực thể thiếu ảnh: báo trên test đầy đủ, kèm bảng chia nhóm theo số đầu bộ ba có ảnh (cả hai / một / không). Nhóm **"không"** là đối chứng âm: Δdepth ở đó phải xấp xỉ 0. FB15k-237-IMG báo thêm Δdepth trên thực thể vật lý so với thực thể trừu tượng (ảnh Bing của khái niệm trừu tượng ít mang thông tin hình học).
    - Lý do: khoảng tin cậy bootstrap chỉ phản ánh dao động do mẫu test, không phản ánh dao động do huấn luyện.
 9. Ghi rõ trong bài: VG validation dùng tập con 5.000 mẫu (GeometryMMKG) và 2.000 mẫu (NativE/SNAG, `-valid_max`); NativE trên VG pool 768 → 256.
 
@@ -95,27 +120,48 @@ Kết quả kỳ vọng: Δdepth ≈ 0 ở hàng MMKG và Δdepth > 0 ở hàng 
 
 ### P0. Sửa dữ liệu (làm trước mọi thí nghiệm)
 
-> **⚠️ CẬP NHẬT 18/11/2026: ĐỌC MỤC NÀY TRƯỚC. Hai phát hiện làm mọi kết quả cũ mất giá trị, và một đề xuất thiết kế dữ liệu mới ĐANG CHỜ DUYỆT.**
+> **⚠️ CẬP NHẬT 18/11/2026: ĐỌC MỤC NÀY TRƯỚC. Hai phát hiện làm mọi kết quả cũ mất giá trị; thiết kế dữ liệu mới (v4) ĐÃ ĐƯỢC DUYỆT, việc cần làm ở P0.9–P0.14.**
 >
 > **P0.7 Embedding depth của mọi dataset (v1–v3.1) gần như không mang thông tin.** Chuỗi xử lý cũ: (1) ZipDepth tạo bản đồ depth và lưu **PNG 16-bit** (`generate_mmkg_depth.py`, `generate_global_depth.py`); bước này đúng, checkpoint nạp đủ khoá. (2) `extract_mmkg_features.py` / `extract_features.py` đọc lại bằng `Image.open(...).convert('L')`: Pillow **cắt mọi giá trị > 255 thành 255**, nên bản đồ gần như trắng toàn bộ (đã thử trên Pillow 12.2: `[0, 7281, ..., 65535] -> [0, 255, ..., 255]`). (3) Mã hoá bằng `DepthEncoder` (AlexNet-BN, `core/features/encoders.py`) **khởi tạo ngẫu nhiên, chưa từng train**. Ngoài ra RGB/text đi qua lớp `fc` ngẫu nhiên, và `except:` trống thay ảnh thiếu bằng ảnh đen. Số đo: cosine trung bình giữa hai thực thể bất kỳ là 0,97 (VG), 0,995 (MMKG), 0,999 (VRD); PC1 chiếm 41–87% phương sai; dự đoán lớp vật thể VG (150 lớp) bằng bộ phân loại tuyến tính được **7,7%**, thấp hơn đoán lớp phổ biến nhất (8,4%) trong khi RGB được 17,7%; 10 hàng xóm gần nhất của depth trùng với RGB ở mức ngẫu nhiên. **Mọi thí nghiệm đến nay (GeometryMMKG, NativE, `prepare_baseline_data.py`) đều chưa thật sự dùng depth.** Kết quả NativE cũ (Δdepth ≈ −0,002) phù hợp với điều này.
 >   - Thay thế: `scripts/extract_features_v4.py` (chưa commit lên `main`). Gồm: ZipDepth (384 px, `strict=True`) → bản đồ float, min-max theo từng ảnh → cắt theo box bằng `roi_align` → **DINOv2 ViT-B/14** (`facebook/dinov2-base`, `pooler_output`, 768 chiều, không có lớp chiếu). RGB dùng cùng DINOv2. Text là RoBERTa-base lấy trung bình token theo mask. Thực thể thiếu ảnh được ghi rõ trong `feature_stats.json`. Chạy thử 200 ảnh MMKG: cosine trung bình của depth giảm từ 0,995 xuống **0,245**, PC1 còn 8%. Các chế độ đã có: `mmkg`, `vrd`, `vg` (VG đã kiểm tra thứ tự 108.073 ảnh trong `VG-SGG.h5` khớp `image_data.json` sau khi bỏ 4 ảnh lỗi; box ở dạng `(xc, yc, w, h)` theo thang cạnh dài 1024; id thực thể = chỉ số box). Còn phải làm: chế độ nhiều ảnh cho mỗi thực thể (lấy trung bình), lưu mặt nạ có/không ảnh, notebook Molab cho VG (`notebooks/extract-vg-features.py`, chưa viết).
 >   - Ảnh gốc tải lại về `data/raw/` (bị gitignore): `mmkg/` (DB15K/MKG-W/MKG-Y.zip lấy từ Drive của người dùng, kèm `DB15K_ImageIndex.txt` từ GitHub mmkb), `vrd/` (mirror Kaggle `apoorvshekher/visual-relationship-detection-vrd-dataset`), `vg/` (`images.zip`, `images2.zip`, `image_data.json.zip` từ Stanford; **tải dở ngày 18/11**, chạy lại `curl -C -` để tải tiếp). Thư mục rỗng thừa `D:\d\...` do lỗi đường dẫn khi tải Kaggle; người dùng tự xoá.
 >
-> **P0.8 Merged-MMKG không đủ chuẩn khoa học; đề xuất bỏ (chờ duyệt).** Kiểm tra `scripts/merge_mmkgs.py`: ghép thực thể theo tên đúng (không có cặp tên nào bị bỏ sót), nhưng (a) quan hệ không được ghép giữa các nguồn, nên có rò rỉ qua quan hệ tương đương (142 bộ ba test, đã bỏ ở v3.1); (b) chỉ giữ thực thể có ảnh, mà ảnh do tự tải lại nên mất nhiều vì link chết: DB15K 67%, MKG-W 38%, MKG-Y 28% thực thể có ảnh, tỉ lệ bộ ba giữ lại 43/28/8%. Đồ thị gộp (56 nghìn bộ ba) còn nhỏ hơn DB15K gốc, bị chọn lọc theo độ nổi tiếng, và không so được với bài báo nào. (Tên file non-ASCII trong `MKG-Y.zip` đã bị mất ký tự, phải ghép bằng mặt nạ U+FFFD; `extract_features_v4.py` đã xử lý.)
+> **P0.8 Merged-MMKG không đủ chuẩn khoa học; bỏ (người dùng duyệt 18/11/2026).** Kiểm tra `scripts/merge_mmkgs.py`: ghép thực thể theo tên đúng (không có cặp tên nào bị bỏ sót), nhưng (a) quan hệ không được ghép giữa các nguồn, nên có rò rỉ qua quan hệ tương đương (142 bộ ba test, đã bỏ ở v3.1); (b) chỉ giữ thực thể có ảnh, mà ảnh do tự tải lại nên mất nhiều vì link chết: DB15K 67%, MKG-W 38%, MKG-Y 28% thực thể có ảnh, tỉ lệ bộ ba giữ lại 43/28/8%. Đồ thị gộp (56 nghìn bộ ba) còn nhỏ hơn DB15K gốc, bị chọn lọc theo độ nổi tiếng, và không so được với bài báo nào. (Tên file non-ASCII trong `MKG-Y.zip` đã bị mất ký tự, phải ghép bằng mặt nạ U+FFFD; `extract_features_v4.py` đã xử lý.)
 >
-> **Thiết kế dữ liệu đề xuất (CHỜ NGƯỜI DÙNG DUYỆT trước khi làm):**
+> **Thiết kế dữ liệu v4 (ĐÃ DUYỆT 18/11/2026):**
 >
 > | | Transductive | Inductive |
 > |---|---|---|
-> | MMKG | **FB15k-237-IMG** (chính); DB15K (phụ, nối với P3.0b) | **FB15k-237 v1–v4 của GraIL** |
+> | MMKG | **FB15k-237-IMG** (chính); MKG-Y (phụ; thay DB15K ngày 18/11, P0.12) | **FB15K-237-ind** (BLP/CMR; thay GraIL v1–v4 ngày 18/11) |
 > | MMSG | Spatial-VRD-Trans | Spatial-VRD, Spatial-VG |
 >
-> - Mức phủ ảnh đo ngày 18/11: kho ảnh do MKGformer phát hành (Google Drive id `197c4fCLVC6F7sCBqZIDwm5tjWeGJnZ5-`, 3,0 GB, `FB15k-images/m.xxx/bing_k.jpg`, khoảng 10 ảnh mỗi thực thể) có ảnh cho **14.297 / 14.541 thực thể FB15k-237 (98,3%)** và 97–98% thực thể của GraIL v1–v4 (cả split train và `_ind`). Danh sách thực thể và mô tả: repo KG-BERT; split inductive: repo GraIL (`data/fb237_v{1..4}{,_ind}`).
-> - Bỏ: Merged-MMKG, MKG-W, MKG-Y (độ phủ 38/28%), WN18-IMG (19%), VTKG/VISTA (không phát hành ảnh gốc). P0.6 (`Merged-MMKG-Ind`) được thay bằng GraIL v1–v4.
-> - **Thiếu ảnh (áp dụng cho NativE và GeometryMMKG):** depth suy ra từ RGB nên thực thể thiếu ảnh thì thiếu cả hai; Control và biến thể có depth thiếu ở cùng thực thể nên so sánh vẫn công bằng. Không bỏ thực thể, không suy đoán bù. Mỗi modality có một **vector "thiếu" học được + mặt nạ có/không**; phần gộp modality bỏ qua modality thiếu bằng mặt nạ (không dùng vector 0 vì nằm ngoài phân bố DINOv2). Nhiều ảnh cho một thực thể thì lấy trung bình đặc trưng DINOv2, RGB và depth tính riêng. Đánh giá trên test đầy đủ, kèm bảng chia nhóm theo số đầu bộ ba có ảnh (cả hai / một / không); nhóm **"không"** là đối chứng âm, Δdepth ở đó phải xấp xỉ 0.
-> - Ảnh FB15k-237 lấy từ Bing; nhiều thực thể là khái niệm trừu tượng, nên phân tích thêm Δdepth trên thực thể vật lý so với thực thể trừu tượng.
-> - Khi duyệt: cập nhật mục 2.2–2.3, P0, P4; viết code thiếu modality cho NativE và GeometryMMKG (hạng mục mới); dựng FB15k-237-IMG, GraIL và DB15K v4; trích xuất đặc trưng (FB15k-237 khoảng 150 nghìn ảnh và DB15K 8.660 ảnh chạy được trên máy, RTX 3050; VRD chạy trên máy; VG chạy trên Molab).
-> - Dữ liệu v3/v3.1 bên dưới (Merged-MMKG, Spatial-VRD-Trans) chỉ được commit trên máy, **chưa đẩy lên HF**; tag `v3` trên HF đã có (18/11), còn `v3.1` thì chưa. Không nên chạy thí nghiệm nào trước khi có đặc trưng v4.
+> - Mức phủ ảnh đo ngày 18/11: kho ảnh do MKGformer phát hành (Google Drive id `197c4fCLVC6F7sCBqZIDwm5tjWeGJnZ5-`, 3,0 GB, `FB15k-images/m.xxx/bing_k.jpg`, khoảng 10 ảnh mỗi thực thể) có ảnh cho **14.297 / 14.541 thực thể FB15k-237 (98,3%)** FB15K-237-ind dùng đúng 14.541 thực thể này (11.633 + 1.454 + 1.454) nên cũng có độ phủ khoảng 98%; đo lại khi dựng (P0.11). Danh sách thực thể và mô tả: repo KG-BERT; split inductive: repo BLP (Daza et al., 2021), đối chiếu với Table 1 của CMR.
+> - Bỏ: Merged-MMKG, MKG-W (ảnh chính thức tối đa khoảng 62%; số 38% cũ là của bản tự tải lại, xem P0.12b), WN18-IMG (19%), VTKG/VISTA (không phát hành ảnh gốc). P0.6 (`Merged-MMKG-Ind`) được thay bằng FB15K-237-ind.
+> - **Thiếu ảnh:** cách xử lý ở mục 3.2 (baseline: vector hằng ở tầng dữ liệu, không sửa kiến trúc; GeometryMMKG: vector học được + mặt nạ) và cách báo cáo ở mục 4, điểm 10 (chia nhóm cả hai / một / không; vật lý so với trừu tượng).
+> - Dữ liệu v3/v3.1 bên dưới (Merged-MMKG, Spatial-VRD-Trans) chỉ được commit trên máy, **chưa đẩy lên HF**; tag `v3` trên HF đã có (18/11). Tag `v3.1` sẽ **không** phát hành vì Merged-MMKG bị bỏ; split Spatial-VRD-Trans v3 đi tiếp vào v4. Không chạy thí nghiệm nào trước khi có đặc trưng v4.
+
+**Việc cần làm cho v4 (sau khi duyệt 18/11/2026):**
+
+- [x] **P0.9** Cập nhật kế hoạch: mục 2.2–2.3, 3.2 (thiếu ảnh), 4 (ứng viên/filter của GraIL, báo cáo theo nhóm ảnh), P2.6, P3.5, P4, rủi ro.
+- [x] **P0.9c Dọn dẹp (18/11/2026, người dùng duyệt).** Các script và kết quả nhắc tới trong P0.7, P0.8, P0.3 dưới đây đã bị xoá; bản cuối nằm ở commit `d5e9353`.
+  - Xoá khỏi git: `scripts/{merge_mmkgs, remove_cross_source_leakage, check_mkg_coverage, download_db15k_images, download_mkg_w, download_mkg_y, fetch_wikidata_mapping, extract_features, extract_mmkg_features, extract_depth_features, generate_global_depth, generate_mmkg_depth, prepare_baseline_data}.py`, `scripts/legacy/evaluate_relation_types.py`, mọi kết quả v1 trong `experiment_results/`. Giữ `scripts/legacy/clean_mmsg_aliases.py` vì `audit_vrd_relations.py` cần nó để tạo lại `relation_audit.tsv` (bằng chứng cho P0.1).
+  - Xoá trên máy (ngoài git, tải lại được từ HF/Drive): đặc trưng `ent_*_emb.pt` cũ của Spatial-VG / VRD / VRD-Trans (split, H5, annotation giữ nguyên), `data/Merged-MMKG/`, `data/_feat/`, `data/raw/mmkg/` (zip tự tải lại), ảnh và mô tả MKG-W chính thức, `checkpoints/` (GeometryMMKG v1), `scratch/`, dữ liệu `Spatial-MMSG` của NativE.
+  - Giữ để sửa sang dataset mới ở P4: `notebooks/{geometry-mmkg, native-mmkg-reproduce, mkgformer-mmkg-reproduce}.py` (vẫn trỏ tới Merged-MMKG). Giữ đặc trưng gốc của tác giả trong `baselines/SNAG/SNAG_MKGC/embeddings/` cho P3.0.
+- [ ] **P0.10** Dựng `data/FB15k-237-IMG/`: split chuẩn FB15k-237 (Toutanova & Chen, 2015) và tên/mô tả thực thể từ repo KG-BERT; ảnh từ kho MKGformer (Drive `197c4fCLVC6F7sCBqZIDwm5tjWeGJnZ5-`, 3,0 GB) tải về `data/raw/fb15k237/`. Ghi cùng định dạng các bộ khác (`train.txt` + `*2id.txt`, `entity2id.txt`, `relation2id.txt`), kèm `clean_stats.json` (độ phủ ảnh, số ảnh mỗi thực thể). Kiểm tra số triplet khớp 272.115 / 17.535 / 20.466.
+- [x] **P0.9b** (18/11/2026) Đổi ô MMKG × inductive từ GraIL v1–v4 sang FB15K-237-ind; duyệt baseline mức 1 (mục 3.2), mức 2 để sau.
+- [ ] **P0.11** Dựng `data/FB15K-237-ind/` từ split của BLP (Daza et al., 2021); xem repo CMR (`OreOZhao/CMR`) có phát hành sẵn dữ liệu đã thêm ảnh và mô tả không, nếu có thì đối chiếu. Kiểm tra: khớp Table 1 của CMR (train 11.633 thực thể / 215.082 triplet; valid 1.454 / 42.164; test 1.454 / 52.870; 237 quan hệ), thực thể valid và test không giao thực thể train. Ảnh dùng chung kho FB15k-237, mô tả từ KG-BERT.
+- [x] **P0.10a** (18/11/2026) Đã tải: kho ảnh MKGformer `data/raw/fb15k237/fb15k_wn18_images.zip` (3,03 GB, kiểm tra CRC không lỗi; 150.002 ảnh FB15k), split và văn bản KG-BERT ở `data/raw/fb15k237/kgbert/`. Số triplet khớp 272.115 / 17.535 / 20.466. Thực thể FB15k-237 có ảnh: **14.297 / 14.541 (98,3%)**, 1–48 ảnh mỗi thực thể (trung vị 10); tên ngắn 14.541, mô tả dài 14.515.
+- [x] **P0.12a Kiểm tra DB15K (18/11/2026).** Kết luận: **độ phủ 67% không phải của bản gốc, và ảnh gốc không lấy lại được.**
+  - `data/raw/mmkg/DB15K.zip` là bản dự án tự dựng lại (có cả `DB15K-depth-visual.pth`), mỗi thực thể một ảnh, 8.657 / 12.842 thực thể có ảnh.
+  - Embedding visual gốc mà NativE dùng (`DB15K-visual.pth`, `[12842, 4096]`, VGG16 của mmkb): 12.836 dòng là đặc trưng thật (không âm, khoảng 69% số 0 như đầu ra ReLU), 6 dòng có giá trị âm nhỏ (nhiễu điền vào), 15 nhóm dòng trùng (49 dòng, ví dụ 9 thành phố Mỹ cùng một vector, có thể là ảnh giữ chỗ). 4.185 thực thể mình thiếu ảnh vẫn có đặc trưng gốc bình thường, nghĩa là năm 2019 mmkb có ảnh cho chúng; mình mất do link chết khi tải lại.
+  - Không nguồn nào phát hành file ảnh DB15K: mmkb chỉ có danh sách URL và `DB15K_ImageData.h5` (đặc trưng VGG16); Drive của MMRNS chỉ có triplet, mô tả và đặc trưng BEiT; NativE, AdaMF-MAT, MoMoK chỉ phát hành embedding. Depth cần ảnh thô nên DB15K dùng cho depth tối đa 67%.
+- [x] **P0.12b Phát hiện phụ: MKG-W và MKG-Y có ảnh chính thức** trong Drive của MMRNS (`MKG-W-Y-raw_data/`, tải về `data/raw/mmrns_official/`: `MKG-W_img.zip` 6,4 GB, `MKG-Y_img.zip` 6,3 GB, kèm mô tả). Zip MKG-W/MKG-Y cũ ở `data/raw/mmkg/` cũng là bản tự tải lại (có `images_failed.log`), nên số 38% / 28% ở P0.8 sai.
+  - **MKG-Y chính thức: 14.244 / 15.000 thực thể có ảnh (95,0%)**, trung vị 3 ảnh; mô tả 12.316 thực thể. Tên thư mục non-ASCII bị mất ký tự (U+FFFD), đã ghép bằng mặt nạ.
+  - MKG-W chính thức: 9.301 thư mục cho 15.000 thực thể, tức **tối đa khoảng 62%**. Chưa đo chính xác vì cần bảng ghép mã Q với tiêu đề từ OpenEA D-W (thư mục `ent_links` trên Drive rỗng).
+- [x] **P0.12c** (18/11/2026, người dùng duyệt) Bộ MMKG transductive phụ: thay DB15K bằng **MKG-Y**. DB15K chỉ giữ cho P3.0b (tái lập NativE bằng đặc trưng gốc, không cần depth).
+- [ ] **P0.12** Dựng `data/MKG-Y/` v4: split của MMRNS (`MMRNS-Datasets/MKG-Y/{train,valid,test}.txt`; đối chiếu với `baselines/NativE/benchmarks/MKG-Y/`), ảnh từ `data/raw/mmrns_official/MKG-Y_img.zip` (bỏ `Thumbs.db` và file không phải ảnh; ghép tên non-ASCII bằng mặt nạ U+FFFD, ghi số thực thể ghép kiểu này vào `clean_stats.json`), mô tả từ `MKG-Y_ent2descreption.txt` (12.316 thực thể có mô tả; thực thể thiếu mô tả dùng tên thực thể). Kiểm tra lại độ phủ 95,0%.
+- [ ] **P0.13** Hoàn thiện `scripts/extract_features_v4.py`: chế độ nhiều ảnh cho mỗi thực thể (trung bình DINOv2, RGB và depth tính riêng), lưu **hai dạng**: bảng thô kèm mặt nạ có/không ảnh (`ent_img_mask.pt`, cho GeometryMMKG) và bảng đã điền vector hằng (trung bình trên thực thể train có ảnh, cho baseline; mục 3.2), chế độ `fb15k237` (dùng chung cho FB15K-237-ind) và `mkgy`, bỏ chế độ `mmkg` (dựng lại ánh xạ ảnh của Merged-MMKG, dữ liệu nguồn đã xoá ở P0.9c), notebook Molab `notebooks/extract-vg-features.py`. Chạy: FB15k-237 (~150 nghìn ảnh), MKG-Y (~43 nghìn ảnh), VRD và VRD-Trans trên máy (RTX 3050); VG trên Molab. Sau khi chạy, đo lại cosine trung bình, PC1 và probe tuyến tính như P0.7 cho từng dataset.
+- [ ] **P0.14** Phát hành v4 lên HF (repo mới cho FB15k-237-IMG, FB15K-237-ind, MKG-Y; tag `v4` cho các repo cũ), cập nhật `DATA_REVISION` trong notebook, `data/README.md`, `experiment_results/dataset_stats.md`. Liệt kê thay đổi cho người dùng duyệt trước khi đẩy.
 
 P0.1–P0.3b làm bằng `scripts/clean_splits.py` (11/11/2026). **Bản v2 hiện là dữ liệu chính tại `data/<tên>/`** (cùng tên với repo HF); các file split v1 chỉ còn trên HF (tag `v1`). Chi tiết trong `clean_stats.json` của mỗi thư mục; cấu trúc và lệnh tái tạo ở `data/README.md`.
 
@@ -147,7 +193,8 @@ P0.1–P0.3b làm bằng `scripts/clean_splits.py` (11/11/2026). **Bản v2 hi�
   `python scripts/make_transductive_split.py --src data/Spatial-VRD --dst data/Spatial-VRD-Trans`
   0 thực thể valid/test chưa thấy trong train; test phủ 72/73 quan hệ.
   - [x] **v3 (18/11/2026)** Bản v2 lệch nhóm quan hệ: test 79.5% GEOMETRIC, train 66.9% (triplet POSSESSIVE hay dính thực thể bậc 1 nên ít được tách ra). Như vậy so sánh VRD với VRD-Trans bị nhiễu bởi phân bố quan hệ chứ không chỉ bởi inductive/transductive. Chạy lại với `--stratify relation`: GEOMETRIC train/test 70.3/70.5%, POSSESSIVE 25.1/24.9% (khớp Spatial-VRD 70.4/70.3%). Thống kê đầy đủ: `experiment_results/dataset_stats.md`.
-- [ ] **P0.6** *(Tùy chọn)* Tạo `Merged-MMKG-Ind`: giữ lại một tập thực thể, đưa mọi triplet chứa chúng vào test.
+- [x] ~~**P0.6** *(Tùy chọn)* Tạo `Merged-MMKG-Ind`~~ Thay bằng FB15K-237-ind (P0.11).
+- Các mục mở còn lại của Merged-MMKG ở P0.3 (6 quan hệ chỉ có trong test, ghi tỉ lệ giữ lại vào phương pháp) **không làm nữa** vì Merged-MMKG bị bỏ.
 
 ### P1. Hạ tầng đánh giá
 
@@ -170,6 +217,7 @@ P0.1–P0.3b làm bằng `scripts/clean_splits.py` (11/11/2026). **Bản v2 hi�
 - [ ] **P2.3** Sửa hoặc mô tả đúng bước cross-attention: với độ dài chuỗi 1, softmax luôn bằng 1, nên text không điều khiển attention. Bước này hiện tương đương `Linear(h_vision)` cộng residual.
 - [ ] **P2.4** Log trọng số gate (phần dành cho Depth) theo từng triplet test để phân tích ở P5.
 - [ ] **P2.5** *(Tùy chọn)* Modality BBox geometry (x, y, w, h chuẩn hóa, diện tích).
+- [ ] **P2.6** Thiếu modality cho GeometryMMKG: vector "thiếu" học được cho RGB và depth, đọc `ent_img_mask.pt`, gate/fusion bỏ qua modality thiếu theo mặt nạ (mục 3.2, ý 4). Có test: thực thể thiếu ảnh cho cùng đầu ra ở bản có và không có depth. Thêm cờ chạy ablation "vector hằng, không mặt nạ" (đọc bảng đã điền như baseline).
 
 ### P3. Baseline
 
@@ -199,17 +247,22 @@ P0.1–P0.3b làm bằng `scripts/clean_splits.py` (11/11/2026). **Bản v2 hi�
   - [ ] SNAG trên MKG-W: chưa chuẩn bị.
 
 - [ ] **P3.1** Feature-TransE (2-modal và 3-modal).
-- [ ] **P3.2** NativE feature-only cho dữ liệu inductive.
-- [ ] **P3.3** SNAG: chạy nguyên bản (MMKG, VRD-Trans) và feature-only (VRD/VG).
-- [ ] **P3.4** MKGformer trên Merged-MMKG và VRD-Trans.
+- [ ] **P3.2** NativE feature-only cho dữ liệu inductive (FB15K-237-ind, VRD, VG).
+- [ ] **P3.3** SNAG: chạy nguyên bản (MMKG, VRD-Trans) và feature-only (FB15K-237-ind, VRD/VG).
+- [ ] **P3.4** MKGformer trên FB15k-237-IMG (dataset gốc của paper, so trực tiếp được với số công bố) và VRD-Trans. Phải sửa notebook để dùng ảnh và mô tả thật (phát hiện ở P1).
+- [ ] **P3.5** Thiếu ảnh cho baseline: **không sửa code mô hình**. Baseline dùng bảng đặc trưng đọc bảng đã điền vector hằng (P0.13, mục 3.2 ý 1); MKGformer giữ cách gốc (ý 3). Kiểm tra file embedding gốc của tác giả NativE (DB15K) xem họ điền gì cho thực thể thiếu ảnh, ghi vào phụ lục; P3.0b vẫn dùng embedding gốc đó.
+- [ ] **P3.6** MoMoK (mức 1): clone repo `zjukg/MoMoK` làm submodule; gắn `ValidSelector` (`-select_on valid`) và ghi rank theo P1; thêm depth thành một expert riêng (không đổi cấu trúc expert); bản feature-only cho dữ liệu inductive như NativE. Kiểm tra tái lập (tiêu chí 1 của P3.0) trên MKG-Y bằng đặc trưng gốc của tác giả.
+- [ ] **P3.7** CMR (mức 1): clone repo `OreOZhao/CMR`; chạy nguyên bản trên FB15K-237-ind, đối chiếu số paper (MRR 0,371), đây là kiểm tra tái lập cho ô inductive. Thêm ghi rank theo P1. Chạy trên Spatial-VRD (text = tên lớp vật thể, ảnh = vùng cắt theo box). Ghi rõ: CMR điền vector ngẫu nhiên cho thực thể thiếu ảnh (cách gốc, mục 3.2 ý 3).
+- [ ] **P3.8** *(Mức 2, chỉ làm nếu còn GPU)* AdaMF-MAT, IKRL, TBKGC, BLP-TransE; MyGO nếu code tách token đã phát hành.
 
 ### P4. Chạy thí nghiệm (Molab)
 
 Ưu tiên theo thứ tự:
 
-- [ ] **P4.1** Merged-MMKG: GeometryMMKG + ablation; SNAG; MKGformer; Feature-TransE; NativE (**chạy lại** với `-select_on valid`, xem P3.0). Chạy trên **v3.1**. Lượt NativE trên v2 (18/11, seed 42, Control MRR 0.3843, P1.4 rank check khớp) chỉ là kiểm tra hạ tầng.
-- [ ] **P4.2** VRD-Trans: GeometryMMKG (full, w/o Depth); NativE nguyên bản 3 kịch bản; Feature-TransE.
-- [ ] **P4.3** VRD inductive: GeometryMMKG + ablation; NativE/SNAG feature-only; Feature-TransE.
+- [ ] **P4.1** FB15k-237-IMG: GeometryMMKG + ablation; NativE (`-select_on valid`); SNAG; MoMoK; MKGformer; Feature-TransE. MKG-Y: GeometryMMKG (full, w/o Depth); NativE; SNAG; MoMoK; Feature-TransE. Chạy trên **v4**. Lượt NativE trên Merged-MMKG v2 (18/11, seed 42, Control MRR 0.3843, P1.4 rank check khớp) chỉ là kiểm tra hạ tầng.
+- [ ] **P4.1b** FB15K-237-ind: GeometryMMKG (full, w/o Depth); CMR nguyên bản; NativE/SNAG/MoMoK feature-only; Feature-TransE.
+- [ ] **P4.2** VRD-Trans: GeometryMMKG (full, w/o Depth); NativE nguyên bản 3 kịch bản; SNAG; MoMoK; MKGformer; Feature-TransE.
+- [ ] **P4.3** VRD inductive: GeometryMMKG + ablation; NativE/SNAG/MoMoK feature-only; CMR nguyên bản; Feature-TransE.
 - [ ] **P4.4** VG inductive: GeometryMMKG (full, w/o Depth), NativE feature-only. Theo dõi RAM/VRAM ở lần eval đầu tiên.
 - [ ] **P4.5** Chạy 3 seed cho các cấu hình chính.
 - [ ] **P4.6** Đẩy checkpoint `.pth` và file rank lên HF sau mỗi lần chạy (storage của Molab có thể không bền).
@@ -250,5 +303,8 @@ P0.1–P0.3b làm bằng `scripts/clean_splits.py` (11/11/2026). **Bản v2 hi�
 | Δdepth trên VRD-Trans ≈ 0 (Depth chỉ giúp khi inductive) | Vẫn là kết quả có giá trị: Depth đóng vai trò đặc trưng định danh cho thực thể mới. Điều chỉnh lại luận điểm RQ1 |
 | Gating không tốt hơn trọng số cố định | Chuyển trọng tâm RQ2 sang gate theo quan hệ (P2.2) |
 | BBox tốt bằng Depth | Báo cáo trung thực; nhấn mạnh tính bổ sung nếu có (Depth + BBox) |
-| Không đủ GPU cho 3 seed | Ưu tiên 3 seed cho Merged-MMKG và VRD; VG chạy 1 seed |
+| Không đủ GPU cho 3 seed | Ưu tiên 3 seed cho FB15k-237-IMG và VRD; FB15K-237-ind nếu còn GPU; MKG-Y và VG chạy 1 seed; bỏ hẳn baseline mức 2 |
+| Ảnh Bing của FB15k-237 nhiễu, Δdepth ≈ 0 vì ảnh xấu chứ không vì loại đồ thị | Phân tích vật lý / trừu tượng (mục 4, điểm 10); MKG-Y làm bộ thứ hai; kiểm tra chất lượng đặc trưng bằng probe như P0.7 |
+| Không tái lập được số CMR trên FB15K-237-ind (MRR 0,371), hoặc split BLP tải về không khớp Table 1 của CMR | Báo số tự chạy cạnh số paper và ghi rõ sai lệch; Δdepth vẫn so trong cùng giao thức nên không bị ảnh hưởng |
+| MoMoK chưa có sẵn trong máy, tích hợp tốn thời gian hơn dự kiến | Ưu tiên NativE và SNAG (đã có hạ tầng); MoMoK làm sau P4.1 lượt đầu |
 | Nhóm SEMANTIC trong VRD quá nhỏ | Gộp thêm VG; báo khoảng tin cậy bootstrap |

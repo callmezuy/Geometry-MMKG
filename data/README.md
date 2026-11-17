@@ -1,5 +1,10 @@
 # Data layout (v3.1, 18/11/2026)
 
+> **18/11/2026, data v4 in progress (RESEARCH_PLAN.md P0.7–P0.14).** `Merged-MMKG/` has been dropped and
+> deleted locally (still on HF `callmezuy/unified-mmkg`, tags v1–v3). The old `ent_*_emb.pt` features of every
+> dataset were deleted because they carry almost no depth information (P0.7); the split files below are
+> unchanged. New MMKG datasets (FB15k-237-IMG, FB15K-237-ind, MKG-Y) and v4 features will replace this page at P0.14.
+
 Each `data/<name>/` folder holds the **current (v3.1)** version of a dataset and has the same
 name as the folder the notebooks download into. File conventions are unchanged:
 

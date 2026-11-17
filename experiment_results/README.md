@@ -1,10 +1,9 @@
-# experiment_results/ (legacy, v1)
+# experiment_results/
 
-Mọi file trong thư mục này là kết quả **trước 12/11/2026**:
+Kết quả v1 (trước 18/11/2026) đã bị xoá: chạy trên đặc trưng depth hỏng và dữ liệu Merged-MMKG đã bỏ
+(`RESEARCH_PLAN.md` P0.7, P0.8, P0.9c). Bản cuối của các file đó nằm ở commit `d5e9353`.
 
-- chạy trên dữ liệu **v1** (valid của Merged-MMKG bị rò rỉ; nhãn VRD và split VRD/VG cũ);
-- giao thức cũ: GeometryMMKG chỉ đánh giá chiều tail; NativE chạy cố định số epoch thay vì chọn checkpoint theo valid;
-- không có file rank theo từng triplet.
+Kết quả mới phải chạy trên dữ liệu v4 với giao thức ở `RESEARCH_PLAN.md` mục 4 và tính số bằng
+`scripts/compute_metrics.py`.
 
-**Chỉ dùng để tham khảo**, không đưa vào bảng so sánh. Kết quả mới phải chạy với giao thức trong
-`RESEARCH_PLAN.md` mục 4 / `CONTRIBUTING.md` mục 4, và tính số bằng `scripts/compute_metrics.py`.
+- `dataset_stats.md`: thống kê dữ liệu v3.1, sẽ tạo lại bằng `scripts/dataset_stats.py` khi phát hành v4 (P0.14).
