@@ -133,7 +133,6 @@ def _(DATA_REVISION, HF_REPO_ID, os, shutil, snapshot_download, subprocess, torc
 @app.cell
 def _(DATASET_NAME, HfApi, WORK_DIR, os, subprocess, sys):
     # Kết quả: log + rank CSV + checkpoint của từng kịch bản, đẩy lên HF ngay sau khi chạy xong.
-    SEED = 42
     RESULTS_REPO = "callmezuy/geometry-mmkg-results"  # dataset repo private, tự tạo nếu chưa có
     RESULTS_DIR = os.path.join(WORK_DIR, "results", "native", DATASET_NAME)
     os.makedirs(RESULTS_DIR, exist_ok=True)
@@ -166,7 +165,7 @@ def _(DATASET_NAME, HfApi, WORK_DIR, os, subprocess, sys):
         except Exception as _e:
             print(f"⚠️  Upload lên HF thất bại ({_e}). Hãy tải thủ công thư mục {RESULTS_DIR} trước khi tắt session.")
 
-    return RESULTS_DIR, RESULTS_REPO, SEED, push_results, run_streaming
+    return RESULTS_DIR, RESULTS_REPO, push_results, run_streaming
 
 
 @app.cell
@@ -176,15 +175,17 @@ def _(mo):
     dim_ui = mo.ui.dropdown(options=[100, 128, 200, 250], value=250, label="Embedding Dim")
     margin_ui = mo.ui.number(start=2, stop=24, step=1, value=12, label="Margin")
     neg_num_ui = mo.ui.dropdown(options=[32, 64, 128], value=128, label="Negative Samples")
+    seed_ui = mo.ui.dropdown(options=["42", "43", "44"], value="42", label="Seed")  # RESEARCH_PLAN.md mục 4 (P4.5)
     train_btn = mo.ui.run_button(label="▶ Train 3 kịch bản")
 
     mo.vstack([
         mo.md("Mặc định = config gốc của NativE cho DB15K (`baselines/NativE/scripts/run_db15k.sh`). "
-              "Đặt xong tham số rồi mới bấm nút: đổi tham số **không** tự chạy lại training."),
-        mo.hstack([epochs_ui, batch_size_ui, dim_ui, margin_ui, neg_num_ui]),
+              "Đặt xong tham số rồi mới bấm nút: đổi tham số **không** tự chạy lại training. "
+              "Chạy seed 42 trước; khi `Rank check` C++ khớp Python thì chạy tiếp 43 và 44 (mỗi seed một lần bấm)."),
+        mo.hstack([seed_ui, epochs_ui, batch_size_ui, dim_ui, margin_ui, neg_num_ui]),
         train_btn,
     ])
-    return batch_size_ui, dim_ui, epochs_ui, margin_ui, neg_num_ui, train_btn
+    return batch_size_ui, dim_ui, epochs_ui, margin_ui, neg_num_ui, seed_ui, train_btn
 
 
 @app.cell
@@ -193,7 +194,6 @@ def _(
     EMB_DIR,
     NATIVE_DIR,
     RESULTS_DIR,
-    SEED,
     batch_size_ui,
     dim_ui,
     epochs_ui,
@@ -202,6 +202,7 @@ def _(
     os,
     push_results,
     run_streaming,
+    seed_ui,
     shutil,
 ):
     def run_native(variant, script, visual_src):
@@ -210,7 +211,8 @@ def _(
             os.path.join(EMB_DIR, f"{DATASET_NAME}-{visual_src}.pth"),
             os.path.join(EMB_DIR, f"{DATASET_NAME}-visual.pth"),
         )
-        _tag = f"{DATASET_NAME}_{variant}_seed{SEED}"
+        _seed = int(seed_ui.value)
+        _tag = f"{DATASET_NAME}_{variant}_seed{_seed}"
         _ckpt = os.path.join(NATIVE_DIR, "checkpoint", f"native_{_tag}.ckpt")
         _cmd = [
             "python", script,
@@ -223,7 +225,7 @@ def _(
             f"-save={_ckpt}",
             f"-rank_file={os.path.join(RESULTS_DIR, f'ranks_native_{_tag}_test.csv')}",
             "-select_on=valid", "-valid_steps=10",  # checkpoint = best validation MRR (ValidSelector.py)
-            f"-seed={SEED}",
+            f"-seed={_seed}",
             f"-neg_num={int(neg_num_ui.value)}",
             "-mu=0.0001",
             "-learning_rate=1e-4",
@@ -270,8 +272,9 @@ def _(mean_rc, mo, run_native, train_btn):
 
 
 @app.cell
-def _(RESULTS_DIR, RESULTS_REPO, mo, modal3_rc):
+def _(RESULTS_DIR, RESULTS_REPO, mo, modal3_rc, seed_ui):
     _ = modal3_rc
+    _s = seed_ui.value
     mo.md(
         f"""
         ### 📦 Kết quả
@@ -281,9 +284,9 @@ def _(RESULTS_DIR, RESULTS_REPO, mo, modal3_rc):
         2. Tính số báo cáo trên máy local (CONTRIBUTING.md mục 4):
         ```
         python scripts/compute_metrics.py --data data/Merged-MMKG \\
-            --ranks control=ranks_native_Unified-MMKG_Control_seed42_test.csv \\
-                    mean=ranks_native_Unified-MMKG_Ablation-Mean_seed42_test.csv \\
-                    3modal=ranks_native_Unified-MMKG_Ablation-3Modal_seed42_test.csv \\
+            --ranks control=ranks_native_Unified-MMKG_Control_seed{_s}_test.csv \\
+                    mean=ranks_native_Unified-MMKG_Ablation-Mean_seed{_s}_test.csv \\
+                    3modal=ranks_native_Unified-MMKG_Ablation-3Modal_seed{_s}_test.csv \\
             --reference control --by-relation
         ```
         """

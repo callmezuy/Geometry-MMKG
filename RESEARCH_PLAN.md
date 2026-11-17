@@ -83,7 +83,10 @@ Kết quả kỳ vọng: Δdepth ≈ 0 ở hàng MMKG và Δdepth > 0 ở hàng 
 5. Metric: MRR, MR, Hits@1/3/10.
 6. **Mọi mô hình dump rank theo từng triplet** ra `ranks_<model>_<dataset>.csv` (`h, r, t, rank_head, rank_tail`). **Một script chung duy nhất** tính metric và phân tích theo nhóm quan hệ.
 7. Chọn checkpoint theo MRR trên valid, đánh giá trên test một lần.
-8. Seed cố định (42), chạy **3 seed** cho các cấu hình chính và báo mean ± std.
+8. Seed cố định (42), chạy **3 seed (42, 43, 44)** cho các cấu hình chính và báo mean ± std.
+   - **Cấu hình chính** = các cặp có Depth / không Depth của mỗi mô hình trên Merged-MMKG, Spatial-VRD và VRD-Trans (các ô dùng để kết luận Δdepth).
+   - **Chỉ 1 seed (42):** kiểm tra tái lập paper (P3.0b), ablation fusion phụ (RQ2) nếu thiếu GPU, và Spatial-VG.
+   - Lý do: khoảng tin cậy bootstrap chỉ phản ánh dao động do mẫu test, không phản ánh dao động do huấn luyện.
 9. Ghi rõ trong bài: VG validation dùng tập con 5.000 mẫu (GeometryMMKG) và 2.000 mẫu (NativE/SNAG, `-valid_max`); NativE trên VG pool 768 → 256.
 
 ---
