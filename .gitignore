@@ -36,7 +36,8 @@ env.bak/
 venv.bak/
 
 # Data & Models (Crucial to ignore so we don't upload GBs of data)
-data/
+# Root data/ only: a bare "data/" also matched the baselines' mmkgc/data/ source packages.
+/data/
 datasets/
 Dataset/
 Spatial-MMSG/
