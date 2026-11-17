@@ -1,3 +1,20 @@
+"""Build Merged-MMKG v1 from DB15K, MKG-W, MKG-Y (historical record, 10/2026).
+
+Not re-runnable on the current machine: it needs data/raw_downloads/, the per-source
+image folders and data/MKG-W/wikidata_to_wiki_dict.json, none of which are kept.
+entity2id.txt and every ent_*_emb.pt follow the entity order produced here, so do NOT
+re-run it: later fixes (v2 cleaning, v3 valid re-split, v3.1 leakage removal) edit only
+the split files. See data/README.md.
+
+Known properties (audit 18/11/2026, experiment_results/dataset_stats.md):
+- Entities are aligned across sources by Wikipedia title; relations are NOT (prefix "SRC::").
+  Equivalent / inverse relations across sources (birthPlace ~ P19, starring ~ actedIn,
+  country ~ P17, ...) leaked 142 test and 122 valid triples; removed in v3.1
+  (scripts/remove_cross_source_leakage.py).
+- Entities without a usable image are dropped with all their triples. Triples kept per
+  source: DB15K 43%, MKG-W 28%, MKG-Y 8%, so the merged graph is mostly DB15K + MKG-W.
+- Test = union of the official test splits of the three sources (filtered as above).
+"""
 import os
 import json
 import shutil

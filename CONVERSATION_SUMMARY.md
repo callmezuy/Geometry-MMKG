@@ -8,9 +8,20 @@
 
 ---
 
+## 0. Bàn giao session 18/11/2026: ĐỌC TRƯỚC
+
+Trạng thái mới nhất nằm ở đầu mục **P0 của `RESEARCH_PLAN.md`** (P0.7, P0.8, thiết kế dữ liệu chờ duyệt). Tóm tắt:
+- **Embedding depth cũ vô dụng** (PNG 16-bit bị cắt khi đọc lại, cộng với `DepthEncoder` ngẫu nhiên). Mọi kết quả cũ có/không depth không dùng được. Script thay thế: `scripts/extract_features_v4.py` (ZipDepth → DINOv2), đã chạy thử được.
+- **Đề xuất bỏ Merged-MMKG**, chuyển sang FB15k-237-IMG + GraIL v1–v4 (MMKG), DB15K làm bộ phụ, có xử lý thiếu modality bằng vector học được và mặt nạ. **Chờ người dùng duyệt.**
+- Đã dừng: NativE MMKG trên Molab (dữ liệu v2 và depth hỏng; Control seed 42 được MRR 0,3843, khớp C++/Python, chỉ có giá trị kiểm tra hạ tầng P1.4). DB15K sanity (P3.0b) **chưa chạy**; không phụ thuộc depth nên chạy được bất cứ lúc nào (`notebooks/native-db15k-sanity.py`).
+- Ảnh gốc ở `data/raw/` (bị gitignore). Ảnh VG tải dở: chạy lại `curl -C -` với `https://cs.stanford.edu/people/rak248/VG_100K_2/images.zip` và `images2.zip`.
+- Commit chỉ ở trên máy, **chưa push** (quy tắc: liệt kê thay đổi cho người dùng duyệt trước khi push).
+- Notebook `native-mmkg-reproduce.py` đang ghim `DATA_REVISION = "v3.1"`, tag này **chưa có trên HF**; sẽ đổi khi phát hành v4.
+- Molab: chỉ chạy được một notebook GPU một lúc; không gọi `execute-code` vào kernel đang train.
+
 ## 1. Kiến Trúc Dữ Liệu & Hugging Face Remote Storage
 
-Dữ liệu local đã được làm sạch thành **v2** (11/11/2026, xem `data/README.md`). Đã đẩy lên HF ngày 12/11/2026: nhánh `main` = v2, bản cũ giữ ở tag `v1`. Bảng dưới đây là v2; số liệu v1 để trong ngoặc. **v3 (18/11/2026)** chỉ đổi Merged-MMKG (valid 5.001 phân tầng theo nguồn, train 45.192, test giữ nguyên) và Spatial-VRD-Trans (phân tầng theo quan hệ: 77.371 / 8.578 / 21.455); lý do và số liệu ở `data/README.md` và `experiment_results/dataset_stats.md`.
+Dữ liệu local đã được làm sạch thành **v2** (11/11/2026, xem `data/README.md`). Đã đẩy lên HF ngày 12/11/2026: nhánh `main` = v2, bản cũ giữ ở tag `v1`. Bảng dưới đây là v2; số liệu v1 để trong ngoặc. **v3 (18/11/2026)** chỉ đổi Merged-MMKG (valid 5.001 phân tầng theo nguồn, train 45.192, test giữ nguyên) và Spatial-VRD-Trans (phân tầng theo quan hệ: 77.371 / 8.578 / 21.455); lý do và số liệu ở `data/README.md` và `experiment_results/dataset_stats.md`. **v3.1**: bỏ triplet valid/test của Merged-MMKG rò rỉ qua quan hệ tương đương giữa các nguồn (test 5.880, valid 4.879; train không đổi).
 
 | Dataset (Local & HF) | Hugging Face Repo ID | Số Thực Thể (`entity2id.txt`) | Số Quan Hệ (`relation2id.txt`) | Train / Valid / Test Triplets | Đặc Trưng Trích Xuất Sẵn (`.pt`) |
 | :--- | :--- | :---: | :---: | :---: | :--- |

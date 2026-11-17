@@ -42,6 +42,9 @@ class RGBEncoder(nn.Module):
 
 class DepthEncoder(nn.Module):
     """
+    WARNING (18/11/2026, RESEARCH_PLAN.md P0.7): randomly initialised and never trained when it was used
+    to precompute ent_depth_emb.pt; those features carry almost no information. Only meaningful if trained
+    end to end.
     Depth spatial encoder using an AlexNet-BN architecture.
     Crucially, this is NOT pre-trained on generic ImageNet features.
     It is trained from scratch specifically on depth maps to preserve

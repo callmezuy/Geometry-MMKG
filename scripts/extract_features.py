@@ -1,3 +1,6 @@
+"""OBSOLETE (18/11/2026, RESEARCH_PLAN.md P0.7): do not use. It re-reads 16-bit depth PNGs with
+convert('L') (clips everything above 255) and encodes them with an untrained, randomly initialised
+DepthEncoder; RGB/text also pass a random fc layer. Use scripts/extract_features_v4.py."""
 import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

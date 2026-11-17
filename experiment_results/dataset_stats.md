@@ -7,10 +7,10 @@ Sinh bởi `scripts/dataset_stats.py` từ `data/`.
 | split | triples | entities | relations | entity unseen in train (%) | triples with unseen h or t (%) |
 |---|---:|---:|---:|---:|---:|
 | train | 45,192 | 13,170 | 423 | 0.0 | 0.0 |
-| valid | 5,001 | 5,064 | 253 | 0.0 | 0.0 |
-| test | 6,022 | 5,745 | 262 | 4.2 | 4.1 |
+| valid | 4,879 | 4,987 | 252 | 0.0 | 0.0 |
+| test | 5,880 | 5,680 | 261 | 4.3 | 4.2 |
 
-- Thực thể trong entity2id: **15,458** (xuất hiện trong ít nhất một split: 13,412); quan hệ: **429**; tổng bộ ba: **56,215**.
+- Thực thể trong entity2id: **15,458** (xuất hiện trong ít nhất một split: 13,412); quan hệ: **429**; tổng bộ ba: **55,951**.
 - Bậc trong train: trung bình 6.86, trung vị 4, max 3,959; thực thể bậc 1: 20.0%.
 - Mật độ train (bộ ba / thực thể): 3.43.
 
@@ -20,19 +20,19 @@ Sinh bởi `scripts/dataset_stats.py` từ `data/`.
 
 | mapping | relations | test triples (%) |
 |---|---:|---:|
-| 1-1 | 216 | 8.8 |
+| 1-1 | 216 | 8.5 |
 | 1-N | 40 | 1.5 |
-| N-1 | 141 | 58.7 |
-| N-N | 26 | 30.9 |
+| N-1 | 141 | 58.6 |
+| N-N | 26 | 31.3 |
 | unseen | 0 | 0.1 |
 
 - Quan hệ đối xứng (≥ 50% bộ ba có chiều ngược trong train, ≥ 10 bộ ba): 7 (`DB15K::<http://dbpedia.org/ontology/spouse>`, `DB15K::<http://dbpedia.org/ontology/partner>`, `DB15K::<http://dbpedia.org/ontology/sisterCollege>`, `MKG-W::http://www.wikidata.org/entity/P190`, `MKG-W::http://www.wikidata.org/entity/P47`, `MKG-W::http://www.wikidata.org/entity/P26`, `MKG-Y::isMarriedTo`).
 
 | source | relations | train | valid | test |
 |---|---:|---:|---:|---:|
-| DB15K | 263 | 33,748 | 3,848 | 4,634 |
-| MKG-W | 142 | 9,790 | 984 | 1,185 |
-| MKG-Y | 24 | 1,654 | 169 | 203 |
+| DB15K | 263 | 33,748 | 3,791 | 4,566 |
+| MKG-W | 142 | 9,790 | 946 | 1,127 |
+| MKG-Y | 24 | 1,654 | 142 | 187 |
 
 | embedding | shape | dtype | zero rows | NaN rows | rows = n_ent |
 |---|---|---|---:|---:|---|
