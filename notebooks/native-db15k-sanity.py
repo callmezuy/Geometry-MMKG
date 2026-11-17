@@ -121,10 +121,15 @@ def _(HfApi, WORK_DIR, os, subprocess, sys):
                 cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
                 env={**os.environ, "PYTHONUNBUFFERED": "1"},
             )
-            for _line in _proc.stdout:
-                print(_line, end="", flush=True)
-                _log.write(_line)
-                _log.flush()
+            try:
+                for _line in _proc.stdout:
+                    print(_line, end="", flush=True)
+                    _log.write(_line)
+                    _log.flush()
+            except BaseException:  # interrupt/stop: kill training so it does not keep running unattended
+                _proc.kill()
+                _proc.wait()
+                raise
             return _proc.wait()
 
     def push_results(subdir):
