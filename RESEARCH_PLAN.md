@@ -71,9 +71,9 @@ Kết quả kỳ vọng: Δdepth ≈ 0 ở hàng MMKG và Δdepth > 0 ở hàng 
 
 | Baseline | FB15k-237-IMG, MKG-Y | VRD-Trans | FB15K-237-ind, VRD / VG (inductive) | Δdepth? |
 |---|---|---|---|---|
-| NativE (3 kịch bản) | Nguyên bản (kết quả cũ trên Merged-MMKG bị bỏ) | Nguyên bản | Bản *feature-only* (ghi rõ "adapted") | Có |
-| SNAG (COLING 2025) | Nguyên bản | Nguyên bản | Bản *feature-only* | Có |
-| MoMoK (ICLR 2025) | Nguyên bản | Nguyên bản | Bản *feature-only* | Có: mỗi modality một expert, depth thành một expert riêng |
+| NativE (Control / +D mean / +D concat) | Nguyên bản (kết quả cũ trên Merged-MMKG bị bỏ) | Nguyên bản | Nguyên bản trên FB15K-237-ind và Spatial-VRD, 1 seed; không chạy VG | Có, tầng dữ liệu |
+| SNAG (COLING 2025) | Nguyên bản | Nguyên bản | Như NativE | Có, tầng dữ liệu |
+| MoMoK (ICLR 2025) | Nguyên bản | Nguyên bản | Như NativE | Có, tầng dữ liệu (không thêm expert) |
 | MKGformer (SIGIR 2022) | Nguyên bản (FB15k-237-IMG là dataset gốc; so với số arXiv v5 đã sửa lỗi: H@1 0,256 · H@3 0,367 · H@10 0,504 · MR 221, paper không báo MRR) | Nguyên bản | Không chạy; giải thích: entity-as-token, không inductive, không mở rộng tới 1.44M | Không: đọc ảnh thô, làm mốc tham chiếu |
 | CMR (SIGIR 2024) | Không bắt buộc | Không bắt buộc | Nguyên bản trên FB15K-237-ind (số paper: MRR 0,371 · H@1 0,269 · H@10 0,567) và Spatial-VRD; VG không chạy (bi-encoder PLM + ViT trên 1,44M thực thể quá nặng) | Không: đọc ảnh thô, làm mốc tham chiếu. CMR gốc điền vector ngẫu nhiên cho thực thể thiếu ảnh; giữ nguyên (mục dưới, ý 3) và ghi rõ |
 | Feature-TransE (RGB+Text / RGB+Depth+Text, MLP) | Có | Có | Có: baseline đơn giản cùng đặc trưng, cô lập đóng góp của Router | Có |
@@ -94,7 +94,7 @@ Kết quả kỳ vọng: Δdepth ≈ 0 ở hàng MMKG và Δdepth > 0 ở hàng 
 
 Δdepth (RQ1) không bị ảnh hưởng bởi lựa chọn này vì luôn so trong cùng một mô hình: bản có và không có depth thiếu ở cùng thực thể và được xử lý như nhau.
 
-**Feature-only adaptation:** thay embedding theo ID bằng `e = MLP(đặc trưng modal)`, giữ nguyên hàm score và cách fusion gốc. Báo thêm một dòng bản nguyên gốc (ID embedding ngẫu nhiên cho thực thể chưa thấy) để tham khảo.
+**Baseline ở ô inductive (sửa 18/11/2026):** không còn bản feature-only (sửa kiến trúc, vi phạm quy tắc ở P3.0). NativE, SNAG, MoMoK chạy nguyên bản: thực thể chưa thấy giữ embedding ID ngẫu nhiên, chỉ phần đặc trưng mang thông tin. Mọi baseline giữ kiến trúc gốc; depth chỉ vào ở tầng dữ liệu (xem quy tắc và P3.0c).
 
 ---
 
@@ -221,7 +221,30 @@ P0.1–P0.3b làm bằng `scripts/clean_splits.py` (11/11/2026). **Bản v2 hi�
 
 ### P3. Baseline
 
-**P3.0 Chuẩn reproduce baseline (12/11/2026).** Bảng dưới là các tiêu chí phải đạt trước khi đưa số baseline vào bài:
+**Quy tắc bắt buộc (người dùng đặt 18/11/2026): baseline phải chạy đúng kiến trúc gốc. Không sửa code can thiệp vào kiến trúc.**
+- *Kiến trúc* = mọi thứ quyết định cách mô hình tính điểm một bộ ba: các module và lớp (projection, pooling, fusion, attention, expert, generator), cách gộp modality, hàm score, cách khởi tạo embedding. Giữ nguyên code gốc của tác giả, kể cả các số chiều gắn cứng.
+- *Được phép sửa* (ngoài kiến trúc, mỗi thay đổi ghi vào phụ lục kèm diff so với commit gốc): đường dẫn và nạp dữ liệu; giao thức đánh giá (ghi rank, filtered head + tail, luật bằng điểm chặt); chọn checkpoint theo valid (`ValidSelector`); seed; sửa lỗi tương thích phiên bản thư viện (ví dụ `weights_only=False`); cờ có sẵn trong code gốc (ví dụ `type_constrain=False`).
+- *Đưa depth vào baseline:* chỉ ở **tầng dữ liệu**. Ví dụ ghép đặc trưng RGB và depth (trung bình hoặc nối) rồi đưa vào ô ảnh có sẵn, khi mô hình gốc tự lấy số chiều từ dữ liệu. Hoặc dùng một đường N-modality mà tác giả đã phát hành sẵn. Không thêm nhánh, lớp hay expert mới.
+- Nếu một baseline không nhận được dữ liệu của mình mà không sửa kiến trúc (ví dụ gắn cứng số chiều đặc trưng), thì **không chạy baseline đó ở ô ấy** và giải thích trong bài. Không viết bản chỉnh sửa.
+- Baseline transductive (embedding theo ID) ở ô inductive: **chạy nguyên bản** (duyệt 18/11/2026). `entity2id` chứa mọi thực thể nên code gốc chạy được; thực thể chưa thấy giữ embedding ID ngẫu nhiên lúc khởi tạo, chỉ phần đặc trưng (qua lớp chiếu đã học) mang thông tin. Số đo được là mức mô hình gốc tổng quát hoá sang thực thể mới, báo đúng như vậy.
+
+**P3.0c Rà soát theo quy tắc trên (18/11/2026). Người dùng duyệt cả 4 cách sửa dưới đây (18/11/2026):**
+1. **NativE `AdvRelRotatEDB15K`:** commit `ed293a1` bỏ bước pooling gốc (`orig_pool=0` mặc định). Pooling gốc gắn cứng VGG 4096 chiều (`view(-1, 64, 64)`). Đề xuất: trả file về bản gốc, chỉ dùng cho P3.0b với đặc trưng gốc của tác giả. Với MKG-Y và FB15k-237-IMG, NativE dùng `AdvRelRotatE` (script gốc `run_mkgy.sh`), vốn tự lấy số chiều từ dữ liệu nên nhận đặc trưng DINOv2 mà không phải sửa.
+2. **Kịch bản "Ablation 2: 3-modal" của NativE** đưa depth vào ô `numeric` của model DB15K, nên phụ thuộc vi phạm 1. Sửa: +depth của NativE chỉ đi qua tầng dữ liệu. Ba kịch bản mới: **Control** (RGB + Text), **+D mean** (trung bình RGB và depth vào ô ảnh), **+D concat** (nối RGB và depth thành 1536 chiều vào ô ảnh; `AdvRelRotatE` tự lấy số chiều). Bỏ kịch bản late fusion: đường 4-modality gốc (`AdvRelRotatEKuai16K`) bắt buộc đủ 4 đầu vào (ảnh, text, audio, video), mình chỉ có 3, dùng thì phải điền ô giả.
+3. **SNAG trong repo đã bị thêm nhánh depth** (`depth_proj`, `depth_embeddings`, `comb_proj` 4 modality trong `AdvMixRotatE.py`) ngay từ commit đầu `634d7be`. Đề xuất: thay bằng mã gốc `zjukg/SNAG` dạng submodule như MKGformer, so diff để chuyển phần được phép (`ValidSelector`, ghi rank) sang, và đưa depth vào ở tầng dữ liệu như NativE.
+4. **Bản "feature-only" cho dữ liệu inductive** (mục 3.2, P3.2, P3.3, MoMoK ở P3.6) thay embedding theo ID bằng `MLP(đặc trưng)`, tức là sửa kiến trúc. **"Depth thành một expert riêng" của MoMoK** cũng vậy. Sửa: bỏ hết bản feature-only. Ở ô inductive, NativE, SNAG và MoMoK **chạy nguyên bản trên FB15K-237-ind và Spatial-VRD, 1 seed**; **không chạy trên Spatial-VG** (1,44M thực thể, tốn GPU mà không thêm thông tin; ghi lý do trong bài). Δdepth ở hàng inductive dựa chủ yếu trên GeometryMMKG và Feature-TransE (mô hình của mình, quy tắc này không áp dụng); Δdepth của baseline nguyên bản ở đây chỉ đo depth giúp phần đặc trưng tổng quát hoá đến đâu. CMR là mốc tham chiếu inductive nguyên bản. MoMoK nhận depth ở tầng dữ liệu như NativE.
+5. *(Phát hiện thêm khi sửa)* SNAG có cờ gốc `use_pool`: khi `use_pool=1` và tên dataset không chứa "MKG", nó pooling cứng theo VGG 4096 chiều. Dùng `-use_pool 0` (cờ có sẵn, được phép) cho FB15k-237-IMG và VRD; kiểm tra lại trên bản gốc sau khi thay submodule.
+
+**Việc cần làm (P3.0d):**
+- [ ] Trả `baselines/NativE/mmkgc/module/model/AdvRelRotatEDB15K.py` về bản gốc (bỏ `orig_pool`); P3.0b dùng đúng bản gốc. Rà lại các file NativE khác so với upstream `zjukg/NativE`, ghi diff phần được phép vào phụ lục.
+- [ ] Thay `baselines/SNAG/` bằng submodule `zjukg/SNAG`; chuyển `ValidSelector`, ghi rank, `-select_on` sang dưới dạng file và cờ ngoài kiến trúc; so diff bản cũ với upstream để chắc không còn sửa nào khác trong kiến trúc.
+- [ ] P0.13 xuất thêm bảng đặc trưng `ent_rgbd_mean_emb.pt` và `ent_rgbd_concat_emb.pt` (đã điền vector hằng) cho các kịch bản +D của baseline.
+- [ ] Sửa notebook NativE theo 3 kịch bản mới (Control / +D mean / +D concat) và bỏ đường 3-modal.
+- [ ] SNAG trên MKG-Y: code gốc đọc `missing.json` khi tên dataset chứa "MKG". Tạo `missing.json` từ mặt nạ ảnh của mình, đúng định dạng file của tác giả (xem `baselines/SNAG/SNAG_MKGC/embeddings/missing.json` và cách code gốc dùng nó), không sửa code để bỏ qua.
+
+Không vi phạm: `patch_mkgformer.py` (chỉ ghi rank và luật bằng điểm), `ValidSelector`, vector hằng cho thực thể thiếu ảnh (mục 3.2 ý 1, tầng dữ liệu).
+
+Bảng dưới là các tiêu chí phải đạt trước khi đưa số baseline vào bài:
 
 | # | Tiêu chí | Trạng thái |
 |---|---|---|
@@ -231,7 +254,8 @@ P0.1–P0.3b làm bằng `scripts/clean_splits.py` (11/11/2026). **Bản v2 hi�
 | 4 | Cùng feature (`ent_*_emb.pt`, 768 chiều) cho mọi model; ghi rõ là không dùng feature gốc của baseline | [x] dữ liệu; [ ] ghi trong bài |
 | 5 | Tuning siêu tham số với **cùng ngân sách** trên valid cho mọi model, kể cả GeometryMMKG; xuất phát từ config gốc của tác giả | [ ] |
 | 6 | 3 seed cho các ô chính, báo mean ± std; Δ kèm khoảng tin cậy bootstrap | [ ] |
-| 7 | Đặt tên phân biệt: `SNAG` (gốc, 3 modality) / `SNAG+D` (mình mở rộng thêm depth) / `SNAG-FO` (feature-only); tương tự cho NativE. Ghi mọi thay đổi vào phụ lục | [ ] |
+| 0 | **Kiến trúc baseline giữ nguyên code gốc** (quy tắc ở trên); mọi thay đổi ngoài kiến trúc có diff trong phụ lục | [ ] P3.0d: sửa các vi phạm đã duyệt |
+| 7 | Đặt tên phân biệt: `SNAG` (gốc) / `SNAG+D(mean)`, `SNAG+D(concat)` (depth đưa vào ô ảnh ở tầng dữ liệu, kiến trúc giữ nguyên); tương tự cho NativE, MoMoK. Không có bản feature-only (P3.0c). Ghi mọi thay đổi ngoài kiến trúc vào phụ lục | [ ] |
 
 - [x] **P3.0a Rò rỉ test trong SNAG gốc.** `Trainer.run` cứ mỗi 100 epoch lại chạy Tester trên **test**, giữ `best_model_wts` có MRR test cao nhất và early-stop theo MRR test. NativE `WCGTrainerKuai16KGP` (4 modality) cũng in metric test trong lúc train.
   - **Đã sửa:** thêm `mmkgc/config/ValidSelector.py`, file giống hệt nhau trong NativE và SNAG.
@@ -247,11 +271,11 @@ P0.1–P0.3b làm bằng `scripts/clean_splits.py` (11/11/2026). **Bản v2 hi�
   - [ ] SNAG trên MKG-W: chưa chuẩn bị.
 
 - [ ] **P3.1** Feature-TransE (2-modal và 3-modal).
-- [ ] **P3.2** NativE feature-only cho dữ liệu inductive (FB15K-237-ind, VRD, VG).
-- [ ] **P3.3** SNAG: chạy nguyên bản (MMKG, VRD-Trans) và feature-only (FB15K-237-ind, VRD/VG).
+- [x] ~~**P3.2** NativE feature-only cho dữ liệu inductive~~ Bỏ (P3.0c): NativE chạy nguyên bản ở ô inductive.
+- [ ] **P3.3** SNAG: thay bằng mã gốc (P3.0d), chạy nguyên bản trên mọi ô trừ Spatial-VG.
 - [ ] **P3.4** MKGformer trên FB15k-237-IMG (dataset gốc của paper, so trực tiếp được với số công bố) và VRD-Trans. Phải sửa notebook để dùng ảnh và mô tả thật (phát hiện ở P1).
 - [ ] **P3.5** Thiếu ảnh cho baseline: **không sửa code mô hình**. Baseline dùng bảng đặc trưng đọc bảng đã điền vector hằng (P0.13, mục 3.2 ý 1); MKGformer giữ cách gốc (ý 3). Kiểm tra file embedding gốc của tác giả NativE (DB15K) xem họ điền gì cho thực thể thiếu ảnh, ghi vào phụ lục; P3.0b vẫn dùng embedding gốc đó.
-- [ ] **P3.6** MoMoK (mức 1): clone repo `zjukg/MoMoK` làm submodule; gắn `ValidSelector` (`-select_on valid`) và ghi rank theo P1; thêm depth thành một expert riêng (không đổi cấu trúc expert); bản feature-only cho dữ liệu inductive như NativE. Kiểm tra tái lập (tiêu chí 1 của P3.0) trên MKG-Y bằng đặc trưng gốc của tác giả.
+- [ ] **P3.6** MoMoK (mức 1): clone repo `zjukg/MoMoK` làm submodule; gắn `ValidSelector` (`-select_on valid`) và ghi rank theo P1; depth vào ở tầng dữ liệu (+D mean / +D concat vào ô ảnh), không thêm expert, không sửa kiến trúc; ở ô inductive chạy nguyên bản như NativE. Kiểm tra trước: code MoMoK có tự lấy số chiều đặc trưng từ dữ liệu không; nếu gắn cứng thì không chạy ở ô đó (quy tắc P3.0). Kiểm tra tái lập (tiêu chí 1 của P3.0) trên MKG-Y bằng đặc trưng gốc của tác giả.
 - [ ] **P3.7** CMR (mức 1): clone repo `OreOZhao/CMR`; chạy nguyên bản trên FB15K-237-ind, đối chiếu số paper (MRR 0,371), đây là kiểm tra tái lập cho ô inductive. Thêm ghi rank theo P1. Chạy trên Spatial-VRD (text = tên lớp vật thể, ảnh = vùng cắt theo box). Ghi rõ: CMR điền vector ngẫu nhiên cho thực thể thiếu ảnh (cách gốc, mục 3.2 ý 3).
 - [ ] **P3.8** *(Mức 2, chỉ làm nếu còn GPU)* AdaMF-MAT, IKRL, TBKGC, BLP-TransE; MyGO nếu code tách token đã phát hành.
 
@@ -260,10 +284,10 @@ P0.1–P0.3b làm bằng `scripts/clean_splits.py` (11/11/2026). **Bản v2 hi�
 Ưu tiên theo thứ tự:
 
 - [ ] **P4.1** FB15k-237-IMG: GeometryMMKG + ablation; NativE (`-select_on valid`); SNAG; MoMoK; MKGformer; Feature-TransE. MKG-Y: GeometryMMKG (full, w/o Depth); NativE; SNAG; MoMoK; Feature-TransE. Chạy trên **v4**. Lượt NativE trên Merged-MMKG v2 (18/11, seed 42, Control MRR 0.3843, P1.4 rank check khớp) chỉ là kiểm tra hạ tầng.
-- [ ] **P4.1b** FB15K-237-ind: GeometryMMKG (full, w/o Depth); CMR nguyên bản; NativE/SNAG/MoMoK feature-only; Feature-TransE.
-- [ ] **P4.2** VRD-Trans: GeometryMMKG (full, w/o Depth); NativE nguyên bản 3 kịch bản; SNAG; MoMoK; MKGformer; Feature-TransE.
-- [ ] **P4.3** VRD inductive: GeometryMMKG + ablation; NativE/SNAG/MoMoK feature-only; CMR nguyên bản; Feature-TransE.
-- [ ] **P4.4** VG inductive: GeometryMMKG (full, w/o Depth), NativE feature-only. Theo dõi RAM/VRAM ở lần eval đầu tiên.
+- [ ] **P4.1b** FB15K-237-ind: GeometryMMKG (full, w/o Depth); CMR nguyên bản; NativE/SNAG/MoMoK nguyên bản (1 seed); Feature-TransE.
+- [ ] **P4.2** VRD-Trans: GeometryMMKG (full, w/o Depth); NativE 3 kịch bản (Control / +D mean / +D concat); SNAG; MoMoK; MKGformer; Feature-TransE.
+- [ ] **P4.3** VRD inductive: GeometryMMKG + ablation; NativE/SNAG/MoMoK nguyên bản (1 seed); CMR nguyên bản; Feature-TransE.
+- [ ] **P4.4** VG inductive: GeometryMMKG (full, w/o Depth); Feature-TransE. Baseline transductive không chạy (P3.0c). Theo dõi RAM/VRAM ở lần eval đầu tiên.
 - [ ] **P4.5** Chạy 3 seed cho các cấu hình chính.
 - [ ] **P4.6** Đẩy checkpoint `.pth` và file rank lên HF sau mỗi lần chạy (storage của Molab có thể không bền).
   - Đã làm cho notebook NativE MMKG và DB15K: log, rank CSV và checkpoint được tự động đẩy lên dataset repo private `callmezuy/geometry-mmkg-results` (`native/<dataset>/`) ngay khi mỗi kịch bản chạy xong. Cần secret `HF_TOKEN` có quyền ghi trên Molab. Các notebook còn lại chưa có.
@@ -274,7 +298,7 @@ P0.1–P0.3b làm bằng `scripts/clean_splits.py` (11/11/2026). **Bản v2 hi�
 - [ ] **P5.2** Bảng Δdepth trên ma trận 2×2 cho từng mô hình.
 - [ ] **P5.3** Δdepth theo nhóm SPATIAL / SEMANTIC.
 - [ ] **P5.4** Phân bố trọng số gate theo dataset và nhóm quan hệ.
-- [ ] **P5.5** So sánh baseline nguyên bản trên VRD-Trans với bản feature-only trên VRD inductive, để định lượng mức sụt do inductive.
+- [ ] **P5.5** So sánh baseline nguyên bản trên VRD-Trans với chính nó (nguyên bản) trên VRD inductive: cùng mô hình, cùng code, chỉ khác chế độ split, để định lượng mức sụt do inductive.
 
 ### P6. Viết bài
 

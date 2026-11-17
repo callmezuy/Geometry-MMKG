@@ -69,14 +69,15 @@ Mọi mô hình (GeometryMMKG, NativE, SNAG, MKGformer, baseline mới) phải t
    ```
 4. **Δdepth** = (có depth) − (không depth) **trong cùng một mô hình và cùng thiết lập**, báo kèm khoảng tin cậy bootstrap (`--reference`). Không so depth giữa các mô hình khác nhau.
 5. **Seed:** 42 cho mọi lần chạy (`core.reproducibility.set_seed`); cấu hình chính chạy 3 seed.
-6. **Tên baseline:** `SNAG` (gốc, 3 modality) / `SNAG+D` (mình thêm depth) / `SNAG-FO` (feature-only cho inductive). NativE đặt tên tương tự.
+6. **Baseline giữ đúng kiến trúc gốc, không sửa code kiến trúc** (lớp, pooling, fusion, expert, hàm score, khởi tạo embedding, kể cả số chiều gắn cứng). Chỉ được sửa ngoài kiến trúc: nạp dữ liệu, đánh giá và ghi rank, chọn checkpoint theo valid, seed, lỗi tương thích thư viện; mỗi thay đổi ghi diff vào phụ lục. Depth và thực thể thiếu ảnh chỉ xử lý ở tầng dữ liệu. Chi tiết: `RESEARCH_PLAN.md` P3.0.
+7. **Tên baseline:** `SNAG` (gốc) / `SNAG+D(mean)`, `SNAG+D(concat)` (depth trung bình hoặc nối với RGB rồi đưa vào ô ảnh, kiến trúc giữ nguyên). NativE, MoMoK đặt tên tương tự. Không có bản feature-only.
 
 ## 5. Bẫy thường gặp
 
 - **Thứ tự cột khác nhau:** `train.txt` là `h \t r \t t`, còn `train2id.txt` (OpenKE) là `h \t t \t r`. Dòng đầu của cả hai là số dòng.
-- **VRD/VG là inductive:** 100% entity ở valid/test không có trong train (chia theo ảnh). Các mô hình học embedding theo ID (NativE, SNAG, MKGformer) không dự đoán được entity mới, nên cần bản feature-only (P3.2, P3.3).
+- **VRD/VG là inductive:** 100% entity ở valid/test không có trong train (chia theo ảnh). Các mô hình học embedding theo ID (NativE, SNAG, MoMoK) chạy nguyên bản: entity chưa thấy giữ embedding ID ngẫu nhiên, chỉ phần đặc trưng mang thông tin, nên số thấp là đúng bản chất. Không viết bản feature-only (sửa kiến trúc). Không chạy các mô hình này trên Spatial-VG.
 - **Spatial-VG lấy từ VG150-curated `no_part_whole`**, không phải VG150 chuẩn; có 1,44M entity, mỗi file `.pt` khoảng 4,4 GB, cần nạp bằng `torch.load(..., mmap=True)`.
-- **SNAG trên dữ liệu của mình:** truyền `-use_pool 0` (đặc trưng 768 chiều), và tên dataset không được chứa chữ `MKG` (nếu chứa, code sẽ đọc `missing.json`).
+- **SNAG trên dữ liệu của mình:** truyền `-use_pool 0` (đặc trưng 768 chiều). Tên dataset chứa chữ `MKG` (ví dụ MKG-Y) thì code gốc đọc `missing.json`: tạo file này từ mặt nạ ảnh của mình, cùng định dạng với file của tác giả (tầng dữ liệu), không sửa code để bỏ qua.
 - **`baselines/MKGformer` là submodule:** thay đổi chỉ qua `scripts/patch_mkgformer.py`. Không commit con trỏ submodule bị "dirty".
 - **PyTorch ≥ 2.6:** khi `torch.load` file chứa object pickle, cần thêm `weights_only=False`.
 - **Marimo:** tên biến không được trùng giữa các cell; biến cục bộ trong cell đặt tên bắt đầu bằng `_`.
