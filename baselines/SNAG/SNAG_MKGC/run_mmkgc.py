@@ -49,15 +49,6 @@ if __name__ == "__main__":
         "./benchmarks/" + args.dataset + '/', "link")
     img_emb = torch.load('./embeddings/' + args.dataset + '-visual.pth')
     text_emb = torch.load('./embeddings/' + args.dataset + '-textual.pth')
-    
-    # Try to load depth embeddings, fallback to None if not exists (for backwards compatibility)
-    try:
-        depth_emb = torch.load('./embeddings/' + args.dataset + '-depth-visual.pth')
-        print(f"Successfully loaded depth embeddings for {args.dataset}")
-    except FileNotFoundError:
-        depth_emb = None
-        print(f"Warning: Depth embeddings not found for {args.dataset}")
-
     # pdb.set_trace()
     # define the model
     kge_score = AdvMixRotatE(
@@ -68,8 +59,7 @@ if __name__ == "__main__":
         margin=args.margin,
         epsilon=2.0,
         img_emb=img_emb,
-        text_emb=text_emb,
-        depth_emb=depth_emb
+        text_emb=text_emb
     )
     # print(kge_score)
     logger.info(kge_score)

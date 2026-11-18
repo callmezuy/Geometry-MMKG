@@ -1,0 +1,309 @@
+--- a/args.py
++++ b/args.py
+@@ -16,6 +16,13 @@
+     arg.add_argument('-adv_temp', type=float, default=2.0)
+     arg.add_argument('-visual', type=str, default='random')
+     arg.add_argument('-seed', type=int, default=42)
++    arg.add_argument('-rank_file', type=str, default='', help='write per-triple filtered ranks (CSV) for scripts/compute_metrics.py')
++    # [Geometry-MMKG] checkpoint selection (mmkgc/config/ValidSelector.py)
++    arg.add_argument('-select_on', type=str, default='valid', choices=['valid', 'original'],
++                     help='valid: keep the best validation-MRR checkpoint, test once; original: upstream behaviour')
++    arg.add_argument('-valid_steps', type=int, default=10, help='evaluate on valid every N epochs')
++    arg.add_argument('-patience', type=int, default=0, help='early stop after N evaluations without improvement (0 = off)')
++    arg.add_argument('-valid_max', type=int, default=0, help='evaluate on a seeded random subset of N valid triples (0 = all)')
+     arg.add_argument('-missing_rate', type=float, default=0.8)
+     arg.add_argument('-postfix', type=str, default='')
+     arg.add_argument('-con_temp', type=float, default=0)
+--- a/mmkgc/config/Tester.py
++++ b/mmkgc/config/Tester.py
+@@ -75,19 +75,32 @@
+             
+             
+ 
+-    def run_link_prediction(self, type_constrain=False):
++    def run_link_prediction(self, type_constrain=False, rank_file=None):
++        """rank_file: if given, also compute filtered head/tail ranks per test triple in Python
++        (same rule as the C++ tester: strictly lower score is better, other true triples from
++        train/valid/test filtered, no type constraint) and write them as CSV
++        h_id,r_id,t_id,rank_head,rank_tail for Geometry-MMKG's scripts/compute_metrics.py."""
+         self.lib.initTest()
+         self.data_loader.set_sampling_mode('link')
+         if type_constrain:
+             type_constrain = 1
+         else:
+             type_constrain = 0
++        if rank_file:
++            tails, heads = self._load_filters()
++            dumped = []
+         training_range = self.data_loader
+         for index, [data_head, data_tail] in enumerate(training_range):
+             score = self.test_one_step(data_head)
+             self.lib.testHead(score.__array_interface__["data"][0], index, type_constrain)
++            if rank_file:
++                h, t, r = int(data_tail["batch_h"][0]), int(data_head["batch_t"][0]), int(data_head["batch_r"][0])
++                rank_head = self._filtered_rank(score, h, heads.get((r, t), ()))
+             score = self.test_one_step(data_tail)
+             self.lib.testTail(score.__array_interface__["data"][0], index, type_constrain)
++            if rank_file:
++                rank_tail = self._filtered_rank(score, t, tails.get((h, r), ()))
++                dumped.append((h, r, t, rank_head, rank_tail))
+         self.lib.test_link_prediction(type_constrain)
+ 
+         mrr = self.lib.getTestLinkMRR(type_constrain)
+@@ -95,8 +108,51 @@
+         hit10 = self.lib.getTestLinkHit10(type_constrain)
+         hit3 = self.lib.getTestLinkHit3(type_constrain)
+         hit1 = self.lib.getTestLinkHit1(type_constrain)
++        if rank_file:
++            self._write_ranks(rank_file, dumped, (mrr, mr, hit10, hit3, hit1))
+         return mrr, mr, hit10, hit3, hit1
+ 
++    def _load_filters(self):
++        """All true triples (train+valid+test, OpenKE files 'h t r') as {(h,r):{t}} and {(r,t):{h}}."""
++        tails, heads = {}, {}
++        for fn in ("train2id.txt", "valid2id.txt", "test2id.txt"):
++            path = os.path.join(self.data_loader.in_path, fn)
++            if not os.path.exists(path):
++                continue
++            with open(path) as f:
++                next(f)
++                for line in f:
++                    x = line.split()
++                    if len(x) < 3:
++                        continue
++                    h, t, r = int(x[0]), int(x[1]), int(x[2])
++                    tails.setdefault((h, r), set()).add(t)
++                    heads.setdefault((r, t), set()).add(h)
++        return tails, heads
++
++    @staticmethod
++    def _filtered_rank(score, true_id, true_set):
++        s = np.asarray(score).reshape(-1)
++        v = s[true_id]
++        better = int((s < v).sum())
++        others = [e for e in true_set if e != true_id]
++        if others:
++            better -= int((s[np.asarray(others, dtype=np.int64)] < v).sum())
++        return better + 1
++
++    @staticmethod
++    def _write_ranks(path, rows, cpp_metrics):
++        import csv
++        with open(path, "w", newline="") as f:
++            w = csv.writer(f)
++            w.writerow(["h_id", "r_id", "t_id", "rank_head", "rank_tail"])
++            w.writerows(rows)
++        ranks = np.array([[r[3], r[4]] for r in rows], dtype=np.float64).reshape(-1)
++        py = (np.mean(1 / ranks), np.mean(ranks), np.mean(ranks <= 10), np.mean(ranks <= 3), np.mean(ranks <= 1))
++        print(f"Saved {len(rows)} per-triple ranks to {path}")
++        print("Rank check  (MRR, MR, H@10, H@3, H@1)  C++: " + ", ".join(f"{x:.6f}" for x in cpp_metrics)
++              + "  | Python: " + ", ".join(f"{x:.6f}" for x in py))
++
+     def get_best_threshlod(self, score, ans):
+         res = np.concatenate([ans.reshape(-1,1), score.reshape(-1,1)], axis = -1)
+         order = np.argsort(score)
+--- a/mmkgc/config/Trainer.py
++++ b/mmkgc/config/Trainer.py
+@@ -146,6 +146,12 @@
+                 loss = self.train_one_step(data)
+                 res += loss
+             training_range.set_description("Epoch %d | loss: %f" % (epoch, res))
++            # [Geometry-MMKG] select on validation, never on test (ValidSelector.py)
++            if getattr(self, "valid_selector", None) is not None:
++                if self.valid_selector.due(epoch) and self.valid_selector.step(self.model.model, epoch):
++                    self.logger.info("Early stop on validation MRR at epoch %d" % epoch)
++                    break
++                continue
+             
+ 
+             # $DATA-$NUM_BATCH-$EMB_DIM-$NEG_NUM-$MARGIN-$LR
+@@ -172,6 +178,11 @@
+                 self.logger.info(f"{mrr}\t{mr}\t{hit10}\t{hit3}\t{hit1}")
+             # else:
+             #     self.logger.info(f"Epoch {epoch} | loss: {res}")
++        if getattr(self, "valid_selector", None) is not None:
++            self.valid_selector.restore_best(self.model.model)
++            # downstream code (run_mmkgc.py) saves best_model_wts and names it by Loss_log
++            self.best_model_wts = copy.deepcopy(self.model.model.state_dict())
++            self.Loss_log.update_acc(self.valid_selector.best_mrr)
+ 
+     def set_model(self, model):
+         self.model = model
+--- /dev/null
++++ b/mmkgc/config/ValidSelector.py
+@@ -0,0 +1,134 @@
++# coding:utf-8
++"""
++[Geometry-MMKG] Checkpoint selection on the VALIDATION split (RESEARCH_PLAN.md, P3.0).
++
++Upstream behaviour differs between baselines:
++  * SNAG keeps the checkpoint with the best TEST MRR and early-stops on it (test leakage);
++  * NativE trains a fixed number of epochs and tests the last checkpoint.
++For the comparison every model selects its checkpoint on validation MRR and touches the
++test split exactly once. Use `-select_on valid` (run scripts); `-select_on original` keeps the
++upstream behaviour (needed to check that our copy still reproduces the published numbers).
++
++Evaluation is pure Python (no OpenKE C++ state, so it cannot disturb the test loader):
++filtered ranks over ALL entities, head + tail pooled, no type constraint, strict tie rule
++(rank = 1 + #entities with a strictly lower score, other true answers from train+valid+test
++excluded) -- the same protocol as Tester.run_link_prediction and core/models/evaluation.py.
++
++This file is identical in baselines/NativE/mmkgc/config/ and baselines/SNAG/SNAG_MKGC/mmkgc/config/.
++"""
++import os
++
++import numpy as np
++import torch
++
++
++def read_triples(path):
++    """OpenKE *2id.txt: first line = count, then 'h t r' per line. Returns list of (h, r, t)."""
++    out = []
++    with open(path) as f:
++        next(f)
++        for line in f:
++            x = line.split()
++            if len(x) >= 3:
++                out.append((int(x[0]), int(x[2]), int(x[1])))
++    return out
++
++
++def load_filters(in_path):
++    tails, heads = {}, {}
++    for fn in ("train2id.txt", "valid2id.txt", "test2id.txt"):
++        p = os.path.join(in_path, fn)
++        if os.path.exists(p):
++            for h, r, t in read_triples(p):
++                tails.setdefault((h, r), set()).add(t)
++                heads.setdefault((r, t), set()).add(h)
++    return tails, heads
++
++
++def filtered_rank(score, true_id, true_set):
++    """score: lower is better (OpenKE predict)."""
++    s = np.asarray(score).reshape(-1)
++    v = s[true_id]
++    better = int((s < v).sum())
++    others = [e for e in true_set if e != true_id]
++    if others:
++        better -= int((s[np.asarray(others, dtype=np.int64)] < v).sum())
++    return better + 1
++
++
++class ValidSelector(object):
++    """Evaluate every `every` epochs on the validation split, keep the best weights in memory.
++
++    Trainers call  stop = selector.step(kge_model, epoch)  and  selector.restore_best(kge_model).
++    patience > 0: stop after `patience` evaluations without improvement (0 = never stop early,
++    i.e. the same epoch budget as upstream). max_triples > 0: evaluate on a fixed random subset
++    (seeded) of the validation split, for very large graphs (Spatial-VG).
++    """
++
++    def __init__(self, in_path, split="valid2id.txt", every=10, patience=0, max_triples=0, seed=0, log=print):
++        self.every = max(1, int(every))
++        self.patience = int(patience)
++        self.log = log
++        triples = read_triples(os.path.join(in_path, split))
++        if not triples:
++            raise ValueError(f"ValidSelector: no triples in {os.path.join(in_path, split)}")
++        if max_triples and len(triples) > max_triples:
++            idx = np.sort(np.random.default_rng(seed).choice(len(triples), size=max_triples, replace=False))
++            triples = [triples[i] for i in idx]
++        self.triples = triples
++        self.tails, self.heads = load_filters(in_path)
++        self.best_mrr, self.best_epoch, self.best_state = -1.0, -1, None
++        self.bad, self.history = 0, []
++        self.log(f"[ValidSelector] {split}: {len(triples)} triples, every {self.every} epochs, "
++                 f"patience {self.patience or 'off'}")
++
++    def due(self, epoch):
++        return (epoch + 1) % self.every == 0
++
++    @torch.no_grad()
++    def evaluate(self, model):
++        was_training = model.training
++        model.eval()
++        dev = next(model.parameters()).device
++        all_e = torch.arange(model.ent_tot, dtype=torch.long, device=dev)
++        ranks = []
++        for h, r, t in self.triples:
++            H = torch.tensor([h], dtype=torch.long, device=dev)
++            R = torch.tensor([r], dtype=torch.long, device=dev)
++            T = torch.tensor([t], dtype=torch.long, device=dev)
++            s = model.predict({"batch_h": all_e, "batch_t": T, "batch_r": R, "mode": "head_batch"})
++            ranks.append(filtered_rank(s, h, self.heads.get((r, t), ())))
++            s = model.predict({"batch_h": H, "batch_t": all_e, "batch_r": R, "mode": "tail_batch"})
++            ranks.append(filtered_rank(s, t, self.tails.get((h, r), ())))
++        if was_training:
++            model.train()
++        rk = np.asarray(ranks, dtype=np.float64)
++        return {"mrr": float(np.mean(1 / rk)), "mr": float(rk.mean()), "hit10": float(np.mean(rk <= 10)),
++                "hit3": float(np.mean(rk <= 3)), "hit1": float(np.mean(rk <= 1))}
++
++    def step(self, model, epoch):
++        """Evaluate, remember the best weights. Returns True when training should stop."""
++        m = self.evaluate(model)
++        self.history.append((epoch, m["mrr"]))
++        if m["mrr"] > self.best_mrr:
++            self.best_mrr, self.best_epoch, self.bad = m["mrr"], epoch, 0
++            # Only weights that change: trainable parameters + buffers (frozen modality
++            # tables can be GBs and never change).
++            st = {k: p.detach().cpu().clone() for k, p in model.named_parameters() if p.requires_grad}
++            st.update({k: b.detach().cpu().clone() for k, b in model.named_buffers()})
++            self.best_state = st
++        else:
++            self.bad += 1
++        self.log(f"[ValidSelector] epoch {epoch}: valid MRR {m['mrr']:.4f} | MR {m['mr']:.1f} | "
++                 f"H@1 {m['hit1']:.4f} | H@10 {m['hit10']:.4f}  (best {self.best_mrr:.4f} @ epoch {self.best_epoch})")
++        return self.patience > 0 and self.bad >= self.patience
++
++    def restore_best(self, model):
++        if self.best_state is None:
++            self.log("[ValidSelector] no validation run happened; keeping the last weights")
++            return
++        missing = [k for k in self.best_state if k not in dict(model.named_parameters()) and k not in dict(model.named_buffers())]
++        if missing:
++            raise RuntimeError(f"[ValidSelector] unknown keys in saved state: {missing[:5]}")
++        model.load_state_dict(self.best_state, strict=False)
++        self.log(f"[ValidSelector] restored best weights: epoch {self.best_epoch}, valid MRR {self.best_mrr:.4f}")
+--- a/run_mmkgc.py
++++ b/run_mmkgc.py
+@@ -2,6 +2,7 @@
+ import torch
+ import mmkgc
+ from mmkgc.config import Trainer, Tester
++from mmkgc.config.ValidSelector import ValidSelector
+ from mmkgc.module.model import AdvMixRotatE
+ from mmkgc.module.loss import MarginLoss, SigmoidLoss
+ from mmkgc.module.strategy import NegativeSampling
+@@ -85,7 +86,11 @@
+         checkpoint_dir=args.save
+     )
+ 
+-    trainer.run()
++    if args.select_on == "valid":
++        trainer.valid_selector = ValidSelector("./benchmarks/" + args.dataset + '/', every=args.valid_steps,
++                                               patience=args.patience, max_triples=args.valid_max,
++                                               seed=args.seed, log=logger.info)
++    trainer.run()  # with select_on=valid: best-validation weights; MRR in the file name is VALID MRR
+ 
+     save_dir = f"{args.save}-MRR{trainer.Loss_log.get_acc()}"
+     if not osp.exists(save_dir):
+@@ -95,7 +100,7 @@
+     # test the model
+     kge_score.load_checkpoint(save_dir)
+     tester = Tester(model=kge_score, data_loader=test_dataloader, use_gpu=True)
+-    mrr, mr, hit10, hit3, hit1 = tester.run_link_prediction(type_constrain=False)
++    mrr, mr, hit10, hit3, hit1 = tester.run_link_prediction(type_constrain=False, rank_file=args.rank_file or None)
+     logger.info(f"mrr:{mrr},\t mr:{mr},\t hit10:{hit10},\t hit3:{hit3},\t hit1:{hit1}")
+     logger.info(f"{mrr}\t{mr}\t{hit10}\t{hit3}\t{hit1}")
+     logger.info(" -------------------- finish! -------------------- ")
+\ No newline at end of file
+--- a/run_mmkgc_test.py
++++ b/run_mmkgc_test.py
+@@ -47,4 +47,4 @@
+     # test the model
+     kge_score.load_checkpoint(save_dir)
+     tester = Tester(model=kge_score, data_loader=test_dataloader, use_gpu=True)
+-    tester.run_link_prediction(type_constrain=False)
++    tester.run_link_prediction(type_constrain=False, rank_file=args.rank_file or None)

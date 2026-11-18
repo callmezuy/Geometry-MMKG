@@ -28,8 +28,7 @@ class AdvMixRotatE(Model):
         margin=6.0,
         epsilon=2.0,
         img_emb=None,
-        text_emb=None,
-        depth_emb=None
+        text_emb=None
     ):
 
         super(AdvMixRotatE, self).__init__(ent_tot, rel_tot)
@@ -95,21 +94,6 @@ class AdvMixRotatE(Model):
             self.text_mean = torch.mean(text_emb, dim=0).cuda()
             self.text_std = torch.std(text_emb, dim=0).cuda()
 
-        if depth_emb is not None:
-            self.depth_mean = torch.mean(depth_emb, dim=0).cuda()
-            self.depth_std = torch.std(depth_emb, dim=0).cuda()
-            self.depth_dim = depth_emb.shape[1]
-            self.depth_proj = nn.Linear(self.depth_dim, self.dim_e)
-            self.depth_embeddings = nn.Embedding.from_pretrained(depth_emb).requires_grad_(False)
-            self.depth_proj_2 = nn.Linear(self.dim_e, self.dim_e)
-        else:
-            self.depth_dim = 0
-            self.depth_proj = None
-            self.depth_embeddings = None
-            self.depth_proj_2 = None
-        
-        self.use_depth = depth_emb is not None
-
         self.img_dim = img_emb.shape[1]
         self.text_dim = text_emb.shape[1]
         # 383-256
@@ -128,7 +112,7 @@ class AdvMixRotatE(Model):
         
         self.img_proj_2 = nn.Linear(self.dim_e, self.dim_e)
         self.text_proj_2 = nn.Linear(self.dim_e, self.dim_e)
-        self.comb_proj = nn.Linear(self.dim_e * (4 if self.use_depth else 3), self.dim_e)
+        self.comb_proj = nn.Linear(self.dim_e * 3, self.dim_e)
         
         # assert self.args.joint_way in ["Mformer_hd_mean", "Mformer_hd_graph", "Mformer_weight", "atten_weight", "learnable_weight","cat_mlp"]
         self.fusion_layer = nn.ModuleList([BertLayer(args) for _ in range(args.num_hidden_layers)])
@@ -138,7 +122,7 @@ class AdvMixRotatE(Model):
         self.margin = nn.Parameter(torch.Tensor([margin]))
         self.margin.requires_grad = False
 
-        params = torch.ones((4 if self.use_depth else 3), requires_grad=True)
+        params = torch.ones(3, requires_grad=True)
         self.weight_raw = torch.nn.Parameter(params)
 
     def add_noise_to_embeddings(self, embeddings, mean, std, noise_ratio=0.1):
@@ -160,11 +144,8 @@ class AdvMixRotatE(Model):
         embeddings[noise_mask] = (1.0 - self.args.mask_ratio) * selected_embeddings + self.args.mask_ratio * self.entity_noise[batch][noise_mask]
         
         return embeddings
-    def get_joint_embeddings(self, es, ev, et, ed=None):
-        if ed is not None:
-            e = torch.stack((es, ev, et, ed), dim=1)
-        else:
-            e = torch.stack((es, ev, et), dim=1)
+    def get_joint_embeddings(self, es, ev, et):
+        e = torch.stack((es, ev, et), dim=1)
         u = torch.tanh(e)
         hidden_states = u
         
@@ -198,13 +179,11 @@ class AdvMixRotatE(Model):
         # weight_norm_fz = F.softmax(self.weight_raw, dim=0)
         elif "learnable_weight" in self.args.joint_way:
             weight_norm_fz = F.softmax(self.weight_raw, dim=0)
+            attention_weights: torch.Size([33792, 3])
             attention_weights = weight_norm_fz.unsqueeze(0).unsqueeze(-1)
             context_vectors = torch.sum(attention_weights * e, dim=1)
         else:
-            if ed is not None:
-                combined = torch.cat((es, ev, et, ed), dim=1)
-            else:
-                combined = torch.cat((es, ev, et), dim=1)
+            combined = torch.cat((es, ev, et), dim=1)
             context_vectors = self.comb_proj(combined)
 
         return context_vectors
@@ -259,10 +238,6 @@ class AdvMixRotatE(Model):
         img_noisy_weights = self.add_noise_to_embeddings(self.img_embeddings.weight.data.clone(), self.img_mean, self.img_std, noise_ratio=self.args.noise_ratio)
         self.img_embeddings_noise = nn.Embedding.from_pretrained(img_noisy_weights).requires_grad_(False)
         
-        if self.use_depth:
-            depth_noisy_weights = self.add_noise_to_embeddings(self.depth_embeddings.weight.data.clone(), self.depth_mean, self.depth_std, noise_ratio=self.args.noise_ratio)
-            self.depth_embeddings_noise = nn.Embedding.from_pretrained(depth_noisy_weights).requires_grad_(False)
-        
         self.ent_mean = torch.mean(self.ent_embeddings.weight.data, dim=0)
         self.ent_std = torch.std(self.ent_embeddings.weight.data, dim=0)
         self.entity_noise = self.ent_mean + self.ent_std * torch.randn_like(self.ent_embeddings.weight.data)
@@ -286,12 +261,6 @@ class AdvMixRotatE(Model):
                 h_text = self.text_embeddings_noise(batch_h)
                 t_text = self.text_embeddings_noise(batch_t)
                 
-                if self.use_depth:
-                    h_depth = self.depth_embeddings_noise(batch_h)
-                    t_depth = self.depth_embeddings_noise(batch_t)
-                else:
-                    h_depth, t_depth = None, None
-                
                 h = self.update_entity_noise(h, batch_h)
                 t = self.update_entity_noise(t, batch_t)
             else:
@@ -307,14 +276,6 @@ class AdvMixRotatE(Model):
                 h_text = self.add_noise_to_embeddings(h_text, self.text_mean, self.text_std, noise_ratio=self.args.noise_ratio)
                 t_text = self.add_noise_to_embeddings(t_text, self.text_mean, self.text_std, noise_ratio=self.args.noise_ratio)
                 
-                if self.use_depth:
-                    h_depth = self.depth_embeddings(batch_h)
-                    t_depth = self.depth_embeddings(batch_t)
-                    h_depth = self.add_noise_to_embeddings(h_depth, self.depth_mean, self.depth_std, noise_ratio=self.args.noise_ratio)
-                    t_depth = self.add_noise_to_embeddings(t_depth, self.depth_mean, self.depth_std, noise_ratio=self.args.noise_ratio)
-                else:
-                    h_depth, t_depth = None, None
-                
                 h = self.add_noise_to_embeddings(h, self.ent_mean, self.ent_std, noise_ratio=self.args.noise_ratio)
                 t = self.add_noise_to_embeddings(t, self.ent_mean, self.ent_std, noise_ratio=self.args.noise_ratio)
                     
@@ -324,12 +285,6 @@ class AdvMixRotatE(Model):
             t_img = self.img_embeddings(batch_t)
             h_text = self.text_embeddings(batch_h)
             t_text = self.text_embeddings(batch_t)
-            
-            if self.use_depth:
-                h_depth = self.depth_embeddings(batch_h)
-                t_depth = self.depth_embeddings(batch_t)
-            else:
-                h_depth, t_depth = None, None
         
         if self.args.num_proj == 2:
             # torch.Size([33792, 256])
@@ -338,12 +293,6 @@ class AdvMixRotatE(Model):
             # torch.Size([33792, 256])
             h_text_emb = self.text_proj_2(self.text_proj(h_text))
             t_text_emb = self.text_proj_2(self.text_proj(t_text))
-            
-            if self.use_depth:
-                h_depth_emb = self.depth_proj_2(self.depth_proj(h_depth))
-                t_depth_emb = self.depth_proj_2(self.depth_proj(t_depth))
-            else:
-                h_depth_emb, t_depth_emb = None, None
         else:
             # torch.Size([33792, 256])
             h_img_emb = self.img_proj(h_img)
@@ -351,16 +300,18 @@ class AdvMixRotatE(Model):
             # torch.Size([33792, 256])
             h_text_emb = self.text_proj(h_text)
             t_text_emb = self.text_proj(t_text)
-            
-            if self.use_depth:
-                h_depth_emb = self.depth_proj(h_depth)
-                t_depth_emb = self.depth_proj(t_depth)
-            else:
-                h_depth_emb, t_depth_emb = None, None
         
-        h_joint = self.get_joint_embeddings(h, h_img_emb, h_text_emb, h_depth_emb)
-        t_joint = self.get_joint_embeddings(t, t_img_emb, t_text_emb, t_depth_emb)
         
+        
+        # text
+        # h_joint = self.get_joint_embeddings(h, h_text_emb)
+        # t_joint = self.get_joint_embeddings(t, t_text_emb)
+        # # img
+        # h_joint = self.get_joint_embeddings(h, h_img_emb)
+        # t_joint = self.get_joint_embeddings(t, t_img_emb)
+        # joint
+        h_joint = self.get_joint_embeddings(h, h_img_emb, h_text_emb)
+        t_joint = self.get_joint_embeddings(t, t_img_emb, t_text_emb)
         score = self.margin - self._calc(h_joint, t_joint, r, mode)
         return score
 

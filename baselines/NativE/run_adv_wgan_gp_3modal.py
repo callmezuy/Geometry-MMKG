@@ -42,7 +42,6 @@ if __name__ == "__main__":
         img_emb=img_emb,
         text_emb=text_emb,
         numeric_emb=num_emb,
-        orig_pool=bool(args.orig_pool),
     )
     print(kge_score)
     # define the loss function
@@ -77,6 +76,6 @@ if __name__ == "__main__":
     kge_score.save_checkpoint(args.save)
 
     # test the model
-    kge_score.load_checkpoint(args.save)
+    # kge_score.load_checkpoint(args.save)
     tester = Tester(model=kge_score, data_loader=test_dataloader, use_gpu=True)
     tester.run_link_prediction(type_constrain=False, rank_file=args.rank_file or None)

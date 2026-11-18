@@ -18,12 +18,13 @@ def _():
     mo.md(
         """
         # 🔁 P3.0b: Kiểm tra NativE trên DB15K so với paper gốc (Molab)
-        Mục tiêu (RESEARCH_PLAN.md, P3.0 tiêu chí 1): chứng minh code NativE **đã sửa** (rank_file, ValidSelector,
-        cờ `-orig_pool`) vẫn cho ra số của paper khi tắt các phần mình thêm vào.
+        Mục tiêu (RESEARCH_PLAN.md, P3.0 tiêu chí 1): chứng minh code NativE **đã sửa** (rank_file, ValidSelector)
+        vẫn cho ra số của paper khi tắt các phần mình thêm vào. Model `AdvRelRotatEDB15K` là bản gốc (P3.0d),
+        giữ pooling gắn cứng 4096/768 -> 256, nên chỉ chạy được với embedding gốc của tác giả.
 
         - Dữ liệu: `baselines/NativE/benchmarks/DB15K` (có sẵn trong repo) + embedding gốc của tác giả
           (Google Drive trong README của NativE, folder `191u4WhT_7P9Ze8Q9N3U3rdr8IWEKYMry`).
-        - Lệnh: giống `scripts/run_db15k.sh` (3-modal, 1000 epoch), thêm `-select_on=original -orig_pool=1`.
+        - Lệnh: giống `scripts/run_db15k.sh` (3-modal, 1000 epoch), thêm `-select_on=original` và `-rank_file`.
         - Số mục tiêu: NativE "All" trên DB15K, arXiv 2406.17605 Table 2/3:
           **MRR 37.16 · H@1 28.01 · H@3 42.25 · H@10 54.13**. Chấp nhận sai lệch khoảng ±1 MRR.
         """
@@ -175,7 +176,6 @@ def _(NATIVE_DIR, RESULTS_DIR, SEED, mo, os, push_results, run_btn, run_streamin
         "-lrg=1e-4",
         f"-seed={SEED}",
         "-select_on=original",  # hành vi gốc: train cố định số epoch, test checkpoint cuối
-        "-orig_pool=1",         # pooling gốc của AdvRelRotatEDB15K (4096/768 -> 256)
         f"-rank_file={os.path.join(RESULTS_DIR, f'ranks_native_{_tag}_test.csv')}",
     ]
     db15k_rc = run_streaming(_cmd, NATIVE_DIR, os.path.join(RESULTS_DIR, f"native_{_tag}.log"))

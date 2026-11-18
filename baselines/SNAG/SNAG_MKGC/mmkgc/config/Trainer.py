@@ -138,19 +138,7 @@ class Trainer(object):
         # print("Finish initializing...")
         self.logger.info("Finish initializing...")
 
-        start_epoch = 0
-        # ── Resume support ────────────────────────────────────────────────
-        if hasattr(self.args, 'resume') and self.args.resume and osp.exists(self.args.resume):
-            self.logger.info(f"Resuming from checkpoint: {self.args.resume}")
-            ckpt = torch.load(self.args.resume)
-            self.model.model.load_state_dict(ckpt['model_state'])
-            self.optimizer.load_state_dict(ckpt['optim_state'])
-            start_epoch = ckpt['epoch'] + 1
-            self.Loss_log.acc = ckpt.get('acc_history', [0.])
-            self.logger.info(f"Resumed from epoch {ckpt['epoch']}, best MRR so far: {self.Loss_log.get_acc():.4f}")
-        # ──────────────────────────────────────────────────────────────────
-
-        training_range = tqdm(range(start_epoch, self.train_times))
+        training_range = tqdm(range(self.train_times))
         for epoch in training_range:
             res = 0.0
             for data in self.data_loader:
@@ -158,35 +146,26 @@ class Trainer(object):
                 loss = self.train_one_step(data)
                 res += loss
             training_range.set_description("Epoch %d | loss: %f" % (epoch, res))
-            
             # [Geometry-MMKG] select on validation, never on test (ValidSelector.py)
             if getattr(self, "valid_selector", None) is not None:
                 if self.valid_selector.due(epoch) and self.valid_selector.step(self.model.model, epoch):
                     self.logger.info("Early stop on validation MRR at epoch %d" % epoch)
                     break
                 continue
+            
 
             # $DATA-$NUM_BATCH-$EMB_DIM-$NEG_NUM-$MARGIN-$LR
             if self.save_steps and self.checkpoint_dir and (epoch + 1) % self.save_steps == 0:
+                # self.logger.info("Epoch %d has finished, saving..." % (epoch))
                 self.logger.info(f"Epoch {epoch} | loss: {res}, saving...")
+                # pdb.set_trace()
+                # self.model.save_checkpoint(osp.join(self.checkpoint_dir, f"{self.args.dataset}-{self.args.batch_size}-{self.args.dim}-{self.args.neg_num}-{self.args.margin}-{self.args.learning_rate}-Epoch{epoch}.ckpt"))
                 tester = Tester.Tester(model=self.model.model, data_loader=self.test_dataloader, use_gpu=True)
                 mrr, mr, hit10, hit3, hit1 = tester.run_link_prediction(type_constrain=False)
 
                 if mrr > self.Loss_log.get_acc():
                     self.best_model_wts = copy.deepcopy(self.model.model.state_dict())
                 self.Loss_log.update_acc(mrr)
-
-                # ── Save resumable checkpoint every eval step ─────────────
-                resume_ckpt_path = f"{self.args.save}-resume.ckpt"
-                torch.save({
-                    'epoch': epoch,
-                    'model_state': self.model.model.state_dict(),
-                    'optim_state': self.optimizer.state_dict(),
-                    'acc_history': self.Loss_log.acc,
-                }, resume_ckpt_path)
-                self.logger.info(f"Checkpoint saved → {resume_ckpt_path}")
-                # ──────────────────────────────────────────────────────────
-
                 if self.Loss_log.early_stop():
                     # f"{args.save}-MRR{trainer.Loss_log.get_acc()}"
                     self.logger.info(" -------------------- Early Stop -------------------- ")

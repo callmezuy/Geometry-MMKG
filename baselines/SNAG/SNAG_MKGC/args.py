@@ -52,7 +52,6 @@ def get_args():
     arg.add_argument("-num_attention_heads", type=int, default=1, help="the number of attention_heads of MEAformer")
     arg.add_argument("-num_hidden_layers", type=int, default=1, help="the number of hidden_layers")
     arg.add_argument("-use_intermediate", type=int, default=0, help="whether to use_intermediate")
-    arg.add_argument("-resume", type=str, default='', help="Path to a -resume.ckpt checkpoint file to resume training")
     return arg.parse_args()
 
 
