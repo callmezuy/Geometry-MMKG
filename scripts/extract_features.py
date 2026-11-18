@@ -1,15 +1,8 @@
-"""Entity features for data v4: RGB / depth with DINOv2, text with RoBERTa (replaces extract_features.py
-and extract_mmkg_features.py).
+"""Entity features (data v0): RGB / depth with DINOv2, text with RoBERTa.
 
-Why v4 (audit 18/11/2026, RESEARCH_PLAN.md P0.7)
--------------------------------------------------
-The v1-v3 ent_depth_emb.pt carried almost no information:
-  1. depth maps were saved as 16-bit PNG and re-read with Image.convert('L'), which CLIPS every value
-     above 255 to 255 -> nearly all-white maps;
-  2. they were then encoded by DepthEncoder (AlexNet-BN) with random, never-trained weights.
-Measured: mean pairwise cosine 0.97-0.999, a linear probe on the 150 VG object classes scored below the
-majority class, and depth 10-NN overlapped RGB 10-NN at chance level. RGB / text also went through a
-randomly initialised fc layer.
+Design notes: the depth map is kept as float end to end (an 8-bit round trip such as PIL convert('L') on a
+16-bit PNG clips it to almost all white), and every encoder is a frozen pretrained network with no randomly
+initialised layer, so the features carry information (checked by scripts/feature_quality.py).
 
 Pipeline (per source image)
 ---------------------------
@@ -34,15 +27,15 @@ entity2id (FB15K-237-ind reuses the FB15k-237-IMG features). entity2id.txt is ne
 
 Usage (from Code/)
 ------------------
-  python scripts/extract_features_v4.py kg --data data/FB15k-237-IMG --out data/_feat/FB15k-237-IMG
+  python scripts/extract_features.py kg --data data/FB15k-237-IMG --out data/_feat/FB15k-237-IMG
       --zip data/raw/fb15k237/fb15k_wn18_images.zip --mean-concat
-  python scripts/extract_features_v4.py fill --feat data/_feat/FB15k-237-IMG --data data/FB15K-237-ind
+  python scripts/extract_features.py fill --feat data/_feat/FB15k-237-IMG --data data/FB15K-237-ind
       --out data/_feat/FB15K-237-ind --mean-concat
-  python scripts/extract_features_v4.py kg --data data/MKG-Y --out data/_feat/MKG-Y
+  python scripts/extract_features.py kg --data data/MKG-Y --out data/_feat/MKG-Y
       --zip data/raw/mmrns_official/MKG-Y_img.zip --mean-concat
-  python scripts/extract_features_v4.py vrd --data data/Spatial-VRD --out data/_feat/Spatial-VRD
+  python scripts/extract_features.py vrd --data data/Spatial-VRD --out data/_feat/Spatial-VRD
       --zip data/raw/vrd/visual-relationship-detection-vrd-dataset.zip --mean-concat
-  python scripts/extract_features_v4.py vg --data data/Spatial-VG --out <dir>
+  python scripts/extract_features.py vg --data data/Spatial-VG --out <dir>
       --zip data/raw/vg/images.zip data/raw/vg/images2.zip --image-data data/raw/vg/image_data.json.zip
 Output: ent_rgb_emb.pt, ent_depth_emb.pt, ent_text_emb.pt (float32 [n_ent, 768]), ent_img_mask.pt,
         ent_fill.pt, for --mean-concat also ent_rgb_depth_mean_emb.pt / ent_rgb_depth_concat_emb.pt,

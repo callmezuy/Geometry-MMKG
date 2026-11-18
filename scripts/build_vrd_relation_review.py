@@ -18,7 +18,6 @@ Output columns (data/Spatial-VRD/relation_review.tsv):
   category           GEOMETRIC / POSSESSIVE / SEMANTIC / MISC of the label
   rule               which rule produced the label
   needs_review       non-empty = please check this row (reason given)
-  old_label          label produced by the old clean_mmsg_aliases.py
   examples           raw "text" predicates from the JSON
 
 Edit proposed_label / inverse / category directly in the TSV; clean_splits.py
@@ -273,10 +272,9 @@ def main():
     out = args.out or os.path.join(args.data, "relation_review.tsv")
     code_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-    spec = importlib.util.spec_from_file_location("audit", os.path.join(code_dir, "scripts", "audit_vrd_relations.py"))
-    audit = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(audit)
-    old_map = audit.load_old_mapper(code_dir)
+    spec = importlib.util.spec_from_file_location("vrd_raw", os.path.join(code_dir, "scripts", "vrd_raw.py"))
+    vrd_raw = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(vrd_raw)
 
     entity2id = {}
     with open(os.path.join(args.data, "entity2id.txt"), encoding="utf-8") as f:
@@ -284,8 +282,8 @@ def main():
         for l in f:
             p = l.rstrip("\n").split("\t")
             entity2id[p[0]] = int(p[1])
-    raw = audit.rebuild(os.path.join(args.data, "sg_train_annotations.json"), entity2id) + \
-          audit.rebuild(os.path.join(args.data, "sg_test_annotations.json"), entity2id)
+    raw = vrd_raw.rebuild(os.path.join(args.data, "sg_train_annotations.json"), entity2id) + \
+          vrd_raw.rebuild(os.path.join(args.data, "sg_test_annotations.json"), entity2id)
 
     cnt = Counter(p for _, p, _, _ in raw)
     examples = defaultdict(list)
@@ -308,7 +306,7 @@ def main():
         if lab in VRD_EXTRA and lab not in ("left of", "right of") and n >= 2 * args.review_min_count:
             reason = reason or "VRD extra label (not in VG150)"
         rows.append((p, n, norm, lab or "<DROP>", inv, CATEGORY.get(lab, "") if lab else "",
-                     rule, reason, old_map(p), " | ".join(examples[p])))
+                     rule, reason, " | ".join(examples[p])))
         if lab:
             label_mass[lab] += n
         else:
@@ -317,7 +315,7 @@ def main():
             review_mass += n
 
     with open(out, "w", encoding="utf-8", newline="\n") as f:
-        f.write("raw_relationship\tcount\tnormalized\tproposed_label\tinverse\tcategory\trule\tneeds_review\told_label\texamples\n")
+        f.write("raw_relationship\tcount\tnormalized\tproposed_label\tinverse\tcategory\trule\tneeds_review\texamples\n")
         for r in rows:
             f.write("\t".join(map(str, r)) + "\n")
 
@@ -328,8 +326,6 @@ def main():
     print(f"dropped: {sum(1 for r in rows if r[3] == '<DROP>')} predicates, {drop_mass} triples ({100 * drop_mass / total:.2f}%)")
     print(f"needs review: {n_rev} predicates, {review_mass} triples ({100 * review_mass / total:.2f}%)")
     print(f"inverted (passive): {sum(r[1] for r in rows if r[4])} triples")
-    changed = sum(r[1] for r in rows if r[3] != r[8] and r[3] != '<DROP>')
-    print(f"label differs from old heuristic: {changed} triples")
     by_cat = Counter()
     for lab, n in label_mass.items():
         by_cat[CATEGORY[lab]] += n

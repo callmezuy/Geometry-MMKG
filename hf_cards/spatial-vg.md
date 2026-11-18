@@ -18,7 +18,7 @@ Inductive multimodal KG completion over Visual Genome scene graphs: every **enti
 the annotated relations between boxes, and the split is by image, so valid / test entities never occur in train.
 Built for the Geometry-MMKG thesis (does monocular depth help multimodal KG completion?).
 Code: [github.com/callmezuy/Geometry-MMKG](https://github.com/callmezuy/Geometry-MMKG)
-(`scripts/clean_splits.py`, `scripts/extract_features_v4.py`, `notebooks/extract-vg-features.py`).
+(`scripts/clean_splits.py`, `scripts/extract_features.py`, `notebooks/extract-vg-features.py`).
 
 | Split | Triples | Entities in triples |
 |---|---:|---:|

@@ -17,15 +17,14 @@ Procedure
    remaining training triples (remaining degree >= 1).
 3. Split the held-out pool into valid / test.
 
-Stratification (--stratify, v3): step 2 caps the held-out count per stratum
+Stratification (--stratify): step 2 caps the held-out count per stratum
 (relation, relation category, or source prefix "SRC::rel"), so every stratum
 loses the same share to valid/test and the category mix of train, valid and test
-match. Without it (v2) degree-1 heavy POSSESSIVE triples were held out less
-often, so test was 80% GEOMETRIC against 67% in train.
+match. Without it, triples of degree-1-heavy relations (POSSESSIVE in VRD) are
+held out less often, and test would be 80% GEOMETRIC against 67% in train.
 
---keep-test (transductive MMKG): test stays exactly as in --src; only valid is
-re-drawn from train + valid, with strata sized to the test distribution
-(e.g. --stratify source: valid has the DB15K / MKG-W / MKG-Y mix of test).
+--keep-test: test stays exactly as in --src; only valid is re-drawn from
+train + valid, with strata sized to the test distribution.
 
 Guarantees: every entity and relation in valid/test occurs in train
 (with --keep-test: every valid entity, and every test entity that was in train before).
@@ -40,8 +39,6 @@ Output (same conventions as the source datasets):
 
 Usage (from the Code/ directory):
   python scripts/make_transductive_split.py --src data/Spatial-VRD --dst data/Spatial-VRD-Trans --stratify relation
-  python scripts/make_transductive_split.py --src data/Merged-MMKG --dst data/_build/Merged-MMKG \
-      --keep-test --stratify source --valid-size 5000
 """
 import argparse
 import json
@@ -178,7 +175,7 @@ def main():
     ap.add_argument("--test-ratio", type=float, default=0.20)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--stratify", choices=["none", "relation", "category", "source"], default="none",
-                    help="cap held-out triples per stratum (v3 uses relation for MMSG, source for MMKG)")
+                    help="cap held-out triples per stratum (Spatial-VRD-Trans uses relation)")
     ap.add_argument("--category-tsv", default=None, help="relation_category.tsv (default: <src>/relation_category.tsv)")
     ap.add_argument("--keep-test", action="store_true", help="keep test of --src, only re-draw valid")
     ap.add_argument("--valid-size", type=int, default=None, help="with --keep-test: number of valid triples")

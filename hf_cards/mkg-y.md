@@ -15,7 +15,7 @@ pretty_name: MKG-Y (Geometry-MMKG v0)
 Transductive multimodal KG completion on MKG-Y (YAGO subset of MMRNS, Xu et al., ACM MM 2022), with the official
 MMRNS images and descriptions and **depth features**.
 Code and rebuild script: [github.com/callmezuy/Geometry-MMKG](https://github.com/callmezuy/Geometry-MMKG)
-(`scripts/build_mkgy.py`, `scripts/extract_features_v4.py`). Rebuilding gives byte-identical split files.
+(`scripts/build_mkgy.py`, `scripts/extract_features.py`). Rebuilding gives byte-identical split files.
 
 | Split | Triples | Entities |
 |---|---:|---:|

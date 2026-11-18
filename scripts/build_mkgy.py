@@ -1,5 +1,5 @@
 """
-Build data/MKG-Y/ (RESEARCH_PLAN.md P0.12, data v4): MKG-Y of MMRNS (Xu et al., ACM MM 2022) with the official
+Build data/MKG-Y/ (RESEARCH_PLAN.md P0.3, data v0): MKG-Y of MMRNS (Xu et al., ACM MM 2022) with the official
 images and descriptions of the MMRNS Google Drive (folder 1sFC-P9RKnikqNXjmLcj0IX7x5zvRs-Yj).
 
 Sources (data/raw/mmrns_official/):

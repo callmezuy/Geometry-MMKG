@@ -1,7 +1,7 @@
-"""Thống kê các bộ dữ liệu trong data/ (v2) và in ra bảng Markdown.
+"""Thống kê các bộ dữ liệu trong data/ (v0) và in ra bảng Markdown.
 
 Chạy từ Code/:
-    python scripts/dataset_stats.py                         # cả 4 bộ, có kiểm tra embedding
+    python scripts/dataset_stats.py                         # cả 6 bộ, có kiểm tra embedding
     python scripts/dataset_stats.py --no-emb                # bỏ qua embedding (nhanh)
     python scripts/dataset_stats.py --out experiment_results/dataset_stats.md
 
@@ -11,7 +11,6 @@ Nội dung:
   3. Phân bố quan hệ: độ lệch (top-k), quan hệ hiếm, quan hệ test không có trong train.
   4. Loại ánh xạ quan hệ 1-1 / 1-N / N-1 / N-N (Bordes et al. 2013, ngưỡng 1.5) và quan hệ đối xứng.
   5. MMSG: nhóm quan hệ (GEOMETRIC/POSSESSIVE/SEMANTIC/MISC), số ảnh, thực thể/ảnh.
-     MMKG: nguồn (DB15K / MKG-W / MKG-Y).
   6. Embedding: số chiều, hàng toàn 0 hoặc NaN.
 """
 import argparse
@@ -180,14 +179,6 @@ def stats(name, d, do_emb):
             L.append(f"| {s} | {len(ti):,} | {np.mean([len(v) for v in ei.values()]):.2f} | {np.mean(list(ti.values())):.2f} |")
         ov = len(imgs_by["test"] & imgs_by["train"])
         L += ["", f"- Ảnh test cũng có trong train: {ov:,}/{len(imgs_by['test']):,} ({pct(ov, len(imgs_by['test'])):.1f}%).", ""]
-    if "::" in rels[0]:  # Merged-MMKG: quan hệ có tiền tố nguồn
-        src = lambda r: rels[r].split("::", 1)[0]
-        L += ["| source | relations | train | valid | test |", "|---|---:|---:|---:|---:|"]
-        rs = Counter(src(r) for r in range(n_rel))
-        per = {s: Counter(src(r) for r in trip[s][:, 1].tolist()) for s in SPLITS}
-        for k in sorted(rs):
-            L.append(f"| {k} | {rs[k]} | {per['train'][k]:,} | {per['valid'][k]:,} | {per['test'][k]:,} |")
-        L.append("")
 
     # 6. Embedding
     if do_emb:

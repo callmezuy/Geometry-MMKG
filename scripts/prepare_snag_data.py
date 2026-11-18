@@ -24,8 +24,8 @@ SNAG reads, for -dataset=<name>:
                                                    MKG-Y-textual.pth list (2,684 ids; same entity2id).
 
 Usage (from Code/):
-  python scripts/prepare_snag_data.py --data data/MKG-Y --snag baselines/SNAG/SNAG_MKGC --name MKG-Y-v4 --visual rgb
-  python scripts/prepare_snag_data.py --data data/MKG-Y --snag baselines/SNAG/SNAG_MKGC --name MKG-Y-v4-Dmean \
+  python scripts/prepare_snag_data.py --data data/MKG-Y --snag baselines/SNAG/SNAG_MKGC --name MKG-Y-v0 --visual rgb
+  python scripts/prepare_snag_data.py --data data/MKG-Y --snag baselines/SNAG/SNAG_MKGC --name MKG-Y-v0-Dmean \
       --visual rgb_depth_mean
   python scripts/prepare_snag_data.py --data data/FB15k-237-IMG --snag baselines/SNAG/SNAG_MKGC --name FB15k-237-IMG \
       --visual rgb

@@ -15,7 +15,7 @@ pretty_name: FB15k-237-IMG (Geometry-MMKG v0)
 Transductive multimodal knowledge graph completion on FB15k-237, with entity images, text and
 **depth features**. Built for the Geometry-MMKG thesis (does monocular depth help multimodal KG completion?).
 Code and rebuild script: [github.com/callmezuy/Geometry-MMKG](https://github.com/callmezuy/Geometry-MMKG)
-(`scripts/build_fb15k237_img.py`, `scripts/extract_features_v4.py`). Rebuilding gives byte-identical split files.
+(`scripts/build_fb15k237_img.py`, `scripts/extract_features.py`). Rebuilding gives byte-identical split files.
 
 | Split | Triples | Entities |
 |---|---:|---:|

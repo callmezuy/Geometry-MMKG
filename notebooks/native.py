@@ -26,7 +26,7 @@ def _():
         | `dmean` = NativE+D(mean) | `ent_rgb_depth_mean_emb.pt` (768) | như trên |
         | `dconcat` = NativE+D(concat) | `ent_rgb_depth_concat_emb.pt` (1536) | như trên |
 
-        Thực thể thiếu ảnh mang một vector hằng (P0.13). Giao thức (mục 4): chọn checkpoint theo MRR valid,
+        Thực thể thiếu ảnh mang một vector hằng (P0.7). Giao thức (mục 4): chọn checkpoint theo MRR valid,
         test một lần, ghi rank từng bộ ba cho `scripts/compute_metrics.py`. Diff của NativE so với mã gốc:
         `baselines/PROVENANCE.md`.
 
@@ -118,7 +118,7 @@ def _(
             "ent_text_emb.pt", "ent_img_mask.pt", "ent_fill.pt", "relation_category.tsv", "feature_stats.json"],
     )
 
-    # Kiểm tra bảng đặc trưng: đúng số thực thể, hữu hạn; dòng thiếu ảnh = vector hằng (P0.13)
+    # Kiểm tra bảng đặc trưng: đúng số thực thể, hữu hạn; dòng thiếu ảnh = vector hằng (P0.7)
     with open(os.path.join(DATA_DIR, "entity2id.txt"), encoding="utf-8") as _f:
         N_ENT = int(_f.readline())
     _load = lambda _fn: torch.load(os.path.join(DATA_DIR, _fn), map_location="cpu", weights_only=True)

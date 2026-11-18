@@ -1,5 +1,5 @@
 """
-Publish data/<folder>/ to a Hugging Face dataset repo (RESEARCH_PLAN.md P0.14, data v0 since 18/11/2026).
+Publish data/<folder>/ to a Hugging Face dataset repo (RESEARCH_PLAN.md P0.8, data v0).
 
 Uploads every file of the folder (skips .git*, temp files starting with "_") plus hf_cards/<repo>.md as README.md
 in one commit, then optionally tags it. Repos are public.
@@ -39,7 +39,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--only", nargs="*", choices=list(REPOS), help="repos to publish (default: all)")
     ap.add_argument("--tag", help="tag to create on the new commit (e.g. v0)")
-    ap.add_argument("--message", default="Data v0 (RESEARCH_PLAN.md P0.14)")
+    ap.add_argument("--message", default="Data v0 (RESEARCH_PLAN.md P0.8)")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
     api = HfApi()

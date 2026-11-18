@@ -19,7 +19,7 @@ the annotated relations between boxes, and the split is by image, so valid / tes
 Built for the Geometry-MMKG thesis (does monocular depth help multimodal KG completion?).
 Transductive control with the same triples: [callmezuy/spatial-vrd-trans](https://huggingface.co/datasets/callmezuy/spatial-vrd-trans).
 Code: [github.com/callmezuy/Geometry-MMKG](https://github.com/callmezuy/Geometry-MMKG)
-(`scripts/build_vrd_relation_review.py`, `scripts/clean_splits.py`, `scripts/extract_features_v4.py`).
+(`scripts/build_vrd_relation_review.py`, `scripts/clean_splits.py`, `scripts/extract_features.py`).
 
 | Split | Triples | Entities |
 |---|---:|---:|
@@ -35,8 +35,7 @@ Code: [github.com/callmezuy/Geometry-MMKG](https://github.com/callmezuy/Geometry
   `sg_test_annotations.json` (1,310 raw predicates, object names and attributes). Images are **not** redistributed.
 - Relations: raw predicates mapped to the curated predicate vocabulary of
   [callmezuy/spatial-vg](https://huggingface.co/datasets/callmezuy/spatial-vg) plus a few VRD-only labels
-  (`left of`, `right of`, `touching`, ...); 1.0% of triples dropped, some inverted. Mapping: `relation_review.tsv`;
-  what an older heuristic did: `relation_audit.tsv`.
+  (`left of`, `right of`, `touching`, ...); 1.0% of triples dropped, some inverted. Mapping: `relation_review.tsv`.
 - Relations with < 10 triples dropped; duplicates within a split removed; no valid/test triple occurs in train.
 - Test = original VRD test images; valid = 10% of the train images (grouped by image).
 - `relation_category.tsv`: GEOMETRIC / POSSESSIVE / SEMANTIC / MISC per relation (our classification following the

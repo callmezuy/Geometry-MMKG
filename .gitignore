@@ -41,7 +41,6 @@ venv.bak/
 datasets/
 Dataset/
 Spatial-MMSG/
-Merged-MMKG/
 
 # IDEs
 .idea/
@@ -58,7 +57,6 @@ scratch/
 ZipDepth/
 checkpoints/
 hf_weights/
-mkgformer-mmkg/
 *.zip
 *.tar
 *.tar.gz

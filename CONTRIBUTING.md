@@ -7,33 +7,37 @@
 | # | File | Để biết |
 |---|---|---|
 | 1 | [RESEARCH_PLAN.md](RESEARCH_PLAN.md) | Câu hỏi nghiên cứu, thiết kế 2×2 (MMKG/MMSG × transductive/inductive), giao thức đánh giá (mục 4), danh sách task P0–P6 và trạng thái. **Đây là tài liệu chính**; task nào xong thì đánh dấu `[x]` ở đây. |
-| 2 | [data/README.md](data/README.md) | Bốn bộ dữ liệu v2, repo HF và tag, lệnh dựng lại dữ liệu. |
-| 3 | [CONVERSATION_SUMMARY.md](CONVERSATION_SUMMARY.md) | Cách chạy trên Molab, kết quả đã có, quy tắc làm việc. |
-| 4 | Code chính | `notebooks/geometry-*.py` → `core/models/end_to_end.py` → `core/fusion/geometry_guided_fusion.py` → `core/models/evaluation.py` → `scripts/compute_metrics.py` |
-| 5 | Baseline (khi cần) | `baselines/{NativE,SNAG/SNAG_MKGC}/mmkgc/config/{Tester,ValidSelector}.py`, `scripts/patch_mkgformer.py` |
+| 2 | [data/README.md](data/README.md) | Sáu bộ dữ liệu v0, repo HF, lệnh dựng lại dữ liệu và đặc trưng. |
+| 3 | Code chính | `core/models/end_to_end.py` → `core/fusion/geometry_guided_fusion.py` → `core/models/evaluation.py` → `scripts/compute_metrics.py` |
+| 4 | Baseline (khi cần) | [baselines/PROVENANCE.md](baselines/PROVENANCE.md) (mã gốc và mọi thay đổi), `notebooks/native.py`, `scripts/prepare_snag_data.py`, `scripts/patch_mkgformer.py` |
 
-`experiment_results/` chỉ chứa kết quả **v1, chạy theo giao thức cũ** (xem [experiment_results/README.md](experiment_results/README.md)). Không lấy số ở đó để so sánh.
+`experiment_results/` hiện chỉ có thống kê dữ liệu; chưa có kết quả thí nghiệm nào.
 
 ## 2. Bản đồ repo
 
 ```
 core/
   data_engineering/fast_dataset.py   FastMMSGDataset (đặc trưng .pt), get_all_true_triplets
-  features/encoders.py               encoder Text / RGB / Depth (chỉ dùng khi không có .pt)
+  features/encoders.py               encoder Text / RGB / Depth train end-to-end (không dùng để trích đặc trưng)
   fusion/geometry_guided_fusion.py   gate RGB–Depth + cross-attention với Text
   models/end_to_end.py               GeometryMMKGModel
   models/kg_reasoning.py             TransE scorer, JointLoss
   models/evaluation.py               đánh giá chung (head + tail, filtered), save_ranks
   reproducibility.py                 set_seed, seed_worker
-notebooks/                           Marimo notebook chạy trên Molab (tải dữ liệu từ HF)
+notebooks/                           Marimo notebook chạy trên Molab (tải dữ liệu từ HF, tag v0)
+  native.py                          NativE: Control / +D mean / +D concat trên 5 dataset
+  native-db15k-sanity.py             tái lập số paper NativE trên DB15K (P3.0b)
+  extract-vg-features.py             trích đặc trưng Spatial-VG
 scripts/
   train.py                           train GeometryMMKG local (Spatial-VRD)
   compute_metrics.py                 NGUỒN DUY NHẤT của số liệu báo cáo
-  clean_splits.py, build_vrd_relation_review.py, make_transductive_split.py   dựng dữ liệu v2/v3/v3.1
+  build_fb15k237_img.py, build_fb15k237_ind.py, build_mkgy.py                 dựng dữ liệu MMKG
+  build_vrd_relation_review.py, clean_splits.py, make_transductive_split.py   dựng dữ liệu scene graph
+  extract_features.py, feature_quality.py                                    đặc trưng và kiểm tra chất lượng
+  prepare_snag_data.py               dữ liệu cho SNAG (tầng dữ liệu, kể cả missing.json)
   patch_mkgformer.py                 patch submodule MKGformer lúc chạy
-  legacy/                            script cũ, không dùng cho thí nghiệm mới
 baselines/
-  NativE/, SNAG/                     code vendored, đã sửa (rank_file, ValidSelector, depth cho SNAG)
+  NativE/, SNAG/                     mã gốc của tác giả + thay đổi được phép (baselines/PROVENANCE.md, patches/)
   MKGformer/                         git submodule (upstream zjunlp), KHÔNG sửa trực tiếp
 tests/                               test_evaluation.py, test_valid_selector.py
 data/                                gitignored, trừ data/README.md (tải từ HF)
@@ -49,7 +53,7 @@ pip install -r requirements.txt
 python tests/test_evaluation.py && python tests/test_valid_selector.py
 ```
 
-Dữ liệu: notebook tự tải về bằng `snapshot_download`. Để chạy local, tải repo HF vào `data/<tên>/` (bảng trong `data/README.md`). Muốn số liệu tái lập được thì ghim `revision="v3.1"`.
+Dữ liệu: notebook tự tải về bằng `snapshot_download`. Để chạy local, tải repo HF vào `data/<tên>/` (bảng trong `data/README.md`). Muốn số liệu tái lập được thì ghim `revision="v0"`.
 
 Notebook trên Molab tải code từ GitHub `main`, nên **code chỉ có tác dụng trên Molab sau khi đã push**.
 
@@ -77,7 +81,7 @@ Mọi mô hình (GeometryMMKG, NativE, SNAG, MKGformer, baseline mới) phải t
 - **Thứ tự cột khác nhau:** `train.txt` là `h \t r \t t`, còn `train2id.txt` (OpenKE) là `h \t t \t r`. Dòng đầu của cả hai là số dòng.
 - **VRD/VG là inductive:** 100% entity ở valid/test không có trong train (chia theo ảnh). Các mô hình học embedding theo ID (NativE, SNAG, MoMoK) chạy nguyên bản: entity chưa thấy giữ embedding ID ngẫu nhiên, chỉ phần đặc trưng mang thông tin, nên số thấp là đúng bản chất. Không viết bản feature-only (sửa kiến trúc). Không chạy các mô hình này trên Spatial-VG.
 - **Spatial-VG lấy từ VG150-curated `no_part_whole`**, không phải VG150 chuẩn; có 1,44M entity, mỗi file `.pt` khoảng 4,4 GB, cần nạp bằng `torch.load(..., mmap=True)`.
-- **SNAG trên dữ liệu của mình:** truyền `-use_pool 0` (đặc trưng 768 chiều). Tên dataset chứa chữ `MKG` (ví dụ MKG-Y) thì code gốc đọc `missing.json`: tạo file này từ mặt nạ ảnh của mình, cùng định dạng với file của tác giả (tầng dữ liệu), không sửa code để bỏ qua.
+- **SNAG trên dữ liệu của mình:** chuẩn bị bằng `scripts/prepare_snag_data.py`. Tên dataset không chứa `MKG` thì truyền `-use_pool 0`. Tên chứa `MKG` (ví dụ `MKG-Y-v0`) thì code gốc đọc `missing.json`; script đã tạo khoá cho tên đó từ mặt nạ ảnh của mình, cùng định dạng với file của tác giả. Không sửa code để bỏ qua.
 - **`baselines/MKGformer` là submodule:** thay đổi chỉ qua `scripts/patch_mkgformer.py`. Không commit con trỏ submodule bị "dirty".
 - **PyTorch ≥ 2.6:** khi `torch.load` file chứa object pickle, cần thêm `weights_only=False`.
 - **Marimo:** tên biến không được trùng giữa các cell; biến cục bộ trong cell đặt tên bắt đầu bằng `_`.

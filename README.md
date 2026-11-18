@@ -6,28 +6,31 @@ more than concept-level KGs (MMKG), and that an adaptive depth-gated fusion work
 
 The proposed model, **GeometryMMKG**, fuses Text, RGB and Depth features of each entity
 (gated RGB–Depth fusion followed by cross-attention with text) and scores triples with TransE.
-The baselines are NativE, SNAG and MKGformer.
+The baselines are NativE, SNAG, MoMoK, MKGformer and CMR (RESEARCH_PLAN.md 3.2).
 
 **Start here:** [CONTRIBUTING.md](CONTRIBUTING.md) (onboarding and rules) and [RESEARCH_PLAN.md](RESEARCH_PLAN.md) (design, protocol, tasks and status).
 
-## Datasets (v2)
+## Datasets (v0)
 
-| Dataset | HF repo | Train / Valid / Test | Setting |
+| Dataset | HF repo (tag `v0`) | Train / Valid / Test | Setting |
 |---|---|---|---|
-| Merged-MMKG | `callmezuy/unified-mmkg` | 48,798 / 1,395 / 6,022 | transductive |
-| Spatial-VRD | `callmezuy/spatial-vrd` | 77,227 / 8,614 / 21,563 | inductive (split by image) |
-| Spatial-VG | `callmezuy/spatial-vg` | 319,069 / 26,372 / 137,984 | inductive (official image split) |
-| Spatial-VRD-Trans | `callmezuy/spatial-vrd-trans` | 77,331 / 8,592 / 21,481 | transductive control |
+| FB15k-237-IMG | `callmezuy/fb15k237-img` | 272,115 / 17,535 / 20,466 | MMKG, transductive (main) |
+| MKG-Y | `callmezuy/mkg-y` | 21,310 / 2,665 / 2,663 | MMKG, transductive |
+| FB15K-237-ind | `callmezuy/fb15k237-ind` | 215,082 / 42,164 / 52,870 | MMKG, inductive |
+| Spatial-VRD | `callmezuy/spatial-vrd` | 77,227 / 8,614 / 21,563 | MMSG, inductive (split by image) |
+| Spatial-VRD-Trans | `callmezuy/spatial-vrd-trans` | 77,371 / 8,578 / 21,455 | MMSG, transductive control |
+| Spatial-VG | `callmezuy/spatial-vg` | 319,069 / 26,372 / 137,984 | MMSG, inductive (official image split) |
 
-Every entity has pre-extracted 768-d `ent_{text,rgb,depth}_emb.pt` features. Details, file formats and rebuild commands are in [data/README.md](data/README.md).
+Every entity has 768-d `ent_{rgb,depth,text}_emb.pt` features (DINOv2 for RGB and ZipDepth depth, RoBERTa for text).
+Details, file formats and rebuild commands are in [data/README.md](data/README.md).
 
 ## Layout
 
 ```
-core/            dataset, encoders, fusion, GeometryMMKG model, unified evaluation, seeding
-notebooks/       Marimo notebooks run on Molab (GeometryMMKG, NativE, MKGformer)
-scripts/         data building/cleaning, train.py, compute_metrics.py, patch_mkgformer.py
-baselines/       NativE, SNAG (vendored, modified), MKGformer (git submodule)
+core/            dataset, fusion, GeometryMMKG model, unified evaluation, seeding
+notebooks/       Marimo notebooks run on Molab (feature extraction, NativE, ...)
+scripts/         data building, feature extraction, train.py, compute_metrics.py, baseline data preparation
+baselines/       NativE, SNAG (original code + allowed changes, see baselines/PROVENANCE.md), MKGformer (submodule)
 tests/           brute-force checks of the evaluation code
 ZipDepth/        depth estimator used to extract depth features
 ```

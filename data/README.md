@@ -1,10 +1,9 @@
 # Data layout (v0, 18/11/2026)
 
 Each `data/<name>/` folder holds the current version of a dataset and is published as its own public HF dataset
-repo, tagged `v0` (RESEARCH_PLAN.md P0.14). The dataset card of each repo is `hf_cards/<repo>.md`;
-`python scripts/publish_hf.py` uploads a folder plus its card. **v0 restarts the version history**: the earlier
-repos (v1–v3.1, incl. `unified-mmkg` = Merged-MMKG) were deleted on 18/11/2026, and their old `ent_*_emb.pt`
-carried almost no depth information (P0.7). Pin data with `snapshot_download(..., revision="v0")`.
+repo, tagged `v0` (RESEARCH_PLAN.md P0.8). The dataset card of each repo is `hf_cards/<repo>.md`;
+`python scripts/publish_hf.py` uploads a folder plus its card. Pin data with
+`snapshot_download(..., revision="v0")`.
 
 | Folder | HF repo | Train / Valid / Test | Ent. | Rel. | Setting | Built from |
 |---|---|---|---:|---:|---|---|
@@ -27,7 +26,7 @@ and the tag `v0` is created only once they are in. Statistics of every dataset: 
 - `entity2text.txt` (names / short text) and `entity2textlong.txt` (descriptions, MMKG only): `name \t text`; only
   Spatial-VG has a count line.
 
-## Features (all datasets, `scripts/extract_features_v4.py`)
+## Features (all datasets, `scripts/extract_features.py`)
 
 | File | Content |
 |---|---|
@@ -52,12 +51,11 @@ vector. `feature_stats.json` logs the extraction, `feature_quality.json` the qua
 - `FB15K-237-ind/{train,valid,test}_entities.txt`: the entity sets of the inductive split.
 - `relation_category.tsv` (scene graphs): GEOMETRIC / POSSESSIVE / SEMANTIC / MISC per relation.
 - `Spatial-VRD/relation_review.tsv`: raw predicate -> label (+ head/tail inversion). Edit it, then rebuild.
-- `Spatial-VRD/relation_audit.tsv`: what the old heuristic (`scripts/legacy/`) did to each raw predicate.
 - `Spatial-VRD-Trans/split_stats.json`: statistics of the transductive re-split.
 
 ## Rebuild (from `Code/`)
 
-Raw sources go to `data/raw/` (see RESEARCH_PLAN.md P0.10a–P0.12 for where each comes from).
+Raw sources go to `data/raw/` (see RESEARCH_PLAN.md P0.1–P0.6 for where each comes from).
 
 ```bash
 # MMKG (each rebuild is byte-identical, checked 18/11/2026)
@@ -75,15 +73,15 @@ python scripts/clean_splits.py --src data/Spatial-VG --dst data/_build/Spatial-V
 python scripts/make_transductive_split.py --src data/Spatial-VRD --dst data/Spatial-VRD-Trans --stratify relation
 
 # Features (write to data/_feat/<name>/, then move into data/<name>/)
-python scripts/extract_features_v4.py kg --data data/FB15k-237-IMG --out data/_feat/FB15k-237-IMG \
+python scripts/extract_features.py kg --data data/FB15k-237-IMG --out data/_feat/FB15k-237-IMG \
     --zip data/raw/fb15k237/fb15k_wn18_images.zip --mean-concat
-python scripts/extract_features_v4.py fill --feat data/_feat/FB15k-237-IMG --data data/FB15K-237-ind \
+python scripts/extract_features.py fill --feat data/_feat/FB15k-237-IMG --data data/FB15K-237-ind \
     --out data/_feat/FB15K-237-ind --mean-concat
-python scripts/extract_features_v4.py kg --data data/MKG-Y --out data/_feat/MKG-Y \
+python scripts/extract_features.py kg --data data/MKG-Y --out data/_feat/MKG-Y \
     --zip data/raw/mmrns_official/MKG-Y_img.zip --mean-concat
-python scripts/extract_features_v4.py vrd --data data/Spatial-VRD --out data/_feat/Spatial-VRD \
+python scripts/extract_features.py vrd --data data/Spatial-VRD --out data/_feat/Spatial-VRD \
     --zip data/raw/vrd/visual-relationship-detection-vrd-dataset.zip --mean-concat
-python scripts/extract_features_v4.py fill --feat data/_feat/Spatial-VRD --data data/Spatial-VRD-Trans \
+python scripts/extract_features.py fill --feat data/_feat/Spatial-VRD --data data/Spatial-VRD-Trans \
     --out data/_feat/Spatial-VRD-Trans --mean-concat
 # Spatial-VG: notebooks/extract-vg-features.py on Molab (no --mean-concat)
 python scripts/feature_quality.py --data data/FB15k-237-IMG --labels fb15k237   # also: vrd, vg, none (MKG-Y)

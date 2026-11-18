@@ -1,9 +1,9 @@
 """
-Quality checks of the v4 entity features (RESEARCH_PLAN.md P0.7 / P0.13), per modality (rgb, depth, text):
-  mean_cos      mean pairwise cosine over a sample (v1-v3 depth: 0.97-0.999, i.e. all rows nearly identical)
+Quality checks of the entity features (RESEARCH_PLAN.md P0), per modality (rgb, depth, text):
+  mean_cos      mean pairwise cosine over a sample (close to 1 = all rows nearly identical, no information)
   pc1_var       share of variance on the first principal component
   probe_acc     linear probe (multinomial logistic regression on standardised features, 80/20 stratified split)
-                predicting an entity label; compared with the majority class (v1-v3 VG depth: 7.7% < 8.4%)
+                predicting an entity label; compared with the majority class (must be clearly above it)
   knn10_overlap mean overlap of the 10 nearest neighbours (cosine) of depth and of RGB, with the chance level
 Only entities with an image (ent_img_mask.pt) are used for rgb / depth, so filled rows do not inflate the numbers.
 

@@ -1,5 +1,5 @@
 """
-Build data/FB15K-237-ind/ (RESEARCH_PLAN.md P0.11, data v4): the inductive FB15k-237 split of BLP
+Build data/FB15K-237-ind/ (RESEARCH_PLAN.md P0.2, data v0): the inductive FB15k-237 split of BLP
 (Daza et al., WWW 2021), used with images and descriptions by CMR (Zhao et al., SIGIR 2024).
 
 Sources:
@@ -9,7 +9,7 @@ Sources:
                                                byte-identical to OreOZhao/CMR data/FB15k237_ind/{train,valid,test}.txt
   data/FB15k-237-IMG/                          built first by scripts/build_fb15k237_img.py; same 14,541 entities and
                                                237 relations, so entity2id / relation2id, texts and the image index are
-                                               copied unchanged and the v4 features can be shared by both datasets
+                                               copied unchanged and the features can be shared by both datasets
 
 Checks (CMR Table 1): train 11,633 entities / 215,082 triples, valid 1,454 / 42,164, test 1,454 / 52,870,
 237 relations; train / valid / test entity sets pairwise disjoint; the three splits together are exactly the

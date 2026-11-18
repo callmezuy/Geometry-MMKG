@@ -25,7 +25,6 @@ Outputs in --dst:
 writing to data/_build/ and then moving the files into data/<name>/:
   python scripts/clean_splits.py --src data/Spatial-VRD --dst data/_build/Spatial-VRD       --vrd-review data/Spatial-VRD/relation_review.tsv --valid-group image-prefix --valid-ratio 0.1
   python scripts/clean_splits.py --src data/Spatial-VG --dst data/_build/Spatial-VG       --vg-h5 data/Spatial-VG/VG-SGG.h5 --vg-dicts data/Spatial-VG/VG-SGG-dicts.json
-  python scripts/clean_splits.py --src data/_archive_v1/Merged-MMKG --dst data/_build/Merged-MMKG
 """
 import argparse
 import json
@@ -101,7 +100,7 @@ def _load_module(name):
 
 def load_vrd_from_review(json_dir, review_tsv, ent2id):
     """VRD: raw sg_dataset JSON + reviewed label table. Valid is left empty (re-grouped later)."""
-    audit = _load_module("audit_vrd_relations")
+    vrd_raw = _load_module("vrd_raw")
     table = {}
     with open(review_tsv, encoding="utf-8") as f:
         header = next(f).rstrip("\n").split("\t")
@@ -114,7 +113,7 @@ def load_vrd_from_review(json_dir, review_tsv, ent2id):
     out, missing, dropped, inverted = {}, 0, 0, 0
     for sp, fn in (("train", "sg_train_annotations.json"), ("test", "sg_test_annotations.json")):
         triples = []
-        for s, raw, o, _ in audit.rebuild(os.path.join(json_dir, fn), ent2id):
+        for s, raw, o, _ in vrd_raw.rebuild(os.path.join(json_dir, fn), ent2id):
             if raw not in table:
                 missing += 1
                 continue

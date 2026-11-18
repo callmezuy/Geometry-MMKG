@@ -1,7 +1,7 @@
 """
-Build data/FB15k-237-IMG/ (RESEARCH_PLAN.md P0.10, data v4).
+Build data/FB15k-237-IMG/ (RESEARCH_PLAN.md P0.1, data v0).
 
-Sources (downloaded in P0.10a, under data/raw/fb15k237/):
+Sources (see RESEARCH_PLAN.md P0.1; under data/raw/fb15k237/):
   kgbert/{train,dev,test}.tsv        standard FB15k-237 split (Toutanova & Chen, 2015), as shipped by KG-BERT
                                      (byte-identical to baselines/MKGformer/MKG/dataset/FB15k-237/)
   kgbert/{entities,relations}.txt    entity / relation lists (their order defines entity2id / relation2id)
