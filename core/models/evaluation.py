@@ -57,12 +57,16 @@ def _pick_store_device(num_entities, embed_dim, device, keep_on_gpu):
 
 
 @torch.no_grad()
-def fused_entity_table(model, all_text, all_rgb, all_depth, device, store_device, batch_size=2048):
+def fused_entity_table(model, all_text, all_rgb, all_depth, device, store_device, batch_size=2048, all_mask=None):
+    """all_mask: optional bool [N] image mask, passed to forward_fusion when given (P2.6)."""
     out = []
     n = len(all_text)
     for i in range(0, n, batch_size):
         j = min(i + batch_size, n)
-        fused = model.forward_fusion(all_text[i:j].to(device), all_rgb[i:j].to(device), all_depth[i:j].to(device))
+        args = [all_text[i:j].to(device), all_rgb[i:j].to(device), all_depth[i:j].to(device)]
+        if all_mask is not None:
+            args.append(all_mask[i:j].to(device))
+        fused = model.forward_fusion(*args)
         out.append(fused.to(store_device))
     return torch.cat(out, dim=0)
 
@@ -85,9 +89,11 @@ def _filtered_correction(queries, true_scores, table, filters, device):
 
 @torch.no_grad()
 def evaluate_link_prediction(model, all_text, all_rgb, all_depth, dataloader, all_true_triplets, device,
-                             entity_chunk_size=32768, keep_on_gpu=None, return_ranks=False, desc="Evaluating"):
+                             entity_chunk_size=32768, keep_on_gpu=None, return_ranks=False, desc="Evaluating",
+                             all_mask=None):
     """
     Args:
+        all_mask: optional bool [N] image mask (ent_img_mask.pt) for models that take it (P2.6).
         all_true_triplets: {(h, r): set(t)} over train+valid+test (get_all_true_triplets).
         keep_on_gpu: None = automatic (P1.6), True / False to force.
         return_ranks: also return per-triplet ranks (for save_ranks / compute_metrics).
@@ -100,7 +106,7 @@ def evaluate_link_prediction(model, all_text, all_rgb, all_depth, dataloader, al
     num_entities = len(all_text)
     store_device = _pick_store_device(num_entities, model.embed_dim, device, keep_on_gpu)
     print(f"Pre-computing fused representations for all {num_entities:,} entities (stored on {store_device})...")
-    table = fused_entity_table(model, all_text, all_rgb, all_depth, device, store_device)
+    table = fused_entity_table(model, all_text, all_rgb, all_depth, device, store_device, all_mask=all_mask)
     head_filter = _head_filter(all_true_triplets)
 
     hs, rs, ts, rank_t, rank_h = [], [], [], [], []

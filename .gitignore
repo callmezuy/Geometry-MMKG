@@ -61,3 +61,6 @@ hf_weights/
 *.tar
 *.tar.gz
 *.7z
+
+# Local training outputs (scripts/train.py --out default; results go to the private HF results repo)
+results/

@@ -1,6 +1,6 @@
 # Kế Hoạch Nghiên Cứu & Danh Sách Công Việc
 
-**Cập nhật:** 18/11/2026. **Dữ liệu:** v0 (tag `v0` trên HF, mục P0). Mọi thí nghiệm chạy trên dữ liệu v0 và theo giao thức ở mục 4.
+**Cập nhật:** 19/11/2026. **Dữ liệu:** v0 (tag `v0` trên HF, mục P0). Mọi thí nghiệm chạy trên dữ liệu v0 và theo giao thức ở mục 4.
 
 ---
 
@@ -55,7 +55,7 @@ Kết quả kỳ vọng: Δdepth ≈ 0 ở hàng MMKG và Δdepth > 0 ở hàng 
 
 | Biến thể | Mục đích |
 |---|---|
-| Full (RGB + Depth + Text, gating) | Mô hình đề xuất |
+| Full (RGB + Depth + Text, gating) | Mô hình đề xuất (thiết kế ở đầu mục P2) |
 | w/o Depth (RGB + Text) | Δdepth của chính mô hình |
 | Fusion = concat | RQ2 |
 | Fusion = mean(RGB, Depth) | RQ2 |
@@ -88,7 +88,7 @@ Kết quả kỳ vọng: Δdepth ≈ 0 ở hàng MMKG và Δdepth > 0 ở hàng 
 1. **Baseline dùng bảng đặc trưng (NativE, SNAG, Feature-TransE, ...):** dùng chung một bảng đặc trưng; mọi thực thể thiếu ảnh nhận **cùng một vector hằng** = trung bình đặc trưng của các thực thể có ảnh (tính trên thực thể train, riêng cho RGB và depth). Nhiều ảnh cho một thực thể: lấy trung bình đặc trưng DINOv2. Không sửa code mô hình: lớp chiếu học được biến vector hằng `c` thành `Wc + b`, gần tương đương một vector "thiếu" học được.
 2. **Không dùng vector ngẫu nhiên riêng cho từng thực thể** (cách hay gặp trong các bộ MMKG): ở chế độ transductive nó đóng vai trò embedding theo ID miễn phí, và bản có depth nhận thêm một bảng ID như vậy, làm Δdepth dương giả. Ngoại lệ duy nhất là cơ chế có sẵn trong code gốc của baseline (SNAG đọc `missing.json` trên bộ MKG, P3.0d), vì quy tắc P3 giữ nguyên code gốc.
 3. **Baseline đọc ảnh thô (MKGformer, ...):** giữ nguyên cách gốc (MKGformer: ảnh toàn 0 cho thực thể thiếu ảnh, chọn ngẫu nhiên tối đa 7 ảnh chia 1 chính / 3 phụ / 3 RCNN).
-4. **GeometryMMKG:** vector "thiếu" học được + mặt nạ có/không, fusion bỏ qua modality thiếu (P2.6). Đây là **thiết kế của mô hình đề xuất**, không phải quy tắc chung. Kèm ablation dùng cùng vector hằng như baseline, không mặt nạ (mục 3.1), để phần chênh lệch với baseline không bị quy cho cách xử lý thiếu ảnh.
+4. **GeometryMMKG:** mặt nạ có/không + một vector "thiếu" học được thay cho phần thị giác (RGB và depth) của thực thể thiếu ảnh (P2.6). Đây là **thiết kế của mô hình đề xuất**, không phải quy tắc chung. Kèm ablation dùng cùng vector hằng như baseline, không mặt nạ (mục 3.1), để phần chênh lệch với baseline không bị quy cho cách xử lý thiếu ảnh.
 
 Δdepth (RQ1) không bị ảnh hưởng bởi lựa chọn này vì luôn so trong cùng một mô hình: bản có và không có depth thiếu ở cùng thực thể và được xử lý như nhau.
 
@@ -189,15 +189,20 @@ Sáu bộ, mỗi bộ một repo HF public, tag `v0`; cấu trúc file, lệnh d
 
 ### P2. Mô hình đề xuất
 
-Vấn đề đã biết của code hiện tại (`core/`): GeometryMMKG chỉ lấy mẫu âm phía tail (in-batch, hardest negative) trong khi đánh giá cả head; module GCN được khởi tạo nhưng không dùng.
+**Thiết kế (quyết định 18/11/2026).** Thực thể = hàm của đặc trưng đóng băng (text t, RGB x, depth z), không có embedding theo ID, nên cùng một mô hình chạy ở cả bốn ô 2×2. (1) Gộp RGB–depth thành vision v theo `fusion_mode` (P2.1). (2) Thực thể thiếu ảnh: v ← một vector học được `v_miss` (P2.6). (3) Cổng text–vision: u = W_v v, g = σ(W_tg[t; u]), h = LN(t + Dropout(g ⊙ u)) / √d (P2.3). LN không có gain/bias học được, nên mọi thực thể có chuẩn L2 bằng 1 như TransE gốc (quyết định 19/11/2026): với gain học được, mô hình tự co/giãn cả không gian, làm margin và nhiệt độ đổi ý nghĩa trong lúc train (đo trên Spatial-VRD: khoảng cách tới đáp án đúng 435 lúc khởi tạo, 88 sau 1 epoch; với chuẩn cố định: 35,9 → 32,3 sau 3 epoch). (4) Điểm TransE L1 với embedding quan hệ. Train: âm mẫu **hai phía trong batch** (mọi thực thể khác nhau của batch thay head và thay tail, như BLP); bỏ âm mẫu là đáp án đúng **theo train** (không dùng valid/test khi train); loss margin có trọng số self-adversarial (detach), trung bình hai phía. **Bỏ GCN:** ở chế độ inductive, cạnh của thực thể test chỉ nằm trong chính các bộ ba test (dùng để truyền tin là rò rỉ), còn chỉ dùng đồ thị train thì thực thể test không có hàng xóm, biểu diễn train và test khác bản chất. **Bỏ loss căn chỉnh** text/RGB/depth: nó được tính trên đặc trưng đóng băng nên không có gradient. Code: `core/fusion/geometry_guided_fusion.py`, `core/models/{end_to_end,kg_reasoning}.py`, `core/data_engineering/fast_dataset.py`.
 
-- [ ] **P2.1** Thêm cờ cấu hình cho các ablation ở mục 3.1 (`use_depth`, `fusion_mode`).
+- [x] **P2.1** Cờ ablation (mục 3.1): `use_depth`, `fusion_mode` ∈ {`gate`: G = σ(W_g[x; z]), v = G⊙x + (1−G)⊙z; `concat`: Linear(2d→d); `mean`; `fixed`: một scalar học được α, v = σ(α)x + (1−σ(α))z}, `missing_mode` ∈ {`learned_mask`, `constant`}. Biến thể có tên (`VARIANTS`): `full`, `no_depth` (v = x), `concat`, `mean`, `fixed`, `constant`.
+  - `scripts/train.py --data --variant --epochs --seed` cùng các siêu tham số (`--lr --margin --adv-temp --batch-size --dropout --weight-decay --valid-every --valid-max`). Đánh giá valid mỗi `--valid-every` epoch và sau epoch cuối, giữ checkpoint có MRR valid cao nhất, test một lần. Spatial-VG: valid trên tập con 5.000 bộ ba cố định (seed 0, chung cho mọi biến thể và seed; mục 4.9). Ghi `ranks_geometry_<ds>_<variant>_seed<s>_test.csv`, `metrics_…json` (test, valid tốt nhất, epoch tốt nhất, lịch sử từng epoch, tham số, commit) và checkpoint.
+  - Nhiệt độ self-adversarial mặc định 1 (như RotatE): chạy thử 3 epoch trên Spatial-VRD, số âm mẫu hiệu dụng (exp entropy của trọng số, ghi trong log mỗi epoch) giảm từ khoảng 1.300 xuống 250 trên khoảng 1.980 ứng viên; nhiệt độ 2 chỉ còn khoảng 9, gần với chỉ lấy âm mẫu khó nhất.
+  - Khoảng cách L1 trong loss dùng backward tự viết, chia khúc (`L1CDist`): backward của `torch.cdist(p=1)` dựng tensor B×C×d (khoảng 6 GB với batch 1024).
+  - Kiểm tra: `tests/test_negatives.py` (mặt nạ âm mẫu, thực thể lặp trong batch, chỉ lọc theo train, gradcheck của L1). Chạy 1 epoch đủ 6 biến thể trên Spatial-VRD bằng RTX 3050 4 GB: khoảng 1 phút/epoch train.
+  - **Tuning** (quyết định (d)): lưới lr × margin (6 cấu hình, seed 42) trên valid của `no_depth`, cấu hình thắng dùng cho mọi biến thể (nếu có thiên lệch thì chống lại depth). Ngân sách epoch cố định, không dừng sớm, chốt sau lần chạy thử trên Spatial-VRD và FB15k-237-IMG.
 - [ ] **P2.2** Gate có điều kiện theo quan hệ: `G = σ(W[h_rgb ; h_depth ; r])`, khớp giả thuyết "quan hệ không gian cần Depth". So sánh với gate hiện tại.
-- [ ] **P2.3** Sửa hoặc mô tả đúng bước cross-attention: với độ dài chuỗi 1, softmax luôn bằng 1, nên text không điều khiển attention. Bước này hiện tương đương `Linear(h_vision)` cộng residual.
+- [x] **P2.3** Cross-attention với chuỗi dài 1 (softmax luôn bằng 1, tương đương `Linear(h_vision)` cộng residual) được thay bằng **cổng text–vision**: u = W_v v, g = σ(W_tg[t; u]), h = LN(t + Dropout(g ⊙ u)); text quyết định từng chiều nhận bao nhiêu thông tin thị giác, g log được như gate RGB–depth (P2.4).
 - [ ] **P2.4** Log trọng số gate (phần dành cho Depth) theo từng triplet test để phân tích ở P5.
 - [ ] **P2.5** *(Tùy chọn)* Modality BBox geometry (x, y, w, h chuẩn hóa, diện tích).
-- [ ] **P2.6** Thiếu modality cho GeometryMMKG: vector "thiếu" học được cho RGB và depth, đọc `ent_img_mask.pt`, gate/fusion bỏ qua modality thiếu theo mặt nạ (mục 3.2, ý 4). Có test: thực thể thiếu ảnh cho cùng đầu ra ở bản có và không có depth. Thêm cờ chạy ablation "vector hằng, không mặt nạ" (đọc bảng đã điền như baseline).
-- [ ] **P2.7** Notebook Molab cho GeometryMMKG trên dữ liệu v0 (theo mẫu `notebooks/native.py`: tải `v0`, ô HF token, đẩy kết quả sau mỗi lần chạy).
+- [x] **P2.6** Thiếu ảnh: đọc `ent_img_mask.pt`; với `learned_mask`, vision v của thực thể có mặt nạ 0 được thay bằng **một** vector học được `v_miss`, sau bước gộp RGB–depth. RGB và depth thiếu cùng lúc (cùng nguồn ảnh) nên một vector ở tầng vision là đủ, và thực thể thiếu ảnh đi qua đúng cùng một phép tính ở mọi biến thể; đặt hai vector riêng trước gate thì bản có và không có depth sẽ cho đầu ra khác nhau. Biến thể `constant` bỏ qua mặt nạ, đọc bảng đã điền vector hằng như baseline. Kiểm tra `tests/test_missing_modality.py`: cùng tham số chung thì thực thể thiếu ảnh cho đầu ra giống hệt giữa `no_depth` và mọi `fusion_mode`; đầu ra không phụ thuộc giá trị RGB/depth của dòng thiếu; `constant` thì có; batch toàn thực thể thiếu ảnh không tạo gradient cho phần gộp RGB–depth. (Loss căn chỉnh đã bỏ, xem đầu mục P2.)
+- [x] **P2.7** `notebooks/geometry.py` (Molab, theo mẫu `native.py`): chọn 1 trong 6 dataset, tải `v0` từ HF (chỉ file `*2id`, bảng đặc trưng, mặt nạ, `relation_category.tsv`), kiểm tra bảng đặc trưng; ô HF token dạng mật khẩu; chọn biến thể, seed, tham số; mỗi biến thể chạy `scripts/train.py`, xong là đẩy log, rank, metric, checkpoint lên `geometry-mmkg-results/geometry/<dataset>/<variant>/`; biến thể đã có metric của seed đó thì bỏ qua. Cell cuối chạy `compute_metrics.py` so với `no_depth` (Δdepth). `marimo check` sạch. **Chưa chạy trên Molab.**
 
 ### P3. Baseline
 

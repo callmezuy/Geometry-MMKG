@@ -1,75 +1,45 @@
-import torch
+"""
+GeometryMMKG: frozen per-entity features (text, RGB, depth) -> geometry-guided fusion -> TransE (L1).
+
+There are no per-entity ID embeddings: an entity is fully described by its features, so the same model runs
+in the transductive and the inductive setting (RESEARCH_PLAN.md section 2.2). Relations are learned embeddings.
+"""
 import torch.nn as nn
-from core.features.encoders import TextEncoder, RGBEncoder, DepthEncoder
-from core.fusion.geometry_guided_fusion import GeometryGuidedFusion
-from core.models.kg_reasoning import GraphConvolution, TransEScore
+
+from core.fusion.geometry_guided_fusion import FUSION_MODES, MISSING_MODES, GeometryGuidedFusion  # noqa: F401
+
+# Ablation variants of RESEARCH_PLAN.md section 3.1 (P2.1) -> model keyword arguments.
+VARIANTS = {
+    "full": dict(use_depth=True, fusion_mode="gate", missing_mode="learned_mask"),
+    "no_depth": dict(use_depth=False, missing_mode="learned_mask"),
+    "concat": dict(use_depth=True, fusion_mode="concat", missing_mode="learned_mask"),
+    "mean": dict(use_depth=True, fusion_mode="mean", missing_mode="learned_mask"),
+    "fixed": dict(use_depth=True, fusion_mode="fixed", missing_mode="learned_mask"),
+    "constant": dict(use_depth=True, fusion_mode="gate", missing_mode="constant"),
+}
+
 
 class GeometryMMKGModel(nn.Module):
-    """
-    End-to-end model combining independent feature encoders,
-    geometry-guided cross-attention fusion, GCN neighborhood aggregation,
-    and Knowledge Graph scoring.
-    """
-    def __init__(self, num_relations, embed_dim=768, gcn_dropout=0.1, use_encoders=False):
+    def __init__(self, num_relations, embed_dim=768, use_depth=True, fusion_mode="gate",
+                 missing_mode="learned_mask", dropout=0.1):
         super().__init__()
         self.embed_dim = embed_dim
-        self.use_encoders = use_encoders
-        
-        # 1. Encoders (only instantiated when raw end-to-end extraction is needed;
-        # skipped in FastMMSGDataset mode where pre-extracted .pt embeddings are used)
-        if use_encoders:
-            self.text_encoder = TextEncoder(out_dim=embed_dim)
-            self.rgb_encoder = RGBEncoder(out_dim=embed_dim)
-            self.depth_encoder = DepthEncoder(out_dim=embed_dim)
-        else:
-            self.text_encoder = None
-            self.rgb_encoder = None
-            self.depth_encoder = None
-        
-        # 2. Fusion Module
-        self.fusion_module = GeometryGuidedFusion(feature_dim=embed_dim)
-        
-        # 3. Graph Reasoning
-        self.gcn = GraphConvolution(in_features=embed_dim, out_features=embed_dim, dropout=gcn_dropout)
-        
-        # 4. Relation Embeddings & Scoring
-        # Entities are derived dynamically from encoders + fusion + GCN
-        # Relations are learned as standard embeddings
+        self.fusion_module = GeometryGuidedFusion(embed_dim, use_depth, fusion_mode, missing_mode, dropout)
         self.relation_embeddings = nn.Embedding(num_relations, embed_dim)
         nn.init.xavier_uniform_(self.relation_embeddings.weight)
-        
-        self.scorer = TransEScore(p_norm=1)
 
-    def forward_encoders(self, text_input_ids, text_mask, rgb_imgs, depth_imgs):
-        """
-        Extract independent features.
-        """
-        h_text = self.text_encoder(text_input_ids, text_mask)
-        h_rgb = self.rgb_encoder(rgb_imgs)
-        h_depth = self.depth_encoder(depth_imgs)
-        return h_text, h_rgb, h_depth
+    @property
+    def vision_fusion(self):
+        return self.fusion_module.vision_fusion
 
-    def forward_fusion(self, h_text, h_rgb, h_depth):
-        """
-        Fuse features into initial entity representation.
-        """
-        h_entity_initial = self.fusion_module(h_text, h_rgb, h_depth)
-        return h_entity_initial
+    @property
+    def missing_vision(self):
+        return self.fusion_module.missing_vision
 
-    def forward_gcn(self, h_entity_initial, adj_matrix):
-        """
-        Update entity representations using structural graph neighborhood.
-        """
-        h_entity_final = self.gcn(h_entity_initial, adj_matrix)
-        return h_entity_final
+    def forward_fusion(self, h_text, h_rgb, h_depth, mask=None):
+        """Entity representations [B, d] from features [B, d] and the image mask [B] (bool)."""
+        return self.fusion_module(h_text, h_rgb, h_depth, mask)
 
-    def forward_score(self, h_entity_final, relation_ids, tails_entity_final=None):
-        """
-        Score triplets (h, r, t).
-        If tail is provided, compute standard score.
-        For training, this requires head and tail from h_entity_final.
-        """
-        r_embed = self.relation_embeddings(relation_ids)
-        # Note: Depending on the batch setup, extracting h and t from h_entity_final 
-        # happens outside this function or by passing specific indices.
-        pass # To be fully wired in the training loop
+    def score(self, h, r_ids, t):
+        """TransE L1: -||h + r - t||_1 (higher = more plausible)."""
+        return -(h + self.relation_embeddings(r_ids) - t).abs().sum(dim=-1)

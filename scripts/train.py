@@ -1,129 +1,176 @@
-import torch
-import torch.optim as optim
-from torch.utils.data import DataLoader
-from core.data_engineering.fast_dataset import FastMMSGDataset, get_all_true_triplets
-from core.models.end_to_end import GeometryMMKGModel
-from core.models.kg_reasoning import JointLoss
-from core.models.evaluation import evaluate_link_prediction, format_metrics, save_ranks
-from core.reproducibility import set_seed
-import os
+"""
+Train and evaluate GeometryMMKG on one v0 dataset (RESEARCH_PLAN.md P2.1, section 4).
 
-def main():
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f'Using device: {device}')
-    
-    CODE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    DATA_DIR = os.path.join(CODE_DIR, 'data', 'Spatial-VRD')
-    
-    # 1. Load Pre-Extracted Features
-    print("Loading pre-extracted features into RAM...")
-    all_text = torch.load(os.path.join(DATA_DIR, 'ent_text_emb.pt'), map_location='cpu', weights_only=False)
-    all_rgb = torch.load(os.path.join(DATA_DIR, 'ent_rgb_emb.pt'), map_location='cpu', weights_only=False)
-    all_depth = torch.load(os.path.join(DATA_DIR, 'ent_depth_emb.pt'), map_location='cpu', weights_only=False)
-    
-    # 2. Dataset
-    print("Initializing Fast Datasets...")
-    train_dataset = FastMMSGDataset(DATA_DIR, split='train')
-    valid_dataset = FastMMSGDataset(DATA_DIR, split='valid') if os.path.exists(os.path.join(DATA_DIR, 'valid.txt')) else None
-    test_dataset = FastMMSGDataset(DATA_DIR, split='test')
-    
-    gen = set_seed(42)
-    train_loader = DataLoader(train_dataset, batch_size=1024, shuffle=True, num_workers=0, generator=gen)
-    valid_loader = DataLoader(valid_dataset, batch_size=1024, shuffle=False, num_workers=0) if valid_dataset else None
-    test_loader = DataLoader(test_dataset, batch_size=1024, shuffle=False, num_workers=0)
-    
-    print("Building Filtered Triplet Dictionary for Evaluation...")
-    all_true_triplets = get_all_true_triplets(DATA_DIR)
-    
-    # 3. Model
-    print("Initializing GeometryMMKGModel...")
-    num_relations = len(train_dataset.relation2id)
-    model = GeometryMMKGModel(num_relations=num_relations, embed_dim=768).to(device)
-    
-    # 4. Loss & Optimizer
-    criterion = JointLoss(margin=5.0, lambda_align=0.1)
-    optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-5)
-    
-    EPOCHS = 50
-    print(f"Starting fast training loop for {EPOCHS} epochs...")
-    
-    best_mrr = 0.0
-    
-    for epoch in range(EPOCHS):
+  python scripts/train.py --data data/Spatial-VRD --variant full --epochs 100 --seed 42
+
+* Variants (section 3.1): full, no_depth, concat, mean, fixed, constant (core/models/end_to_end.py VARIANTS).
+* Training: in-batch negatives on both sides, train-only false-negative filter, self-adversarial weighted
+  margin ranking (core/models/kg_reasoning.py).
+* Model selection: filtered MRR (head + tail) on valid every --valid-every epochs and after the last epoch;
+  the best checkpoint is evaluated on test once. Spatial-VG validates on a fixed 5,000-triple subset (4.9),
+  the same subset for every variant and seed.
+* Output (--out): ranks_<stem>_test.csv (for scripts/compute_metrics.py), metrics_<stem>.json,
+  ckpt_<stem>.pt, with stem = geometry_<dataset>_<variant>_seed<seed>.
+"""
+import argparse
+import copy
+import json
+import os
+import subprocess
+import sys
+import time
+
+import torch
+
+CODE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, CODE_DIR)
+
+from core.data_engineering.fast_dataset import (  # noqa: E402
+    TripleBatches, get_all_true_triplets, load_entity_features, load_triples, read_count)
+from core.models.end_to_end import VARIANTS, GeometryMMKGModel  # noqa: E402
+from core.models.evaluation import evaluate_link_prediction, format_metrics, save_ranks  # noqa: E402
+from core.models.kg_reasoning import TripleIndex, in_batch_loss  # noqa: E402
+from core.reproducibility import set_seed  # noqa: E402
+
+VALID_SUBSET_SEED = 0       # fixed: every variant / seed validates on the same subset
+VG_VALID_MAX = 5000         # RESEARCH_PLAN.md 4.9
+
+
+def parse_args(argv=None):
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--data", required=True, help="dataset folder, e.g. data/Spatial-VRD")
+    p.add_argument("--variant", default="full", choices=list(VARIANTS))
+    p.add_argument("--epochs", type=int, default=100)
+    p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--batch-size", type=int, default=1024)
+    p.add_argument("--lr", type=float, default=1e-4)
+    p.add_argument("--weight-decay", type=float, default=1e-5)
+    p.add_argument("--margin", type=float, default=5.0)
+    p.add_argument("--adv-temp", type=float, default=1.0, help="self-adversarial temperature")
+    p.add_argument("--dropout", type=float, default=0.1)
+    p.add_argument("--valid-every", type=int, default=10, help="epochs between validations")
+    p.add_argument("--valid-max", type=int, default=None,
+                   help=f"validate on a fixed random subset of this size (0 = all; default {VG_VALID_MAX} for "
+                        "Spatial-VG, else all)")
+    p.add_argument("--eval-batch-size", type=int, default=512)
+    p.add_argument("--keep-on-gpu", choices=["auto", "yes", "no"], default="auto",
+                   help="feature / fused tables on the GPU (auto: if < 50%% of free memory)")
+    p.add_argument("--out", default=None, help="output folder (default results/geometry/<dataset>/<variant>)")
+    p.add_argument("--no-ckpt", action="store_true", help="do not write the best checkpoint")
+    return p.parse_args(argv)
+
+
+def code_commit():
+    try:
+        return subprocess.run(["git", "-C", CODE_DIR, "rev-parse", "--short", "HEAD"],
+                              capture_output=True, text=True, check=True).stdout.strip()
+    except Exception:
+        return None
+
+
+def strip_ranks(m):
+    return {k: v for k, v in m.items() if k != "ranks"}
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    t_start = time.time()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    data_dir = os.path.abspath(args.data)
+    dataset = os.path.basename(os.path.normpath(data_dir))
+    stem = f"geometry_{dataset}_{args.variant}_seed{args.seed}"
+    out_dir = args.out or os.path.join(CODE_DIR, "results", "geometry", dataset, args.variant)
+    os.makedirs(out_dir, exist_ok=True)
+    keep = {"auto": None, "yes": True, "no": False}[args.keep_on_gpu]
+    valid_max = args.valid_max if args.valid_max is not None else (VG_VALID_MAX if dataset == "Spatial-VG" else 0)
+    print(f"{stem} | device {device} | code {code_commit()} | args {vars(args)}", flush=True)
+
+    gen = set_seed(args.seed)
+    n_ent = read_count(os.path.join(data_dir, "entity2id.txt"))
+    n_rel = read_count(os.path.join(data_dir, "relation2id.txt"))
+    feats = load_entity_features(data_dir, device, keep_on_gpu=keep)
+    train = load_triples(data_dir, "train")
+    valid = load_triples(data_dir, "valid")
+    test = load_triples(data_dir, "test")
+    if valid_max and len(valid) > valid_max:
+        sub = torch.randperm(len(valid), generator=torch.Generator().manual_seed(VALID_SUBSET_SEED))[:valid_max]
+        valid = valid[sub.sort().values]
+    all_true = get_all_true_triplets(data_dir)
+    train_index = TripleIndex(train, n_ent, n_rel, device=device)
+    n_missing = int((~feats.mask).sum())
+    print(f"{n_ent:,} entities ({n_missing:,} without image), {n_rel} relations | train {len(train):,} | "
+          f"valid {len(valid):,}{' (subset)' if valid_max else ''} | test {len(test):,} | "
+          f"features stored on {feats.store}", flush=True)
+
+    model = GeometryMMKGModel(n_rel, embed_dim=feats.text.shape[1], dropout=args.dropout,
+                              **VARIANTS[args.variant]).to(device)
+    n_params = sum(p.numel() for p in model.parameters())
+    print(f"variant {args.variant} = {VARIANTS[args.variant]} | {n_params:,} parameters", flush=True)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+
+    def evaluate(triples, desc, return_ranks=False):
+        if device.type == "cuda":
+            torch.cuda.empty_cache()  # release training buffers so the fused table can stay on the GPU (P1.6)
+        return evaluate_link_prediction(
+            model, feats.text, feats.rgb, feats.depth, TripleBatches(triples, args.eval_batch_size), all_true,
+            device, keep_on_gpu=keep, return_ranks=return_ranks, desc=desc, all_mask=feats.mask)
+
+    history, best = [], {"mrr": -1.0, "epoch": 0, "state": None, "valid": None}
+    train_dev = train.to(device)
+    for epoch in range(1, args.epochs + 1):
         model.train()
-        total_loss = 0
-        total_link_loss = 0
-        total_align_loss = 0
-        
-        for batch in train_loader:
-            optimizer.zero_grad()
-            
-            h_ids = batch['h_id']
-            r_ids = batch['r_id'].to(device)
-            t_ids = batch['t_id']
-            neg_t_ids = batch['neg_t_id']
-            
-            # Fetch embeddings directly from RAM (Bypassing ResNet/RoBERTa completely!)
-            h_t, h_r, h_d = all_text[h_ids].to(device), all_rgb[h_ids].to(device), all_depth[h_ids].to(device)
-            t_t, t_r, t_d = all_text[t_ids].to(device), all_rgb[t_ids].to(device), all_depth[t_ids].to(device)
-            
-            # Geometry-Guided Fusion (Fast forward)
-            h_entity = model.forward_fusion(h_t, h_r, h_d)
-            t_entity = model.forward_fusion(t_t, t_r, t_d)
-            
-            # In-Batch Hard Negative Mining using cdist
-            r_emb = model.relation_embeddings(r_ids)
-            hr_entity = h_entity + r_emb
-            
-            # dist[i, j] = || (h[i] + r[i]) - t[j] ||_1
-            dist = torch.cdist(hr_entity, t_entity, p=1)
-            scores = -dist
-            
-            # Positive scores are on the diagonal (i == j)
-            pos_score = scores.diag()
-            
-            # Mask out the diagonal to find the hardest negative (max score) for each h
-            mask = torch.eye(scores.size(0), device=device).bool()
-            scores.masked_fill_(mask, -1e9)
-            neg_score = scores.max(dim=1)[0]
-            
-            # Loss Calculation
-            loss, l_link, l_align = criterion(pos_score, neg_score, h_t, h_r, h_d)
-            
+        t0 = time.time()
+        perm = torch.randperm(len(train), generator=gen).to(device)
+        sums, n_batches = {}, 0
+        for i in range(0, len(perm), args.batch_size):
+            b = train_dev[perm[i:i + args.batch_size]]
+            loss, stats = in_batch_loss(model, feats, b[:, 0], b[:, 1], b[:, 2], train_index,
+                                        args.margin, args.adv_temp)
+            optimizer.zero_grad(set_to_none=True)
             loss.backward()
             optimizer.step()
-            
-            total_loss += loss.item()
-            total_link_loss += l_link.item()
-            total_align_loss += l_align.item()
-            
-        print(f"Epoch {epoch+1:02d}/{EPOCHS} | Loss: {total_loss/len(train_loader):.4f}")
-        
-        # Evaluate every 5 epochs
-        if (epoch + 1) % 5 == 0:
-            eval_split_name = "Validation" if valid_loader else "Test"
-            eval_loader = valid_loader if valid_loader else test_loader
-            print(f"--- Evaluating on {eval_split_name} at Epoch {epoch+1} ---")
-            m = evaluate_link_prediction(
-                model, all_text, all_rgb, all_depth, eval_loader, all_true_triplets, device
-            )
-            print(f"Metrics -> {format_metrics(m)}")
-            
-            # Checkpoint selection on validation MRR (RESEARCH_PLAN.md, section 4)
-            if m["mrr"] > best_mrr:
-                best_mrr = m["mrr"]
-                print(f"New best model! Saving to best_model.pth")
-                torch.save(model.state_dict(), 'best_model.pth')
-                
-    print("\nTraining complete! Evaluating best model on Test Set...")
-    if os.path.exists('best_model.pth'):
-        model.load_state_dict(torch.load('best_model.pth', weights_only=False))
-    test_m = evaluate_link_prediction(
-        model, all_text, all_rgb, all_depth, test_loader, all_true_triplets, device, return_ranks=True
-    )
-    print(f"Final Test Metrics -> {format_metrics(test_m)}")
-    save_ranks(test_m["ranks"], 'ranks_geometry_vrd_test.csv')
-    torch.save(model.state_dict(), 'final_model.pth')
+            stats["loss"] = float(loss)
+            for k, v in stats.items():
+                sums[k] = sums.get(k, 0.0) + v
+            n_batches += 1
+        row = {"epoch": epoch, **{k: v / n_batches for k, v in sums.items()}, "sec": time.time() - t0}
+        print(f"epoch {epoch:4d}/{args.epochs} | loss {row['loss']:.4f} (tail {row['loss_tail']:.4f}, "
+              f"head {row['loss_head']:.4f}) | eff. negatives tail {row['eff_neg_tail']:.1f} / "
+              f"{row['n_neg_tail']:.0f}, head {row['eff_neg_head']:.1f} / {row['n_neg_head']:.0f} | "
+              f"{row['sec']:.1f}s", flush=True)
 
-if __name__ == '__main__':
+        if epoch % args.valid_every == 0 or epoch == args.epochs:
+            m = strip_ranks(evaluate(valid, f"valid@{epoch}"))
+            row["valid"] = m
+            print(f"valid @ epoch {epoch}: {format_metrics(m)}", flush=True)
+            if m["mrr"] > best["mrr"]:
+                best = {"mrr": m["mrr"], "epoch": epoch, "valid": m,
+                        "state": {k: v.detach().to("cpu", copy=True) for k, v in model.state_dict().items()}}
+                print(f"  new best valid MRR {m['mrr']:.4f}", flush=True)
+        history.append(row)
+
+    model.load_state_dict(best["state"])
+    print(f"Best epoch {best['epoch']} (valid MRR {best['mrr']:.4f}); evaluating on test once.", flush=True)
+    test_m = evaluate(test, "test", return_ranks=True)
+    print(f"test: {format_metrics(test_m)}", flush=True)
+
+    save_ranks(test_m["ranks"], os.path.join(out_dir, f"ranks_{stem}_test.csv"))
+    if not args.no_ckpt:
+        torch.save({"state_dict": best["state"], "variant": args.variant, "model_kwargs": VARIANTS[args.variant],
+                    "args": vars(args), "epoch": best["epoch"]}, os.path.join(out_dir, f"ckpt_{stem}.pt"))
+    metrics = {
+        "model": "GeometryMMKG", "dataset": dataset, "variant": args.variant, "model_kwargs": VARIANTS[args.variant],
+        "seed": args.seed, "args": vars(args), "code_commit": code_commit(), "n_parameters": n_params,
+        "n_entities": n_ent, "n_relations": n_rel, "n_missing_image": n_missing,
+        "n_train": len(train), "n_valid_used": len(valid), "valid_subset_seed": VALID_SUBSET_SEED if valid_max else None,
+        "best_epoch": best["epoch"], "best_valid": best["valid"], "test": strip_ranks(test_m),
+        "history": history, "total_sec": time.time() - t_start,
+    }
+    with open(os.path.join(out_dir, f"metrics_{stem}.json"), "w", encoding="utf-8") as f:
+        json.dump(metrics, f, indent=2)
+    print(f"Wrote ranks / metrics{'' if args.no_ckpt else ' / checkpoint'} to {out_dir} "
+          f"({(time.time() - t_start) / 60:.1f} min)", flush=True)
+
+
+if __name__ == "__main__":
     main()
