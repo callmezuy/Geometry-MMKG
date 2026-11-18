@@ -35,7 +35,7 @@ def _():
 
 @app.cell
 def _(hashlib, os, subprocess):
-    # 1. Code: repo dự án (scripts/) + ZipDepth gốc ghim commit (ZipDepth/ bị gitignore trong repo dự án)
+    # 1. Code: repo dự án (scripts/ + bản sao ZipDepth/ kèm checkpoint)
     WORK_DIR = os.path.abspath(".")
     REPO_ROOT = os.path.join(WORK_DIR, "Geometry-MMKG")
     if not os.path.exists(REPO_ROOT):
@@ -48,12 +48,10 @@ def _(hashlib, os, subprocess):
         "scripts/extract_features_v4.py trên GitHub còn là bản cũ: hãy push commit P0.13 trước"
     )
 
-    ZIPDEPTH_COMMIT = "91f3fd21e131641f51e8d35736d1958350180e3a"  # = bản dùng trên máy (đối chiếu 18/11/2026)
+    ZIPDEPTH_COMMIT = "91f3fd21e131641f51e8d35736d1958350180e3a"  # upstream fabiotosi92/ZipDepth mà ZipDepth/ trong repo dự án sao lại (đối chiếu 18/11/2026)
     ZIPDEPTH_MD5 = "23f5f042af37939afa80b0f056246df5"  # checkpoints/zipdepth_base.pth
-    _zd = os.path.join(REPO_ROOT, "ZipDepth")
-    if not os.path.exists(_zd):
-        subprocess.run(["git", "clone", "https://github.com/fabiotosi92/ZipDepth.git", _zd], check=True)
-    subprocess.run(["git", "-C", _zd, "checkout", "-q", ZIPDEPTH_COMMIT], check=True)
+    _zd = os.path.join(REPO_ROOT, "ZipDepth")  # đã nằm trong repo dự án, không clone riêng
+    assert os.path.exists(os.path.join(_zd, "zipdepth", "model", "architecture.py")), f"thiếu {_zd}"
     with open(os.path.join(_zd, "checkpoints", "zipdepth_base.pth"), "rb") as _f:
         _md5 = hashlib.md5(_f.read()).hexdigest()
     assert _md5 == ZIPDEPTH_MD5, f"zipdepth_base.pth md5 {_md5} != {ZIPDEPTH_MD5}"
@@ -104,13 +102,13 @@ def _(WORK_DIR, os, subprocess):
 
 @app.cell
 def _(mo):
-    enc_batch_ui = mo.ui.dropdown(options=["64", "128", "256", "512"], value="256", label="DINOv2 batch (crops, x2)")
-    img_batch_ui = mo.ui.dropdown(options=["16", "32"], value="16", label="ZipDepth batch (images)")
+    enc_batch_ui = mo.ui.dropdown(options=["256", "512", "1024", "2048"], value="1024", label="DINOv2 batch (crops, x2)")
+    img_batch_ui = mo.ui.dropdown(options=["16", "32", "64", "128"], value="64", label="ZipDepth batch (images)")
     extract_btn = mo.ui.run_button(label="▶ Trích đặc trưng VG")
     mo.vstack([
-        mo.md("DINOv2 batch x2 (RGB + depth) phải vừa VRAM: batch 256 cần khoảng 4,6 GB; trên RTX 3050 4 GB nó tràn "
-              "sang RAM và chậm 8 lần (dùng 64). GPU từ 8 GB trở lên giữ 256 hoặc tăng lên. "
-              "Đổi tham số **không** tự chạy lại; bấm nút để bắt đầu (khoảng 1–3 giờ tuỳ GPU)."),
+        mo.md("DINOv2 batch x2 (RGB + depth) phải vừa VRAM: batch 256 cần khoảng 4,6 GB, nên 1024 khoảng 18 GB và "
+              "2048 khoảng 37 GB. GPU Molab có 96 GB nên mặc định 1024 / 64; GPU 4 GB (RTX 3050) dùng 64 / 16. "
+              "Đổi tham số **không** tự chạy lại; bấm nút để bắt đầu."),
         mo.hstack([enc_batch_ui, img_batch_ui]),
         extract_btn,
     ])
@@ -204,6 +202,17 @@ def _(CODE_COMMIT, DATA_DIR, OUT_DIR, REPO_ROOT, ZIPDEPTH_COMMIT, json, mo, os, 
     return
 
 
+@app.cell(hide_code=False)
+def _(mo):
+    hf_token_ui = mo.ui.text(kind="password", label="HF token (quyền write)", full_width=True)
+    mo.vstack([
+        mo.md("Dán HF token có quyền **write** để mở pull request lên `callmezuy/spatial-vg`. "
+              "Token chỉ nằm trong bộ nhớ kernel, không được ghi vào file notebook."),
+        hf_token_ui,
+    ])
+    return (hf_token_ui,)
+
+
 @app.cell
 def _(mo):
     upload_btn = mo.ui.run_button(label="⬆ Mở pull request lên HF")
@@ -216,9 +225,10 @@ def _(mo):
 
 
 @app.cell
-def _(HF_REPO_ID, HfApi, OUT_DIR, mo, upload_btn):
+def _(HF_REPO_ID, HfApi, OUT_DIR, hf_token_ui, mo, upload_btn):
     mo.stop(not upload_btn.value, mo.md("⏸ Chưa đẩy lên HF."))
-    _info = HfApi().upload_folder(
+    mo.stop(not hf_token_ui.value.strip(), mo.md("⚠ Chưa nhập HF token ở ô phía trên."))
+    _info = HfApi(token=hf_token_ui.value.strip()).upload_folder(
         repo_id=HF_REPO_ID, repo_type="dataset", folder_path=OUT_DIR, create_pr=True,
         allow_patterns=["ent_rgb_emb.pt", "ent_depth_emb.pt", "ent_text_emb.pt", "ent_img_mask.pt", "ent_fill.pt",
                         "feature_stats.json", "feature_quality.json", "extract.log", "quality.log"],
