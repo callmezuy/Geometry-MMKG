@@ -133,10 +133,10 @@ def _(HfApi, WORK_DIR, os, subprocess, sys):
                 raise
             return _proc.wait()
 
-    def push_results(subdir):
+    def push_results(subdir, token):
         """Đẩy RESULTS_DIR lên HF. Lỗi upload không làm hỏng kết quả local."""
         try:
-            _api = HfApi()
+            _api = HfApi(token=token)
             _api.create_repo(RESULTS_REPO, repo_type="dataset", private=True, exist_ok=True)
             _api.upload_folder(
                 repo_id=RESULTS_REPO, repo_type="dataset", folder_path=RESULTS_DIR,
@@ -149,6 +149,18 @@ def _(HfApi, WORK_DIR, os, subprocess, sys):
     return RESULTS_DIR, RESULTS_REPO, SEED, push_results, run_streaming
 
 
+@app.cell(hide_code=False)
+def _(mo):
+    hf_token_ui = mo.ui.text(kind="password", label="HF token (quyền write)", full_width=True)
+    mo.vstack([
+        mo.md("Dán HF token có quyền **write**, nhấn **Enter**, rồi mới bấm nút chạy. Kết quả được đẩy lên dataset "
+              "repo private `RESULTS_REPO` (cell phía trên; tự tạo nếu chưa có). Token chỉ nằm trong bộ nhớ kernel, "
+              "không ghi vào file notebook. Ô này chỉ phụ thuộc `mo`, nên chạy lại các cell khác không xoá token."),
+        hf_token_ui,
+    ])
+    return (hf_token_ui,)
+
+
 @app.cell
 def _(mo):
     run_btn = mo.ui.run_button(label="▶ Chạy NativE DB15K (1000 epoch, config gốc)")
@@ -157,8 +169,9 @@ def _(mo):
 
 
 @app.cell
-def _(NATIVE_DIR, RESULTS_DIR, SEED, mo, os, push_results, run_btn, run_streaming, shutil):
+def _(NATIVE_DIR, RESULTS_DIR, SEED, hf_token_ui, mo, os, push_results, run_btn, run_streaming, shutil):
     mo.stop(not run_btn.value, mo.md("⏸ Bấm nút để bắt đầu."))
+    mo.stop(not hf_token_ui.value.strip(), mo.md("⚠ Chưa nhập HF token ở ô phía trên: nhập rồi bấm chạy lại (để kết quả không mất khi session tắt)."))
     _tag = f"DB15K_original_seed{SEED}"
     _ckpt = os.path.join(NATIVE_DIR, "checkpoint", f"native_{_tag}.ckpt")
     _cmd = [  # = scripts/run_db15k.sh, cộng các cờ kiểm tra
@@ -181,7 +194,7 @@ def _(NATIVE_DIR, RESULTS_DIR, SEED, mo, os, push_results, run_btn, run_streamin
     db15k_rc = run_streaming(_cmd, NATIVE_DIR, os.path.join(RESULTS_DIR, f"native_{_tag}.log"))
     if db15k_rc == 0 and os.path.exists(_ckpt):
         shutil.copy2(_ckpt, os.path.join(RESULTS_DIR, os.path.basename(_ckpt)))
-    push_results("native/DB15K-sanity")
+    push_results("native/DB15K-sanity", hf_token_ui.value.strip())
     mo.md(
         f"""
         ### {'✅' if db15k_rc == 0 else '❌'} Xong (exit code {db15k_rc})
