@@ -39,6 +39,8 @@ No model file (`mmkgc/module/model/*`) appears in either diff.
   - 208,868,276 bytes, sha256 `b25d6823868bf56788c7851c9c45294c44c7a4622e2c2d678978b3e1da8991c3`,
     md5 `1767f200e7892215be769eb97ab833b5` (downloaded 18/11/2026).
 - `benchmarks/`, `embeddings/missing.json` and the author embeddings are identical to the archive.
+  The `.pth` embeddings are not in git: `notebooks/snag-mkgy-sanity.py` (P3.0b) downloads the archive, checks
+  its sha256 and extracts only `MKG-Y-{visual,textual}.pth` and `missing.json`, each checked by sha256.
 - `SNAG_MMEA/`, `README.md` and `LICENSE` are the GitHub repo's files.
 - Removed in P3.0d (present since commit `634d7be`, now back to the archive version):
   - a depth branch in `AdvMixRotatE.py`: `depth_proj`, `depth_embeddings`, a 4-way `comb_proj` and fusion weights;
