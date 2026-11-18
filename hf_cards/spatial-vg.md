@@ -27,7 +27,7 @@ Code: [github.com/callmezuy/Geometry-MMKG](https://github.com/callmezuy/Geometry
 | test | 137,984 | 176,343 |
 
 1,441,984 entities in `entity2id.txt` (every box of `VG-SGG.h5`; entity id = box index, so most boxes are in no
-triple), 50 relations, 108,073 images.
+triple), 50 relations, 108,073 images (105,814 of them have at least one box).
 
 ## Sources and cleaning
 
@@ -41,11 +41,26 @@ triple), 50 relations, 108,073 images.
 
 ## Features
 
-**Not in this commit yet.** The v0 features (`ent_rgb_emb.pt`, `ent_depth_emb.pt`, `ent_text_emb.pt`,
-`ent_img_mask.pt`, `ent_fill.pt`, `feature_stats.json`, `feature_quality.json`) are being extracted with
-`notebooks/extract-vg-features.py` and will be added before the tag `v0` is created. Same recipe as
-`callmezuy/spatial-vrd`: DINOv2-base on the box crop (rgb), ZipDepth depth map of the whole image cropped to the box
-and encoded by DINOv2-base (depth), RoBERTa-base on the class name (text). This repo has no mean / concat tables.
+`*.pt`, float32, row i = entity id i of `entity2id.txt`. Extracted on Molab with `notebooks/extract-vg-features.py`
+(`scripts/extract_features.py vg`, 105,814 images that have at least one box), same recipe as `callmezuy/spatial-vrd`.
+
+| File | Shape | Content |
+|---|---|---|
+| `ent_rgb_emb.pt` | [1441984, 768] | DINOv2-base pooler output of the box crop |
+| `ent_depth_emb.pt` | [1441984, 768] | ZipDepth (base, 384 px, per-image min-max) depth map of the whole image, box region cropped (roi_align) -> DINOv2-base pooler |
+| `ent_text_emb.pt` | [1441984, 768] | RoBERTa-base masked mean of `entity2text.txt` (the class name: only 150 distinct strings) |
+| `ent_img_mask.pt` | [1441984] bool | True = entity has a usable box |
+| `ent_fill.pt` | dict | vectors written into the rows of entities without a usable box |
+
+6 boxes (ids 77901, 77906, 77908, 77914, 77915, 77916, all of image index 5763) lie entirely outside their image
+(annotation error); they are treated as missing and filled with the mean rgb / depth feature of the 389,410 train
+entities that have a box. This repo has **no** mean / concat tables (compute `(rgb + depth) / 2` or `[rgb, depth]`
+from the two tables if needed).
+
+Quality (`feature_quality.json`; linear probe of the 150 object classes on 30,000 entities, majority class 8.2%):
+rgb 40.1%, depth 13.6%, text 100% (the text is the class name). Mean pairwise cosine: rgb 0.066, depth 0.348,
+text 0.986. The 10 nearest neighbours of depth and of rgb overlap by 1.5% (chance 0.005%).
+`feature_stats.json`, `extract.log` and `quality.log` record the run (code commit, ZipDepth commit, timings).
 
 ## File formats
 
@@ -56,8 +71,7 @@ and encoded by DINOv2-base (depth), RoBERTa-base on the class name (text). This 
 
 ## Versions
 
-`v0` is the first version of this repo (earlier repos with this name were deleted); the tag is created once the
-features are in. Pin it with `snapshot_download("callmezuy/spatial-vg", repo_type="dataset", revision="v0")`.
+`v0` (18/11/2026) is the first version of this repo (earlier repos with this name were deleted). Pin it with `snapshot_download("callmezuy/spatial-vg", repo_type="dataset", revision="v0")`.
 
 ## License
 

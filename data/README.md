@@ -14,8 +14,8 @@ repo, tagged `v0` (RESEARCH_PLAN.md P0.8). The dataset card of each repo is `hf_
 | `Spatial-VRD-Trans/` | `callmezuy/spatial-vrd-trans` | 77,371 / 8,578 / 21,455 | 93,809 | 52 | transductive control | `Spatial-VRD/`, stratified by relation |
 | `Spatial-VG/` | `callmezuy/spatial-vg` | 319,069 / 26,372 / 137,984 | 1,441,984 | 50 | inductive (official image split) | `VG-SGG.h5` + `VG-SGG-dicts.json` (VG150-curated, `no_part_whole`) |
 
-`spatial-vg`: the split files are on HF; the features are extracted on Molab (`notebooks/extract-vg-features.py`)
-and the tag `v0` is created only once they are in. Statistics of every dataset: `experiment_results/dataset_stats.md`
+`spatial-vg` features were extracted on Molab (`notebooks/extract-vg-features.py`) and are on HF only (13 GB; not in
+`data/Spatial-VG/` locally). VG images for the notebook come from the private copy `callmezuy/vg-images-raw`. Statistics of every dataset: `experiment_results/dataset_stats.md`
 (`python scripts/dataset_stats.py --out experiment_results/dataset_stats.md`).
 
 ## File conventions

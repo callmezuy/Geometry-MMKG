@@ -155,12 +155,12 @@ Sáu bộ, mỗi bộ một repo HF public, tag `v0`; cấu trúc file, lệnh d
 - [x] **P0.6 Spatial-VRD-Trans** (`scripts/make_transductive_split.py --stratify relation`).
   - Chia lại Spatial-VRD thành transductive: 0 thực thể valid/test chưa thấy trong train. Phân tầng theo quan hệ để phân bố nhóm quan hệ khớp Spatial-VRD (GEOMETRIC train/test 70,3/70,5%, POSSESSIVE 25,1/24,9%; Spatial-VRD 70,4/70,3%); không phân tầng thì triplet POSSESSIVE (hay dính thực thể bậc 1) ít được tách ra và test lệch về GEOMETRIC.
 - [x] **Nhóm quan hệ** (`relation_category.tsv` ở mỗi bộ MMSG): GEOMETRIC / POSSESSIVE / SEMANTIC / MISC, dùng cho P5. Đã đối chiếu với Neural Motifs (Table 1): paper chỉ cho ví dụ, số lớp và tỉ lệ của từng nhóm, không công bố danh sách đầy đủ. Bảng của mình khớp mọi ví dụ trong paper, nhưng phải trình bày là *phân loại của chúng tôi theo định nghĩa của Zellers et al.*, kèm bảng đầy đủ ở phụ lục. Chi tiết sai lệch ghi trong `scripts/build_vrd_relation_review.py`.
-- [~] **P0.7 Đặc trưng** (`scripts/extract_features.py`): xong FB15k-237-IMG, FB15K-237-ind, MKG-Y, Spatial-VRD, Spatial-VRD-Trans; **còn Spatial-VG** (notebook Molab `notebooks/extract-vg-features.py`).
+- [x] **P0.7 Đặc trưng** (`scripts/extract_features.py`): xong cả 6 bộ; Spatial-VG chạy trên Molab (`notebooks/extract-vg-features.py`, 18/11/2026).
   - RGB: **DINOv2 ViT-B/14** (`facebook/dinov2-base`, `pooler_output`, 768 chiều, đóng băng, không có lớp chiếu). Depth: ZipDepth (384 px) → bản đồ float, min-max theo từng ảnh → cắt theo box bằng `roi_align` → cùng DINOv2. Text: RoBERTa-base, trung bình token theo mask, `entity2textlong.txt` nếu có, tối đa 512 token (bị cắt: FB15k-237 24, MKG-Y 154, VRD 0). Bản đồ depth giữ dạng float từ đầu đến cuối và mọi bộ mã hoá đều là mạng pretrained, không có lớp khởi tạo ngẫu nhiên.
   - MMKG (chế độ `kg`): đọc `image_index.tsv`, chỉ ảnh `ok`; đặc trưng thực thể = trung bình các ảnh, RGB và depth tính riêng. Scene graph: một box mỗi thực thể; box nằm hẳn ngoài ảnh (lỗi chú thích, VRD 2 box) tính là thiếu ảnh.
   - Thực thể thiếu ảnh nhận **một vector hằng** = trung bình đặc trưng các thực thể train có ảnh (riêng RGB, depth; `ent_fill.pt`), kèm `ent_img_mask.pt`. Không lưu bảng thô riêng: GeometryMMKG thay đúng các dòng có mặt nạ 0 bằng vector học được. Lệnh `fill` điền lại theo train của bộ khác cùng `entity2id` (FB15K-237-ind từ FB15k-237-IMG, VRD-Trans từ VRD).
   - Bảng cho baseline (+D ở tầng dữ liệu): `ent_rgb_depth_mean_emb.pt` (768) và `ent_rgb_depth_concat_emb.pt` (1536); không xuất cho Spatial-VG (baseline không chạy VG; bảng concat khoảng 8,9 GB).
-  - VG chạy trên Molab; notebook ghim ZipDepth gốc (commit `91f3fd21`, md5 checkpoint khớp) và đẩy kết quả lên HF dưới dạng pull request để duyệt.
+  - VG chạy trên Molab (RTX PRO 6000 96 GB, batch DINOv2 1024 / ZipDepth 64, 44 phút cho 105.814 ảnh); ZipDepth là bản sao trong repo (upstream commit `91f3fd21`, md5 checkpoint khớp); kết quả đẩy lên HF dưới dạng pull request, duyệt rồi merge. Ảnh VG lấy từ bản sao private `callmezuy/vg-images-raw` (chép nguyên 3 file zip từ máy, đúng kích thước gốc), vì Stanford chỉ cho tải khoảng 1 MB/s. 6 box (ảnh số 5763) nằm hẳn ngoài ảnh, tính là thiếu ảnh.
   - Hiệu năng RTX 3050 4 GB: batch DINOv2 64 (175 ảnh/s); RoBERTa với mô tả 512 token giữ khoảng 2 GB bộ nhớ đệm, phải `empty_cache` trước bước ảnh. Thời gian: VRD 20 phút, MKG-Y 22 phút, FB15k-237 43 phút.
   - Chất lượng (`scripts/feature_quality.py`, chỉ trên thực thể có ảnh; probe hồi quy logistic, 80/20):
 
@@ -169,11 +169,12 @@ Sáu bộ, mỗi bộ một repo HF public, tag `v0`; cấu trúc file, lệnh d
     | FB15k-237-IMG | 249 | 0,18 / 0,61 / 0,95 | 63,0 / 57,4 / 82,7% (31,7%; 30 kiểu top-50 của BLP) | 15,4% (0,07%) |
     | MKG-Y | 519 | 0,17 / 0,48 / 0,94 | không có nhãn | 9,1% (0,07%) |
     | Spatial-VRD | 2 | 0,07 / 0,38 / 0,96 | 40,3 / 11,7 / 98,8% (4,5%; 543 lớp vật thể) | 3,7% (0,01%) |
+    | Spatial-VG | 6 | 0,07 / 0,35 / 0,99 | 40,1 / 13,6 / 100% (8,2%; 150 lớp vật thể) | 1,5% (0,005%) |
 
-    Text VRD gần 100% vì mô tả chứa tên lớp. **Lưu ý cho RQ1:** ở FB15k-237, depth của ảnh web đoán kiểu thực thể gần bằng RGB (57% so với 63%): depth toàn ảnh mã hoá cả "thể loại ảnh" (chân dung, bản đồ, logo), không chỉ hình học, nên Δdepth > 0 ở MMKG không tự động là bằng chứng về thông tin hình học; cần đối chứng (ví dụ depth xáo trộn giữa các thực thể cùng kiểu) khi phân tích.
-- [~] **P0.8 Phát hành v0 trên HF** (`scripts/publish_hf.py`, thẻ ở `hf_cards/`).
-  - Tag `v0`: `callmezuy/fb15k237-img`, `callmezuy/fb15k237-ind`, `callmezuy/mkg-y`, `callmezuy/spatial-vrd`, `callmezuy/spatial-vrd-trans`.
-  - `callmezuy/spatial-vg`: mới có split + H5, **chưa gắn tag**. Notebook `extract-vg-features.py` chạy xong mở PR đặc trưng; duyệt `feature_quality.json`, merge, sửa mục Features trong thẻ rồi mới gắn `v0`.
+    Text VRD gần 100% vì mô tả chứa tên lớp; text VG **chính là** tên lớp (150 chuỗi khác nhau), nên probe text = 100% và cần nói rõ trong bài. **Lưu ý cho RQ1:** ở FB15k-237, depth của ảnh web đoán kiểu thực thể gần bằng RGB (57% so với 63%): depth toàn ảnh mã hoá cả "thể loại ảnh" (chân dung, bản đồ, logo), không chỉ hình học, nên Δdepth > 0 ở MMKG không tự động là bằng chứng về thông tin hình học; cần đối chứng (ví dụ depth xáo trộn giữa các thực thể cùng kiểu) khi phân tích.
+- [x] **P0.8 Phát hành v0 trên HF** (`scripts/publish_hf.py`, thẻ ở `hf_cards/`).
+  - Tag `v0` (public): `callmezuy/fb15k237-img`, `callmezuy/fb15k237-ind`, `callmezuy/mkg-y`, `callmezuy/spatial-vrd`, `callmezuy/spatial-vrd-trans`, `callmezuy/spatial-vg` (đặc trưng merge từ PR #1 sau khi kiểm tra kích thước, mặt nạ, vector điền, log; tag 18/11/2026).
+  - Private: `callmezuy/vg-images-raw` (ảnh VG gốc, chỉ để notebook tải nhanh; không gắn tag).
   - Thống kê: `experiment_results/dataset_stats.md` (`scripts/dataset_stats.py`).
 
 ### P1. Hạ tầng đánh giá
