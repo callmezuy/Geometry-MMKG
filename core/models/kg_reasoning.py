@@ -70,7 +70,9 @@ def negative_masks(h, r, t, cand, index):
 
 
 def _side_loss(d_all, pos_col, ok, margin, adv_temp):
-    """d_all [B, C] distances of each query to every candidate; pos_col [B] column of the true answer."""
+    """d_all [B, C] distances of each query to every candidate; pos_col [B] column of the true answer.
+    Returns per-query (loss, effective number of negatives, number of negatives) for the queries that
+    have at least one negative."""
     d_pos = d_all.gather(1, pos_col[:, None])                       # [B, 1], same expression as negatives
     with torch.no_grad():
         logits = (-adv_temp * d_all).masked_fill(~ok, float("-inf"))
@@ -78,28 +80,45 @@ def _side_loss(d_all, pos_col, ok, margin, adv_temp):
         p = torch.softmax(logits[has_neg], dim=1)
         ent = -(p * torch.log(p.clamp_min(1e-30))).sum(dim=1)
     hinge = torch.relu(margin + d_pos - d_all)[has_neg]
-    loss = (p * hinge).sum(dim=1).mean()
-    stats = {"eff_neg": float(ent.exp().mean()), "n_neg": float(ok[has_neg].sum(dim=1).float().mean())}
-    return loss, stats
+    return (p * hinge).sum(dim=1), ent.exp(), ok[has_neg].sum(dim=1).float()
 
 
 def in_batch_loss(model, feats, h, r, t, index, margin, adv_temp):
-    """h, r, t: LongTensor [B] (train triples). Returns (loss, stats dict of floats)."""
+    """h, r, t: LongTensor [B] (train triples). Returns (loss, stats dict of floats).
+    A relation-conditioned model (rel_gate) fuses the candidates once per distinct relation of the batch,
+    and each query is scored against the candidates fused under its own relation."""
     device = feats.device
     cand = torch.unique(torch.cat([h, t]))                          # sorted distinct entities
-    e = model.forward_fusion(*feats.gather(cand))                   # [C, d]
+    cand_feats = feats.gather(cand)
     h_col = torch.searchsorted(cand, h.contiguous()).to(device)
     t_col = torch.searchsorted(cand, t.contiguous()).to(device)
-    rel = model.relation_embeddings(r.to(device))
+    r_dev = r.to(device)
+    rel = model.relation_embeddings(r_dev)
     tail_ok, head_ok = negative_masks(h, r, t, cand, index)
     tail_ok, head_ok = tail_ok.to(device), head_ok.to(device)
 
-    d_tail = l1_cdist(e[h_col] + rel, e)                            # ||h + r - c||_1
-    d_head = l1_cdist(e[t_col] - rel, e)                            # ||c + r - t||_1 = ||(t - r) - c||_1
-    l_tail, s_tail = _side_loss(d_tail, t_col, tail_ok, margin, adv_temp)
-    l_head, s_head = _side_loss(d_head, h_col, head_ok, margin, adv_temp)
-    loss = (l_tail + l_head) / 2
-    stats = {"loss_tail": float(l_tail), "loss_head": float(l_head),
-             "eff_neg_tail": s_tail["eff_neg"], "eff_neg_head": s_head["eff_neg"],
-             "n_neg_tail": s_tail["n_neg"], "n_neg_head": s_head["n_neg"]}
-    return loss, stats
+    if model.relation_conditioned:
+        groups = [(r_dev == rr).nonzero(as_tuple=True)[0] for rr in torch.unique(r_dev)]
+    else:
+        groups = [None]
+    parts = {"tail": [], "head": []}
+    for rows in groups:
+        if rows is None:
+            e = model.forward_fusion(*cand_feats)                   # [C, d]
+            rows = torch.arange(len(h_col), device=device)
+        else:
+            e = model.forward_fusion(*cand_feats, r_dev[rows[0]].expand(len(cand)))
+        rr = rel[rows]
+        d_tail = l1_cdist(e[h_col[rows]] + rr, e)                   # ||h + r - c||_1
+        d_head = l1_cdist(e[t_col[rows]] - rr, e)                   # ||c + r - t||_1 = ||(t - r) - c||_1
+        parts["tail"].append(_side_loss(d_tail, t_col[rows], tail_ok[rows], margin, adv_temp))
+        parts["head"].append(_side_loss(d_head, h_col[rows], head_ok[rows], margin, adv_temp))
+
+    stats, losses = {}, []
+    for side, ps in parts.items():
+        l_rows, eff, nneg = (torch.cat(x) for x in zip(*ps))
+        losses.append(l_rows.mean())
+        stats[f"loss_{side}"] = losses[-1].item()
+        stats[f"eff_neg_{side}"] = float(eff.mean())
+        stats[f"n_neg_{side}"] = float(nneg.mean())
+    return (losses[0] + losses[1]) / 2, stats

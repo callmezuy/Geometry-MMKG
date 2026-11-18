@@ -57,34 +57,71 @@ def _pick_store_device(num_entities, embed_dim, device, keep_on_gpu):
 
 
 @torch.no_grad()
-def fused_entity_table(model, all_text, all_rgb, all_depth, device, store_device, batch_size=2048, all_mask=None):
-    """all_mask: optional bool [N] image mask, passed to forward_fusion when given (P2.6)."""
+def fused_entity_table(model, all_text, all_rgb, all_depth, device, store_device, batch_size=2048, all_mask=None,
+                       rel=None):
+    """all_mask: optional bool [N] image mask, passed to forward_fusion when given (P2.6).
+    rel: relation id (int) for a relation-conditioned model: every entity is fused under that relation."""
     out = []
     n = len(all_text)
     for i in range(0, n, batch_size):
         j = min(i + batch_size, n)
         args = [all_text[i:j].to(device), all_rgb[i:j].to(device), all_depth[i:j].to(device)]
-        if all_mask is not None:
-            args.append(all_mask[i:j].to(device))
+        if all_mask is not None or rel is not None:
+            args.append(None if all_mask is None else all_mask[i:j].to(device))
+        if rel is not None:
+            args.append(torch.full((j - i,), int(rel), dtype=torch.long, device=device))
         fused = model.forward_fusion(*args)
         out.append(fused.to(store_device))
     return torch.cat(out, dim=0)
 
 
-def _filtered_correction(queries, true_scores, table, filters, device):
-    """Number of OTHER true answers that score strictly better than the true one, per query.
-    filters: list (len B) of lists of entity ids to filter."""
-    rows = [i for i, f in enumerate(filters) for _ in f]
-    if not rows:
-        return torch.zeros(len(filters), dtype=torch.long, device=device)
-    ents = torch.tensor([e for f in filters for e in f], dtype=torch.long)
+def _excluded_pairs(true_ids, filters, device):
+    """(row, entity) pairs that are never counted as 'better': the true answer itself and the other true
+    answers of the query (filtered setting). Returns two long tensors (rows, entities), sorted by entity."""
+    rows = list(range(len(true_ids))) + [i for i, f in enumerate(filters) for _ in f]
+    ents = list(true_ids) + [e for f in filters for e in f]
     rows = torch.tensor(rows, dtype=torch.long, device=device)
-    emb = table[ents.to(table.device)].to(device)
-    scores = -(queries[rows] - emb).abs().sum(dim=1)
-    better = (scores > true_scores[rows]).long()
-    out = torch.zeros(len(filters), dtype=torch.long, device=device)
-    out.index_add_(0, rows, better)
-    return out
+    ents = torch.tensor(ents, dtype=torch.long, device=device)
+    order = torch.argsort(ents)
+    return rows[order], ents[order]
+
+
+def _count_better(queries, true_scores, table, excl_rows, excl_ents, device, entity_chunk_size):
+    """#{candidates e not excluded : -||q - f(e)||_1 > true score}, per query.
+    Excluded pairs are removed from the comparison itself (not subtracted afterwards with a separately
+    computed score), so float differences between cdist and an explicit sum cannot make the true answer or a
+    filtered answer count as better than the true answer."""
+    better = torch.zeros(len(queries), dtype=torch.long, device=device)
+    for c in range(0, len(table), entity_chunk_size):
+        ent = table[c:c + entity_chunk_size].to(device, non_blocking=True)
+        cmp = -torch.cdist(queries, ent, p=1) > true_scores[:, None]
+        lo = torch.searchsorted(excl_ents, c)
+        hi = torch.searchsorted(excl_ents, c + len(ent))
+        if hi > lo:
+            cmp[excl_rows[lo:hi], excl_ents[lo:hi] - c] = False
+        better += cmp.sum(dim=1)
+    return better
+
+
+def _rank_batch(model, table, h_ids, r_ids, t_ids, all_true_triplets, head_filter, device, entity_chunk_size):
+    """Filtered (head rank, tail rank) numpy arrays of one batch of triples against the fused table."""
+    h_emb = table[h_ids.to(table.device)].to(device)
+    t_emb = table[t_ids.to(table.device)].to(device)
+    r_emb = model.relation_embeddings(r_ids.to(device))
+
+    q_tail = h_emb + r_emb            # compare with every f(e) as tail
+    q_head = t_emb - r_emb            # compare with every f(e) as head
+    true_t = -(q_tail - t_emb).abs().sum(dim=1)
+    true_h = -(q_head - h_emb).abs().sum(dim=1)
+
+    h_l, r_l, t_l = h_ids.tolist(), r_ids.tolist(), t_ids.tolist()
+    f_tail = [list(all_true_triplets.get((h, r), set()) - {t}) for h, r, t in zip(h_l, r_l, t_l)]
+    f_head = [list(head_filter.get((r, t), set()) - {h}) for h, r, t in zip(h_l, r_l, t_l)]
+    better_t = _count_better(q_tail, true_t, table, *_excluded_pairs(t_l, f_tail, device), device,
+                             entity_chunk_size)
+    better_h = _count_better(q_head, true_h, table, *_excluded_pairs(h_l, f_head, device), device,
+                             entity_chunk_size)
+    return (better_h + 1).cpu().numpy(), (better_t + 1).cpu().numpy()
 
 
 @torch.no_grad()
@@ -97,6 +134,9 @@ def evaluate_link_prediction(model, all_text, all_rgb, all_depth, dataloader, al
         all_true_triplets: {(h, r): set(t)} over train+valid+test (get_all_true_triplets).
         keep_on_gpu: None = automatic (P1.6), True / False to force.
         return_ranks: also return per-triplet ranks (for save_ranks / compute_metrics).
+    A model with `relation_conditioned = True` (entity representations depend on the query relation, P2.8)
+    is evaluated relation by relation: the entity table is fused once per relation of the evaluated triples,
+    and each triple is ranked against the table of its own relation. Ranks keep the input order.
     Returns:
         dict with "mrr", "mr", "hits@1", "hits@3", "hits@10", "n" over BOTH directions
         (head and tail ranks pooled, as in OpenKE), plus "tail" and "head" sub-dicts,
@@ -105,50 +145,51 @@ def evaluate_link_prediction(model, all_text, all_rgb, all_depth, dataloader, al
     model.eval()
     num_entities = len(all_text)
     store_device = _pick_store_device(num_entities, model.embed_dim, device, keep_on_gpu)
-    print(f"Pre-computing fused representations for all {num_entities:,} entities (stored on {store_device})...")
-    table = fused_entity_table(model, all_text, all_rgb, all_depth, device, store_device, all_mask=all_mask)
     head_filter = _head_filter(all_true_triplets)
+    batches = list(dataloader)
+    h_all = torch.cat([b["h_id"] for b in batches]) if batches else torch.zeros(0, dtype=torch.long)
+    r_all = torch.cat([b["r_id"] for b in batches]) if batches else torch.zeros(0, dtype=torch.long)
+    t_all = torch.cat([b["t_id"] for b in batches]) if batches else torch.zeros(0, dtype=torch.long)
+    rank_h = np.zeros(len(h_all), dtype=np.int64)
+    rank_t = np.zeros(len(h_all), dtype=np.int64)
+    batch_size = max(1, len(batches[0]["h_id"])) if batches else 1
 
-    hs, rs, ts, rank_t, rank_h = [], [], [], [], []
-    for batch in tqdm(dataloader, desc=desc):
-        h_ids, r_ids, t_ids = batch["h_id"], batch["r_id"], batch["t_id"]
-        h_emb = table[h_ids.to(table.device)].to(device)
-        t_emb = table[t_ids.to(table.device)].to(device)
-        r_emb = model.relation_embeddings(r_ids.to(device))
+    if getattr(model, "relation_conditioned", False):
+        rels = torch.unique(r_all).tolist()
+        print(f"Relation-conditioned model: fusing all {num_entities:,} entities once per relation "
+              f"({len(rels)} relations, stored on {store_device})...")
+        jobs = []
+        for rel in rels:
+            idx = (r_all == rel).nonzero(as_tuple=True)[0]
+            jobs += [(rel, idx[i:i + batch_size]) for i in range(0, len(idx), batch_size)]
+        table, table_rel = None, None
+        for rel, idx in tqdm(jobs, desc=desc):
+            if rel != table_rel:
+                del table
+                table = fused_entity_table(model, all_text, all_rgb, all_depth, device, store_device,
+                                           all_mask=all_mask, rel=rel)
+                table_rel = rel
+            rh, rt = _rank_batch(model, table, h_all[idx], r_all[idx], t_all[idx], all_true_triplets,
+                                 head_filter, device, entity_chunk_size)
+            rank_h[idx.numpy()], rank_t[idx.numpy()] = rh, rt
+    else:
+        print(f"Pre-computing fused representations for all {num_entities:,} entities (stored on {store_device})...")
+        table = fused_entity_table(model, all_text, all_rgb, all_depth, device, store_device, all_mask=all_mask)
+        pos = 0
+        for batch in tqdm(batches, desc=desc):
+            n = len(batch["h_id"])
+            rh, rt = _rank_batch(model, table, batch["h_id"], batch["r_id"], batch["t_id"], all_true_triplets,
+                                 head_filter, device, entity_chunk_size)
+            rank_h[pos:pos + n], rank_t[pos:pos + n] = rh, rt
+            pos += n
+    del table
 
-        q_tail = h_emb + r_emb            # compare with every f(e) as tail
-        q_head = t_emb - r_emb            # compare with every f(e) as head
-        # True-answer scores are computed with the SAME expression as the candidates of each
-        # direction; otherwise float rounding can make the true entity "beat" itself.
-        true_t = -(q_tail - t_emb).abs().sum(dim=1)
-        true_h = -(q_head - h_emb).abs().sum(dim=1)
-
-        better_t = torch.zeros(len(h_ids), dtype=torch.long, device=device)
-        better_h = torch.zeros(len(h_ids), dtype=torch.long, device=device)
-        for c in range(0, num_entities, entity_chunk_size):
-            ent = table[c:c + entity_chunk_size].to(device, non_blocking=True)
-            better_t += (-torch.cdist(q_tail, ent, p=1) > true_t[:, None]).sum(dim=1)
-            better_h += (-torch.cdist(q_head, ent, p=1) > true_h[:, None]).sum(dim=1)
-
-        h_l, r_l, t_l = h_ids.tolist(), r_ids.tolist(), t_ids.tolist()
-        f_tail = [list(all_true_triplets.get((h, r), set()) - {t}) for h, r, t in zip(h_l, r_l, t_l)]
-        f_head = [list(head_filter.get((r, t), set()) - {h}) for h, r, t in zip(h_l, r_l, t_l)]
-        better_t -= _filtered_correction(q_tail, true_t, table, f_tail, device)
-        better_h -= _filtered_correction(q_head, true_h, table, f_head, device)
-
-        rank_t.append((better_t + 1).cpu().numpy())
-        rank_h.append((better_h + 1).cpu().numpy())
-        hs.append(np.asarray(h_l)); rs.append(np.asarray(r_l)); ts.append(np.asarray(t_l))
-
-    rank_t = np.concatenate(rank_t) if rank_t else np.zeros(0, dtype=np.int64)
-    rank_h = np.concatenate(rank_h) if rank_h else np.zeros(0, dtype=np.int64)
     result = _metrics(np.concatenate([rank_h, rank_t]))
     result["tail"] = _metrics(rank_t)
     result["head"] = _metrics(rank_h)
     if return_ranks:
-        result["ranks"] = {"h": np.concatenate(hs), "r": np.concatenate(rs), "t": np.concatenate(ts),
+        result["ranks"] = {"h": h_all.numpy(), "r": r_all.numpy(), "t": t_all.numpy(),
                            "rank_head": rank_h, "rank_tail": rank_t}
-    del table
     return result
 
 

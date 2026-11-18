@@ -192,10 +192,15 @@ def _(HfApi, RESULTS_REPO, os, subprocess, sys):
 
 @app.cell
 def _(DATASET, PLANNED_SEEDS, VARIANT_NAMES, mo):
-    # Mặc định = scripts/train.py. Tuning (quyết định (d), 18/11/2026): lưới lr × margin trên valid của
-    # no_depth, seed 42; cấu hình thắng dùng cho mọi biến thể. Ngân sách epoch chốt sau lần chạy thử.
+    # Mặc định = scripts/train.py. Giai đoạn phát triển mô hình (P2.8): chế độ dev chỉ đánh giá valid, không
+    # bao giờ chạy test; thử các cờ theo thứ tự rel_gate -> input_norm -> depth_dropout -> text_proj.
+    # Tuning và ngân sách epoch chốt sau khi đóng băng thiết kế.
     seed_ui = mo.ui.dropdown(options=["42", "43", "44"], value="42", label="Seed")
     variants_ui = mo.ui.multiselect(options=VARIANT_NAMES, value=["full", "no_depth"], label="Biến thể")
+    dev_ui = mo.ui.checkbox(value=True, label="Chế độ dev (P2.8): chỉ valid, không chạy test")
+    options_ui = mo.ui.multiselect(options=["rel_gate", "input_norm", "depth_dropout", "text_proj"], value=[],
+                                   label="Cờ phát triển")
+    ddrop_ui = mo.ui.text(value="0.3", label="Xác suất depth_dropout")
     epochs_ui = mo.ui.number(start=1, stop=2000, step=1, value=100, label="Epochs")
     batch_ui = mo.ui.dropdown(options=["512", "1024", "2048", "4096"], value="1024", label="Batch")
     lr_ui = mo.ui.text(value="1e-4", label="LR")
@@ -204,13 +209,15 @@ def _(DATASET, PLANNED_SEEDS, VARIANT_NAMES, mo):
     dropout_ui = mo.ui.text(value="0.1", label="Dropout")
     wd_ui = mo.ui.text(value="1e-5", label="Weight decay")
     valid_every_ui = mo.ui.number(start=1, stop=500, step=1, value=10, label="Đánh giá valid mỗi N epoch")
-    save_ckpt_ui = mo.ui.checkbox(value=True, label="Lưu checkpoint lên HF")
+    save_ckpt_ui = mo.ui.checkbox(value=True, label="Lưu checkpoint lên HF (không áp dụng cho dev)")
     train_btn = mo.ui.run_button(label="▶ Train các biến thể đã chọn")
     mo.vstack([
         mo.md(f"`{DATASET}`: kế hoạch **{PLANNED_SEEDS} seed**. Mỗi lần bấm chạy một seed; đổi tham số **không** "
-              "tự chạy lại training. Dùng cùng tham số cho mọi biến thể (Δdepth so trong cùng config)."
+              "tự chạy lại training. Dùng cùng tham số và cùng cờ cho mọi biến thể (Δdepth so trong cùng config); "
+              "biến thể nào không dùng được một cờ (ví dụ `no_depth` với `rel_gate`) thì tự bỏ cờ đó."
               + (" Valid dùng tập con 5.000 bộ ba (mục 4.9)." if DATASET == "Spatial-VG" else "")),
         mo.hstack([seed_ui, variants_ui]),
+        mo.hstack([dev_ui, options_ui, ddrop_ui]),
         mo.hstack([epochs_ui, batch_ui, lr_ui, margin_ui]),
         mo.hstack([adv_ui, dropout_ui, wd_ui, valid_every_ui]),
         save_ckpt_ui,
@@ -219,10 +226,13 @@ def _(DATASET, PLANNED_SEEDS, VARIANT_NAMES, mo):
     return (
         adv_ui,
         batch_ui,
+        ddrop_ui,
+        dev_ui,
         dropout_ui,
         epochs_ui,
         lr_ui,
         margin_ui,
+        options_ui,
         save_ckpt_ui,
         seed_ui,
         train_btn,
@@ -241,12 +251,15 @@ def _(
     WORK_DIR,
     adv_ui,
     batch_ui,
+    ddrop_ui,
+    dev_ui,
     dropout_ui,
     epochs_ui,
     hf_token_ui,
     lr_ui,
     margin_ui,
     mo,
+    options_ui,
     os,
     push_results,
     remote_files,
@@ -262,12 +275,22 @@ def _(
     _token = hf_token_ui.value.strip()
     mo.stop(not _token, mo.md("⚠ Chưa nhập HF token ở ô phía trên: nhập, nhấn Enter, rồi bấm chạy lại."))
     _seed = int(seed_ui.value)
-    _prefix = f"geometry/{DATASET}"
-    RESULTS_DIR = os.path.join(WORK_DIR, "results", "geometry", DATASET)
+    _dev = bool(dev_ui.value)
+    _opts = set(options_ui.value)
+    _ddrop = float(ddrop_ui.value) if "depth_dropout" in _opts else 0.0
+    _flags = (["--rel-gate"] if "rel_gate" in _opts else []) + (["--input-norm"] if "input_norm" in _opts else []) \
+        + (["--depth-dropout", str(_ddrop)] if _ddrop > 0 else []) + (["--text-proj"] if "text_proj" in _opts else [])
+    # same tag as scripts/train.py options_tag()
+    OPTIONS_TAG = "-".join(
+        (["relgate"] if "rel_gate" in _opts else []) + (["inorm"] if "input_norm" in _opts else [])
+        + ([f"ddrop{_ddrop:g}"] if _ddrop > 0 else []) + (["tproj"] if "text_proj" in _opts else [])) or "base"
+    # dev: geometry-dev/<dataset>/<tag>/<variant>/ ; chính thức: geometry/<dataset>/<variant>/
+    _prefix = f"geometry-dev/{DATASET}/{OPTIONS_TAG}" if _dev else f"geometry/{DATASET}"
+    RESULTS_DIR = os.path.join(WORK_DIR, "results", *_prefix.split("/"))
     _done_remote = remote_files(_prefix, _token)
     train_status = {}
     for _v in variants_ui.value:
-        _stem = f"geometry_{DATASET}_{_v}_seed{_seed}"
+        _stem = f"geometry_{DATASET}_{_v}{'' if OPTIONS_TAG == 'base' else '_' + OPTIONS_TAG}_seed{_seed}"
         _metrics = f"metrics_{_stem}.json"
         _out = os.path.join(RESULTS_DIR, _v)
         os.makedirs(_out, exist_ok=True)
@@ -275,7 +298,8 @@ def _(
             print(f"=== {_v}: đã có {_metrics}, bỏ qua ===")
             train_status[_v] = "đã có"
             continue
-        print(f"=== {_v}, seed {_seed}, code {CODE_COMMIT} ===", flush=True)
+        print(f"=== {_v}, seed {_seed}, cờ {OPTIONS_TAG}{' [dev]' if _dev else ''}, code {CODE_COMMIT} ===",
+              flush=True)
         _cmd = [
             "python", os.path.join(REPO_ROOT, "scripts", "train.py"),
             "--data", DATA_DIR,
@@ -290,29 +314,49 @@ def _(
             "--weight-decay", str(float(wd_ui.value)),
             "--valid-every", str(int(valid_every_ui.value)),
             "--out", _out,
+            *_flags,
         ]
-        if not save_ckpt_ui.value:
+        if _dev:
+            _cmd.append("--dev")
+        elif not save_ckpt_ui.value:
             _cmd.append("--no-ckpt")
         _rc = run_streaming(_cmd, REPO_ROOT, os.path.join(_out, f"{_stem}.log"))
         train_status[_v] = "xong" if _rc == 0 else f"lỗi (exit {_rc})"
         push_results(_out, f"{_prefix}/{_v}", _token)
-    mo.md("### Kết quả train, seed {}\n\n".format(_seed)
+    mo.md("### Kết quả train, seed {}, cờ `{}`{}\n\n".format(_seed, OPTIONS_TAG, " (dev)" if _dev else "")
           + "\n".join(f"- `{_k}`: {_v}" for _k, _v in train_status.items()))
-    return RESULTS_DIR, train_status
+    return OPTIONS_TAG, RESULTS_DIR, train_status
 
 
 @app.cell
-def _(DATASET, DATA_DIR, REPO_ROOT, RESULTS_DIR, VARIANT_NAMES, mo, os, seed_ui, subprocess, sys, train_status):
+def _(
+    DATASET,
+    DATA_DIR,
+    OPTIONS_TAG,
+    REPO_ROOT,
+    RESULTS_DIR,
+    VARIANT_NAMES,
+    dev_ui,
+    mo,
+    os,
+    seed_ui,
+    subprocess,
+    sys,
+    train_status,
+):
     # Metric từ rank CSV của seed này (một nguồn duy nhất: scripts/compute_metrics.py), so với no_depth (Δdepth).
+    # Chế độ dev không có rank test: xem bảng valid ở cell dưới.
     _ = train_status
+    mo.stop(dev_ui.value, mo.md("Chế độ dev: không có rank test (xem bảng valid ở cell dưới)."))
     _seed = int(seed_ui.value)
+    _sfx = "" if OPTIONS_TAG == "base" else "_" + OPTIONS_TAG
     _ranks = []
     for _v in VARIANT_NAMES:
-        _p = os.path.join(RESULTS_DIR, _v, f"ranks_geometry_{DATASET}_{_v}_seed{_seed}_test.csv")
+        _p = os.path.join(RESULTS_DIR, _v, f"ranks_geometry_{DATASET}_{_v}{_sfx}_seed{_seed}_test.csv")
         if os.path.exists(_p):
             _ranks.append(f"{_v}={_p}")
     mo.stop(not _ranks, mo.md("Chưa có rank CSV nào trên máy cho seed này."))
-    _out = os.path.join(RESULTS_DIR, f"metrics_geometry_{DATASET}_seed{_seed}.md")
+    _out = os.path.join(RESULTS_DIR, f"metrics_geometry_{DATASET}{_sfx}_seed{_seed}.md")
     _cmd = [sys.executable, os.path.join(REPO_ROOT, "scripts", "compute_metrics.py"), "--data", DATA_DIR,
             "--ranks", *_ranks, "--out", _out]
     if any(_r.startswith("no_depth=") for _r in _ranks) and len(_ranks) > 1:
@@ -321,6 +365,43 @@ def _(DATASET, DATA_DIR, REPO_ROOT, RESULTS_DIR, VARIANT_NAMES, mo, os, seed_ui,
     print(_res.stderr[-2000:])
     mo.md(open(_out, encoding="utf-8").read() if _res.returncode == 0 and os.path.exists(_out)
           else f"compute_metrics lỗi (exit {_res.returncode}), xem stderr ở trên.")
+    return
+
+
+@app.cell
+def _(DATASET, RESULTS_REPO, WORK_DIR, hf_token_ui, json, mo, os, snapshot_download, train_status):
+    # P2.8: bảng valid của mọi lần chạy dev trên dataset này (tải metric JSON từ repo kết quả, nên xem được cả các
+    # lần chạy ở session trước). Không có số test nào ở đây.
+    _ = train_status
+    _token = hf_token_ui.value.strip()
+    mo.stop(not _token, mo.md("Nhập HF token để xem bảng valid của các lần chạy dev."))
+    _local = os.path.join(WORK_DIR, "hf_results")
+    try:
+        snapshot_download(RESULTS_REPO, repo_type="dataset", token=_token, local_dir=_local,
+                          allow_patterns=[f"geometry-dev/{DATASET}/*/*/metrics_*.json"])
+    except Exception as _e:
+        print(f"Không tải được metric dev: {_e}")
+    _root = os.path.join(_local, "geometry-dev", DATASET)
+    _rows = []
+    for _tag in sorted(os.listdir(_root)) if os.path.isdir(_root) else []:
+        for _v in sorted(os.listdir(os.path.join(_root, _tag))):
+            for _fn in sorted(os.listdir(os.path.join(_root, _tag, _v))):
+                if not _fn.startswith("metrics_"):
+                    continue
+                with open(os.path.join(_root, _tag, _v, _fn), encoding="utf-8") as _f:
+                    _m = json.load(_f)
+                _vals = [_h["valid"]["mrr"] for _h in _m["history"] if "valid" in _h]
+                _g = _m.get("best_gate") or {}
+                _gate = "" if not _g else f"{_g['mean']:.3f}" + (
+                    f" (sd thực thể {_g['std_entities']:.3f}" if "std_entities" in _g else "") + (
+                    f", sd quan hệ {_g['std_relations']:.3f}" if "std_relations" in _g else "") + (
+                    ")" if "std_entities" in _g else "")
+                _rows.append(f"| `{_tag}` | `{_v}` | {_m['seed']} | {_m['args']['epochs']} | {_m['best_epoch']} | "
+                             f"{_m['best_valid']['mrr']:.4f} | {_vals[-1]:.4f} | {_gate} |")
+    mo.md("\n".join([f"### Các lần chạy dev trên `{DATASET}` (chỉ valid)", "",
+                     "| Cờ | Biến thể | Seed | Epochs | Epoch tốt nhất | MRR valid tốt nhất | MRR valid cuối | "
+                     "Phần depth của gate |",
+                     "|---|---|---|---|---|---|---|---|", *_rows]) if _rows else "Chưa có lần chạy dev nào.")
     return
 
 

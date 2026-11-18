@@ -18,13 +18,27 @@ VARIANTS = {
     "constant": dict(use_depth=True, fusion_mode="gate", missing_mode="constant"),
 }
 
+# Development options (P2.8), all off by default.
+OPTIONS = ("rel_gate", "input_norm", "depth_dropout", "text_proj")
+
+
+def effective_options(variant_kwargs, rel_gate=False, input_norm=False, depth_dropout=0.0, text_proj=False):
+    """Options that apply to a variant: rel_gate only for the gate, depth_dropout only with depth.
+    Lets one set of requested options be passed to every variant of a comparison."""
+    uses_depth = variant_kwargs.get("use_depth", True)
+    is_gate = uses_depth and variant_kwargs.get("fusion_mode", "gate") == "gate"
+    return dict(rel_gate=bool(rel_gate and is_gate), input_norm=bool(input_norm),
+                depth_dropout=float(depth_dropout) if uses_depth else 0.0, text_proj=bool(text_proj))
+
 
 class GeometryMMKGModel(nn.Module):
     def __init__(self, num_relations, embed_dim=768, use_depth=True, fusion_mode="gate",
-                 missing_mode="learned_mask", dropout=0.1):
+                 missing_mode="learned_mask", dropout=0.1, rel_gate=False, input_norm=False, depth_dropout=0.0,
+                 text_proj=False):
         super().__init__()
         self.embed_dim = embed_dim
-        self.fusion_module = GeometryGuidedFusion(embed_dim, use_depth, fusion_mode, missing_mode, dropout)
+        self.fusion_module = GeometryGuidedFusion(embed_dim, use_depth, fusion_mode, missing_mode, dropout,
+                                                  num_relations, rel_gate, input_norm, depth_dropout, text_proj)
         self.relation_embeddings = nn.Embedding(num_relations, embed_dim)
         nn.init.xavier_uniform_(self.relation_embeddings.weight)
 
@@ -36,9 +50,15 @@ class GeometryMMKGModel(nn.Module):
     def missing_vision(self):
         return self.fusion_module.missing_vision
 
-    def forward_fusion(self, h_text, h_rgb, h_depth, mask=None):
-        """Entity representations [B, d] from features [B, d] and the image mask [B] (bool)."""
-        return self.fusion_module(h_text, h_rgb, h_depth, mask)
+    @property
+    def relation_conditioned(self):
+        """True when entity representations depend on the query relation (rel_gate)."""
+        return self.vision_fusion.relation_conditioned
+
+    def forward_fusion(self, h_text, h_rgb, h_depth, mask=None, rel=None):
+        """Entity representations [B, d] from features [B, d], the image mask [B] (bool) and, for a
+        relation-conditioned model, the relation ids [B]."""
+        return self.fusion_module(h_text, h_rgb, h_depth, mask, rel)
 
     def score(self, h, r_ids, t):
         """TransE L1: -||h + r - t||_1 (higher = more plausible)."""

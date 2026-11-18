@@ -179,7 +179,7 @@ Sáu bộ, mỗi bộ một repo HF public, tag `v0`; cấu trúc file, lệnh d
 
 ### P1. Hạ tầng đánh giá
 
-- [x] **P1.1** `core/models/evaluation.py`: xếp hạng cả head và tail, trả về dict (MRR/MR/Hits gộp hai chiều + từng chiều), `return_ranks`, `save_ranks()`. Kiểm tra bằng `tests/test_evaluation.py` (so với brute-force).
+- [x] **P1.1** `core/models/evaluation.py`: xếp hạng cả head và tail, trả về dict (MRR/MR/Hits gộp hai chiều + từng chiều), `return_ranks`, `save_ranks()`. Kiểm tra bằng `tests/test_evaluation.py` (so với brute-force). **Sửa 19/11/2026:** điểm đáp án đúng (cộng trực tiếp) và điểm ứng viên (`torch.cdist`) lệch nhau ở chữ số cuối, nên đôi khi đáp án đúng bị đếm là "tốt hơn chính nó" (rank +1); thực thể bị lọc cũng có thể bị đếm lệch. Nay đáp án đúng và các thực thể bị lọc bị loại ngay trong phép so sánh. Ảnh hưởng (Spatial-VRD, lần chạy thử): khoảng 16% bộ ba test có rank +1, MRR bị báo thấp khoảng 0,012–0,015. Thêm test mô hình phụ thuộc quan hệ, test này bắt được lỗi. Baseline không bị: `Tester` / `ValidSelector` của NativE, SNAG lấy điểm đáp án đúng từ chính mảng điểm ứng viên.
 - [x] **P1.2** `core/reproducibility.py` (`set_seed`, `seed_worker`); `scripts/train.py` dùng `SEED = 42` và lưu `ranks_geometry_<ds>_seed<SEED>_test.csv`.
 - [x] **P1.3** `scripts/compute_metrics.py`: metric tổng, theo nhóm (`relation_category.tsv`), theo từng quan hệ; `--reference` cho ΔMRR với khoảng tin cậy bootstrap ghép cặp. (Chưa xuất LaTeX.)
 - [x] **P1.4** NativE `Tester.run_link_prediction(rank_file=...)` + tham số `-rank_file`; in metric Python cạnh metric C++ để đối chiếu. Đã kiểm tra với lib giả theo đúng luật OpenKE; **cần xác nhận hai bộ số khớp nhau ở lần chạy thật đầu tiên**.
@@ -196,13 +196,40 @@ Sáu bộ, mỗi bộ một repo HF public, tag `v0`; cấu trúc file, lệnh d
   - Nhiệt độ self-adversarial mặc định 1 (như RotatE): chạy thử 3 epoch trên Spatial-VRD, số âm mẫu hiệu dụng (exp entropy của trọng số, ghi trong log mỗi epoch) giảm từ khoảng 1.300 xuống 250 trên khoảng 1.980 ứng viên; nhiệt độ 2 chỉ còn khoảng 9, gần với chỉ lấy âm mẫu khó nhất.
   - Khoảng cách L1 trong loss dùng backward tự viết, chia khúc (`L1CDist`): backward của `torch.cdist(p=1)` dựng tensor B×C×d (khoảng 6 GB với batch 1024).
   - Kiểm tra: `tests/test_negatives.py` (mặt nạ âm mẫu, thực thể lặp trong batch, chỉ lọc theo train, gradcheck của L1). Chạy 1 epoch đủ 6 biến thể trên Spatial-VRD bằng RTX 3050 4 GB: khoảng 1 phút/epoch train.
-  - **Tuning** (quyết định (d)): lưới lr × margin (6 cấu hình, seed 42) trên valid của `no_depth`, cấu hình thắng dùng cho mọi biến thể (nếu có thiên lệch thì chống lại depth). Ngân sách epoch cố định, không dừng sớm, chốt sau lần chạy thử trên Spatial-VRD và FB15k-237-IMG.
-- [ ] **P2.2** Gate có điều kiện theo quan hệ: `G = σ(W[h_rgb ; h_depth ; r])`, khớp giả thuyết "quan hệ không gian cần Depth". So sánh với gate hiện tại.
+  - **Tuning** (quyết định (d), đổi 19/11/2026): **tune riêng từng biến thể trên cùng một lưới** (cùng số cấu hình cho mỗi biến thể và cho baseline, tiêu chí 5). Lý do: lần chạy thử cho thấy các biến thể cần cấu hình khác nhau (trên Spatial-VRD `full` học thuộc sau epoch 20, `no_depth` thì không), nên dùng chung cấu hình thắng của `no_depth` có thể làm Δdepth âm chỉ vì tham số. Lưới và ngân sách epoch chốt **sau** khi đóng băng thiết kế (P2.8).
+- [ ] **P2.2** Gate có điều kiện theo quan hệ: `G = σ(W_g[x; z] + b_r)`, b_r là bias theo quan hệ (tương đương W[x; z; one-hot(r)]), khởi tạo 0. Cài dưới cờ `--rel-gate` (P2.8, thử đầu tiên). Biểu diễn thực thể khi đó phụ thuộc quan hệ (như phép chiếu theo quan hệ của TransR): train fuse ứng viên một lần cho mỗi quan hệ trong batch, đánh giá fuse toàn bộ thực thể một lần cho mỗi quan hệ.
 - [x] **P2.3** Cross-attention với chuỗi dài 1 (softmax luôn bằng 1, tương đương `Linear(h_vision)` cộng residual) được thay bằng **cổng text–vision**: u = W_v v, g = σ(W_tg[t; u]), h = LN(t + Dropout(g ⊙ u)); text quyết định từng chiều nhận bao nhiêu thông tin thị giác, g log được như gate RGB–depth (P2.4).
 - [ ] **P2.4** Log trọng số gate (phần dành cho Depth) theo từng triplet test để phân tích ở P5.
 - [ ] **P2.5** *(Tùy chọn)* Modality BBox geometry (x, y, w, h chuẩn hóa, diện tích).
 - [x] **P2.6** Thiếu ảnh: đọc `ent_img_mask.pt`; với `learned_mask`, vision v của thực thể có mặt nạ 0 được thay bằng **một** vector học được `v_miss`, sau bước gộp RGB–depth. RGB và depth thiếu cùng lúc (cùng nguồn ảnh) nên một vector ở tầng vision là đủ, và thực thể thiếu ảnh đi qua đúng cùng một phép tính ở mọi biến thể; đặt hai vector riêng trước gate thì bản có và không có depth sẽ cho đầu ra khác nhau. Biến thể `constant` bỏ qua mặt nạ, đọc bảng đã điền vector hằng như baseline. Kiểm tra `tests/test_missing_modality.py`: cùng tham số chung thì thực thể thiếu ảnh cho đầu ra giống hệt giữa `no_depth` và mọi `fusion_mode`; đầu ra không phụ thuộc giá trị RGB/depth của dòng thiếu; `constant` thì có; batch toàn thực thể thiếu ảnh không tạo gradient cho phần gộp RGB–depth. (Loss căn chỉnh đã bỏ, xem đầu mục P2.)
 - [x] **P2.7** `notebooks/geometry.py` (Molab, theo mẫu `native.py`): chọn 1 trong 6 dataset, tải `v0` từ HF (chỉ file `*2id`, bảng đặc trưng, mặt nạ, `relation_category.tsv`), kiểm tra bảng đặc trưng; ô HF token dạng mật khẩu; chọn biến thể, seed, tham số; mỗi biến thể chạy `scripts/train.py`, xong là đẩy log, rank, metric, checkpoint lên `geometry-mmkg-results/geometry/<dataset>/<variant>/`; biến thể đã có metric của seed đó thì bỏ qua. Cell cuối chạy `compute_metrics.py` so với `no_depth` (Δdepth). `marimo check` sạch. **Chưa chạy trên Molab.**
+- [ ] **P2.8** Hoàn thiện thiết kế trước khi tune (thứ tự: thiết kế → đóng băng → tune → chạy chính thức; quyết định 19/11/2026).
+  - **Lần chạy thử** (seed 42, cấu hình mặc định, 100 epoch, code `0455091`, còn lỗi đánh giá ở P1.1):
+
+    | Dataset | `full`: epoch tốt nhất / MRR valid | `no_depth`: epoch tốt nhất / MRR valid | Ghi chú |
+    |---|---|---|---|
+    | Spatial-VRD | 20 / 0,178 | 90 / 0,217 | `full` học thuộc: valid tụt còn 0,099 ở epoch 100 trong khi loss train vẫn giảm |
+    | MKG-Y | 100 / 0,164 | 100 / 0,089 | chưa hội tụ (21 batch/epoch); valid còn tăng mạnh |
+    | FB15k-237-IMG | 90 / 0,277 | 100 / 0,280 | gần hội tụ, không học thuộc |
+
+    Các lần chạy này đã lỡ tính và xem số test (chế độ dev chưa có); từ nay giai đoạn phát triển chỉ nhìn valid.
+    Phân tích checkpoint VRD: phần depth của gate gần như hằng (trung bình 0,34, sd giữa thực thể 0,03), tức gate chưa thích nghi
+    theo thực thể; vật thể ở ảnh khác chiếm gần hết các ứng viên xếp trên đáp án đúng (khoảng 1.300–1.600 so với 4 vật thể cùng ảnh).
+  - **Chế độ dev** (`train.py --dev`, ô "Chế độ dev" trong notebook): chỉ đánh giá valid, không bao giờ chạy test, không ghi rank;
+    kết quả ở `geometry-dev/<dataset>/<cờ>/<biến thể>/`. Mỗi lần đánh giá valid ghi phần depth của gate (trung bình, độ lệch giữa
+    thực thể, giữa quan hệ). Notebook có bảng tổng hợp valid của mọi lần chạy dev.
+  - **Các cờ thử, theo thứ tự, cộng dồn** (mặc định tắt; cùng cờ cho mọi biến thể, biến thể không dùng được cờ thì bỏ cờ đó):
+    1. `--rel-gate`: gate theo quan hệ (P2.2). Nhắm vào: gate hằng; giả thuyết "quan hệ không gian cần depth".
+    2. `--input-norm`: LayerNorm riêng (có tham số) cho RGB và depth trước khi gộp. Nhắm vào: hai bảng DINOv2 khác thang.
+    3. `--depth-dropout P` (P = 0,3): lúc train, mỗi thực thể bỏ depth với xác suất P (đi đường không depth). Nhắm vào: `full`
+       học thuộc trên VRD.
+    4. `--text-proj`: phép chiếu học được cho text (khởi tạo đơn vị) trước residual và cổng. Nhắm vào: text không được biến đổi.
+    Các cờ 1 và 4 khởi tạo sao cho mô hình lúc đầu giống hệt bản không có cờ. Kiểm tra: `tests/test_model_options.py`
+    (gồm loss nhóm theo quan hệ khớp với cách tính từng câu hỏi, thực thể thiếu ảnh vẫn cho cùng đầu ra với mọi cờ).
+  - **Giao thức:** Spatial-VRD và FB15k-237-IMG, seed 42, cấu hình mặc định, 100 epoch, `full` và `no_depth` (thêm biến thể
+    khác nếu cờ ảnh hưởng tới nó). **Luật giữ một cờ:** MRR valid của các biến thể chịu ảnh hưởng tăng trung bình trên hai bộ và
+    không tụt quá 0,005 ở bộ nào. Ghi mọi lần thử vào đây, kể cả lần không cải thiện. Mục tiêu là mô hình tốt hơn nói chung,
+    không phải làm Δdepth dương.
 
 ### P3. Baseline
 
