@@ -9,6 +9,7 @@ def _():
     import hashlib
     import json
     import os
+    import shutil
     import subprocess
     import sys
 
@@ -30,15 +31,18 @@ def _():
         GitHub; khoảng 40 GB đĩa (ảnh 15 GB, bảng tạm 9 GB, đầu ra khoảng 13 GB).
         """
     )
-    return HfApi, hashlib, json, mo, os, snapshot_download, subprocess, sys
+    return HfApi, hashlib, json, mo, os, shutil, snapshot_download, subprocess, sys
 
 
 @app.cell
-def _(hashlib, os, subprocess):
+def _(hashlib, os, shutil, subprocess):
     # 1. Code: repo dự án (scripts/ + bản sao ZipDepth/ kèm checkpoint)
     WORK_DIR = os.path.abspath(".")
     REPO_ROOT = os.path.join(WORK_DIR, "Geometry-MMKG")
-    if not os.path.exists(REPO_ROOT):
+    # Molab giữ lại thư mục làm việc giữa các session nhưng chỉ còn file .py/.md (mất .git, checkpoint ZipDepth),
+    # nên thiếu .git thì xoá và clone lại.
+    if not os.path.isdir(os.path.join(REPO_ROOT, ".git")):
+        shutil.rmtree(REPO_ROOT, ignore_errors=True)
         subprocess.run(["git", "clone", "https://github.com/callmezuy/Geometry-MMKG.git", REPO_ROOT], check=True)
     else:
         subprocess.run(["git", "-C", REPO_ROOT, "pull"], check=False)

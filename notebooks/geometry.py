@@ -9,6 +9,7 @@ def _():
     import os
     import sys
     import json
+    import shutil
     import subprocess
     import marimo as mo
     import torch
@@ -38,7 +39,7 @@ def _():
         nên session tắt giữa chừng thì chỉ cần bấm lại.
         """
     )
-    return HfApi, json, mo, os, snapshot_download, subprocess, sys, torch
+    return HfApi, json, mo, os, shutil, snapshot_download, subprocess, sys, torch
 
 
 @app.cell
@@ -61,7 +62,7 @@ def _(mo):
 
 
 @app.cell
-def _(os, subprocess):
+def _(os, shutil, subprocess):
     # Mã nguồn Geometry-MMKG (một lần cho cả session)
     WORK_DIR = os.path.abspath(".")
     if os.path.exists(os.path.join(WORK_DIR, "scripts", "train.py")):
@@ -70,7 +71,10 @@ def _(os, subprocess):
         REPO_ROOT = os.path.dirname(WORK_DIR)
     else:
         REPO_ROOT = os.path.join(WORK_DIR, "Geometry-MMKG")
-        if not os.path.exists(REPO_ROOT):
+        # Molab giữ lại thư mục làm việc giữa các session nhưng chỉ còn file .py/.md (mất .git, mã C++, checkpoint),
+        # nên thiếu .git thì xoá và clone lại.
+        if not os.path.isdir(os.path.join(REPO_ROOT, ".git")):
+            shutil.rmtree(REPO_ROOT, ignore_errors=True)
             subprocess.run(["git", "clone", "https://github.com/callmezuy/Geometry-MMKG.git", REPO_ROOT], check=True)
         else:
             subprocess.run(["git", "-C", REPO_ROOT, "pull"], check=False)

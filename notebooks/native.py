@@ -61,7 +61,7 @@ def _(mo):
 
 
 @app.cell
-def _(os, subprocess):
+def _(os, shutil, subprocess):
     # Mã nguồn Geometry-MMKG + thư viện C++ của NativE (một lần cho cả session)
     WORK_DIR = os.path.abspath(".")
     if os.path.exists(os.path.join(WORK_DIR, "baselines", "NativE")):
@@ -70,7 +70,10 @@ def _(os, subprocess):
         REPO_ROOT = os.path.dirname(WORK_DIR)
     else:
         REPO_ROOT = os.path.join(WORK_DIR, "Geometry-MMKG")
-        if not os.path.exists(REPO_ROOT):
+        # Molab giữ lại thư mục làm việc giữa các session nhưng chỉ còn file .py/.md (mất .git, make.sh, mã C++),
+        # nên thiếu .git thì xoá và clone lại.
+        if not os.path.isdir(os.path.join(REPO_ROOT, ".git")):
+            shutil.rmtree(REPO_ROOT, ignore_errors=True)
             subprocess.run(["git", "clone", "https://github.com/callmezuy/Geometry-MMKG.git", REPO_ROOT], check=True)
         else:
             subprocess.run(["git", "-C", REPO_ROOT, "pull"], check=False)
@@ -185,33 +188,60 @@ def _(mo):
 
 @app.cell
 def _(HfApi, RESULTS_REPO, os, subprocess, sys):
-    def run_streaming(cmd, cwd, log_path):
-        """Chạy lệnh, in log theo thời gian thực và ghi đồng thời vào log_path."""
-        print("$ " + " ".join(cmd), flush=True)
-        with open(log_path, "w", encoding="utf-8") as _log:
-            _proc = subprocess.Popen(
-                [sys.executable if cmd[0] == "python" else cmd[0]] + cmd[1:],
-                cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
-                env={**os.environ, "PYTHONUNBUFFERED": "1"},
-            )
-            try:
-                for _line in _proc.stdout:
-                    print(_line, end="", flush=True)
-                    _log.write(_line)
-                    _log.flush()
-            except BaseException:  # interrupt/stop: kill training so it does not keep running unattended
-                _proc.kill()
-                _proc.wait()
-                raise
-            return _proc.wait()
+    def run_parallel(jobs, cwd, on_done):
+        """Chạy cùng lúc các lệnh trong jobs = {tag: (cmd, log_path)}. Log của từng lệnh vừa ghi vào log_path
+        vừa in ra với tiền tố [tag]; mỗi lệnh xong thì gọi on_done(tag, exit_code) ngay, không chờ lệnh khác."""
+        import selectors
 
-    def push_results(folder, subdir, token):
-        """Đẩy folder lên RESULTS_REPO/subdir. Lỗi upload không làm hỏng kết quả local."""
+        _env = {**os.environ, "PYTHONUNBUFFERED": "1",
+                # chia CPU cho các tiến trình chạy cùng lúc (mỗi tiến trình còn 8 luồng C++ lấy mẫu âm)
+                "OMP_NUM_THREADS": str(max(1, (os.cpu_count() or 1) // max(1, len(jobs))))}
+        _sel = selectors.DefaultSelector()
+        _procs, _logs = {}, {}
+        try:
+            for _tag, (_cmd, _log_path) in jobs.items():
+                print(f"[{_tag}] $ " + " ".join(_cmd), flush=True)
+                _logs[_tag] = open(_log_path, "w", encoding="utf-8")
+                _procs[_tag] = subprocess.Popen(
+                    [sys.executable if _cmd[0] == "python" else _cmd[0]] + _cmd[1:],
+                    cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, env=_env,
+                )
+                _sel.register(_procs[_tag].stdout, selectors.EVENT_READ, _tag)
+            _running = len(_procs)
+            while _running:
+                for _key, _ in _sel.select():
+                    _tag = _key.data
+                    _line = _key.fileobj.readline()
+                    if _line:
+                        print(f"[{_tag}] {_line}", end="", flush=True)
+                        _logs[_tag].write(_line)
+                        _logs[_tag].flush()
+                        continue
+                    _sel.unregister(_key.fileobj)
+                    _running -= 1
+                    _rc = _procs[_tag].wait()
+                    _logs[_tag].close()
+                    on_done(_tag, _rc)
+        except BaseException:  # interrupt/stop: kill training so it does not keep running unattended
+            for _p in _procs.values():
+                if _p.poll() is None:
+                    _p.kill()
+            for _p in _procs.values():
+                _p.wait()
+            raise
+        finally:
+            for _f in _logs.values():
+                _f.close()
+
+    def push_results(folder, subdir, token, patterns=None):
+        """Đẩy folder (chỉ các file khớp patterns, nếu có) lên RESULTS_REPO/subdir.
+        Lỗi upload không làm hỏng kết quả local."""
         try:
             _api = HfApi(token=token)
             _api.create_repo(RESULTS_REPO, repo_type="dataset", private=True, exist_ok=True)
             _api.upload_folder(repo_id=RESULTS_REPO, repo_type="dataset", folder_path=folder,
-                               path_in_repo=subdir, commit_message=f"Add {subdir} results")
+                               path_in_repo=subdir, allow_patterns=patterns,
+                               commit_message=f"Add {subdir} results")
             print(f"Uploaded {folder} -> {RESULTS_REPO}/{subdir}")
             return True
         except Exception as _e:
@@ -226,7 +256,7 @@ def _(HfApi, RESULTS_REPO, os, subprocess, sys):
             return set()
         return {os.path.basename(_p) for _p in _fs if _p.startswith(subdir + "/")}
 
-    return push_results, remote_files, run_streaming
+    return push_results, remote_files, run_parallel
 
 
 @app.cell
@@ -246,14 +276,16 @@ def _(PLANNED_SEEDS, SCENARIOS, mo):
     valid_steps_ui = mo.ui.number(start=1, stop=500, step=1, value=50, label="Đánh giá valid mỗi N epoch")
     valid_max_ui = mo.ui.number(start=0, stop=100000, step=500, value=0, label="Số bộ valid (0 = tất cả)")
     save_ckpt_ui = mo.ui.checkbox(value=True, label="Lưu checkpoint lên HF")
+    parallel_ui = mo.ui.checkbox(value=True, label="Chạy các kịch bản song song trên cùng GPU")
     train_btn = mo.ui.run_button(label="▶ Train các kịch bản đã chọn")
     mo.vstack([
         mo.md(f"Kế hoạch cho dataset này: **{PLANNED_SEEDS} seed**. Mỗi lần bấm chạy một seed; đổi tham số "
-              "**không** tự chạy lại training. Dùng cùng tham số cho cả 3 kịch bản (Δdepth so trong cùng config)."),
+              "**không** tự chạy lại training. Dùng cùng tham số cho cả 3 kịch bản (Δdepth so trong cùng config). "
+              "Chạy song song không đổi config, chỉ dùng chung GPU (mỗi kịch bản là một tiến trình riêng)."),
         mo.hstack([seed_ui, scen_ui]),
         mo.hstack([epochs_ui, dim_ui, margin_ui, batch_ui, neg_ui]),
         mo.hstack([lr_ui, lrg_ui, mu_ui, valid_steps_ui, valid_max_ui]),
-        save_ckpt_ui,
+        mo.hstack([save_ckpt_ui, parallel_ui]),
         train_btn,
     ])
     return (
@@ -265,6 +297,7 @@ def _(PLANNED_SEEDS, SCENARIOS, mo):
         margin_ui,
         mu_ui,
         neg_ui,
+        parallel_ui,
         save_ckpt_ui,
         scen_ui,
         seed_ui,
@@ -292,9 +325,10 @@ def _(
     mu_ui,
     neg_ui,
     os,
+    parallel_ui,
     push_results,
     remote_files,
-    run_streaming,
+    run_parallel,
     save_ckpt_ui,
     scen_ui,
     seed_ui,
@@ -312,6 +346,7 @@ def _(
     os.makedirs(RESULTS_DIR, exist_ok=True)
     _done_remote = remote_files(_subdir, _token)
     train_status = {}
+    _jobs = {}  # tag -> (stem, checkpoint, lệnh)
     for _tag in scen_ui.value:
         _run = RUN_NAMES[_tag]
         _stem = f"native_{DATASET}_{_tag}_seed{_seed}"
@@ -320,7 +355,6 @@ def _(
             print(f"=== {_tag}: đã có {_rank}, bỏ qua ===")
             train_status[_tag] = "đã có"
             continue
-        print(f"=== {_tag} ({_run}), seed {_seed}, code {CODE_COMMIT} ===", flush=True)
         _ckpt = os.path.join(NATIVE_DIR, "checkpoint", f"{_stem}.ckpt")
         if os.path.exists(_ckpt):
             os.remove(_ckpt)
@@ -342,11 +376,24 @@ def _(
             f"-valid_max={int(valid_max_ui.value)}",
             f"-rank_file={os.path.join(RESULTS_DIR, _rank)}",
         ]
-        _rc = run_streaming(_cmd, NATIVE_DIR, os.path.join(RESULTS_DIR, f"{_stem}.log"))
-        if _rc == 0 and save_ckpt_ui.value and os.path.exists(_ckpt):
+        _jobs[_tag] = (_stem, _ckpt, _cmd)
+
+    def _finish(tag, rc):
+        # Kịch bản nào xong thì lưu checkpoint và đẩy ngay file của riêng nó (các kịch bản khác còn đang ghi).
+        _stem, _ckpt, _ = _jobs[tag]
+        if rc == 0 and save_ckpt_ui.value and os.path.exists(_ckpt):
             shutil.copy2(_ckpt, os.path.join(RESULTS_DIR, os.path.basename(_ckpt)))
-        train_status[_tag] = "xong" if _rc == 0 else f"lỗi (exit {_rc})"
-        push_results(RESULTS_DIR, _subdir, _token)
+        train_status[tag] = "xong" if rc == 0 else f"lỗi (exit {rc})"
+        print(f"=== {tag}: {train_status[tag]} ===", flush=True)
+        push_results(RESULTS_DIR, _subdir, _token, patterns=[f"*{_stem}*"])
+
+    _mode = "song song" if parallel_ui.value else "lần lượt"
+    print(f"=== seed {_seed}, code {CODE_COMMIT}, {_mode}: {', '.join(_jobs) or 'không còn gì để chạy'} ===",
+          flush=True)
+    for _group in ([list(_jobs)] if parallel_ui.value else [[_t] for _t in _jobs]):
+        if _group:
+            run_parallel({_t: (_jobs[_t][2], os.path.join(RESULTS_DIR, f"{_jobs[_t][0]}.log")) for _t in _group},
+                         NATIVE_DIR, _finish)
     mo.md("### Kết quả train, seed {}\n\n".format(_seed)
           + "\n".join(f"- `{_k}`: {_v}" for _k, _v in train_status.items())
           + "\n\nSo dòng `Rank check ... C++: ... | Python: ...` trong log: hai bộ số phải khớp.")

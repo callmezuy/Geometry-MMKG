@@ -54,7 +54,10 @@ def _(glob, hashlib, json, os, shutil, subprocess, sys, torch, zipfile):
         REPO_ROOT = os.path.dirname(WORK_DIR)
     else:
         REPO_ROOT = os.path.join(WORK_DIR, "Geometry-MMKG")
-        if not os.path.exists(REPO_ROOT):
+        # Molab giữ lại thư mục làm việc giữa các session nhưng chỉ còn file .py/.md (mất .git, make.sh, mã C++),
+        # nên thiếu .git thì xoá và clone lại.
+        if not os.path.isdir(os.path.join(REPO_ROOT, ".git")):
+            shutil.rmtree(REPO_ROOT, ignore_errors=True)
             subprocess.run(
                 ["git", "clone", "https://github.com/callmezuy/Geometry-MMKG.git", REPO_ROOT],
                 check=True,
