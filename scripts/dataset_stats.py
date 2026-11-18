@@ -21,7 +21,7 @@ from collections import Counter, defaultdict
 
 import numpy as np
 
-DATASETS = ["Merged-MMKG", "Spatial-VRD", "Spatial-VRD-Trans", "Spatial-VG"]
+DATASETS = ["FB15k-237-IMG", "FB15K-237-ind", "MKG-Y", "Spatial-VRD", "Spatial-VRD-Trans", "Spatial-VG"]
 SPLITS = ["train", "valid", "test"]
 
 
@@ -86,6 +86,8 @@ def emb_check(d, n_ent):
         if not (f.startswith("ent_") and f.endswith(".pt")):
             continue
         t = torch.load(os.path.join(d, f), map_location="cpu", weights_only=True, mmap=True)
+        if not torch.is_tensor(t) or t.dim() != 2:  # ent_fill.pt (dict), ent_img_mask.pt (1-D bool)
+            continue
         zero = nan = 0
         for i in range(0, t.shape[0], 200_000):
             c = t[i : i + 200_000].float()

@@ -67,9 +67,9 @@ def _(hashlib, os, subprocess):
 
 @app.cell
 def _(WORK_DIR, os, snapshot_download):
-    # 2. Split Spatial-VG từ HF: chỉ file split + H5, KHÔNG tải đặc trưng v1-v3 (ent_*_emb.pt, hỏng theo P0.7)
+    # 2. Split Spatial-VG từ HF (repo v0, P0.14): commit chỉ có split + H5; tag v0 gắn sau khi đặc trưng được merge
     HF_REPO_ID = "callmezuy/spatial-vg"
-    DATA_REVISION = "v3.1"  # Spatial-VG không đổi từ v2 (data/README.md)
+    DATA_REVISION = "b1e85c0ecd40a721eddb51e8323303dbbb4a2e53"  # "Data v0: structure" (18/11/2026)
     DATA_DIR = os.path.join(WORK_DIR, "data", "Spatial-VG")
     snapshot_download(
         repo_id=HF_REPO_ID, repo_type="dataset", revision=DATA_REVISION, local_dir=DATA_DIR,
@@ -209,7 +209,7 @@ def _(mo):
     upload_btn = mo.ui.run_button(label="⬆ Mở pull request lên HF")
     mo.vstack([
         mo.md("Đẩy đặc trưng lên `callmezuy/spatial-vg` dưới dạng **pull request** (không đổi `main`; "
-              "người dùng duyệt và merge ở P0.14). Chỉ bấm sau khi đã xem kết quả ở trên."),
+              "duyệt, merge rồi mới gắn tag `v0`, P0.14). Chỉ bấm sau khi đã xem kết quả ở trên."),
         upload_btn,
     ])
     return (upload_btn,)
@@ -222,7 +222,7 @@ def _(HF_REPO_ID, HfApi, OUT_DIR, mo, upload_btn):
         repo_id=HF_REPO_ID, repo_type="dataset", folder_path=OUT_DIR, create_pr=True,
         allow_patterns=["ent_rgb_emb.pt", "ent_depth_emb.pt", "ent_text_emb.pt", "ent_img_mask.pt", "ent_fill.pt",
                         "feature_stats.json", "feature_quality.json", "extract.log", "quality.log"],
-        commit_message="Features v4 (DINOv2 RGB/depth, RoBERTa text; RESEARCH_PLAN.md P0.13)",
+        commit_message="Data v0: features (DINOv2 RGB/depth, RoBERTa text; RESEARCH_PLAN.md P0.13)",
     )
     mo.md(f"Pull request: {_info.pr_url}")
     return

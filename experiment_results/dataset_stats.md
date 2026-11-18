@@ -2,43 +2,104 @@
 
 Sinh bởi `scripts/dataset_stats.py` từ `data/`.
 
-## Merged-MMKG
+## FB15k-237-IMG
 
 | split | triples | entities | relations | entity unseen in train (%) | triples with unseen h or t (%) |
 |---|---:|---:|---:|---:|---:|
-| train | 45,192 | 13,170 | 423 | 0.0 | 0.0 |
-| valid | 4,879 | 4,987 | 252 | 0.0 | 0.0 |
-| test | 5,880 | 5,680 | 261 | 4.3 | 4.2 |
+| train | 272,115 | 14,505 | 237 | 0.0 | 0.0 |
+| valid | 17,535 | 9,809 | 223 | 0.1 | 0.1 |
+| test | 20,466 | 10,348 | 224 | 0.3 | 0.1 |
 
-- Thực thể trong entity2id: **15,458** (xuất hiện trong ít nhất một split: 13,412); quan hệ: **429**; tổng bộ ba: **55,951**.
-- Bậc trong train: trung bình 6.86, trung vị 4, max 3,959; thực thể bậc 1: 20.0%.
-- Mật độ train (bộ ba / thực thể): 3.43.
+- Thực thể trong entity2id: **14,541** (xuất hiện trong ít nhất một split: 14,541); quan hệ: **237**; tổng bộ ba: **310,116**.
+- Bậc trong train: trung bình 37.52, trung vị 22, max 7,614; thực thể bậc 1: 2.5%.
+- Mật độ train (bộ ba / thực thể): 18.76.
 
-- Quan hệ: top-1 chiếm 11.8% train, top-5 29.1%, top-10 42.0%; quan hệ có < 10 bộ ba train: 207/423; quan hệ không có trong train: 6.
-- Quan hệ có trong test nhưng không có trong train: 6 (6 bộ ba test).
-- Top-5 quan hệ train: `DB15K::<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>` 5,332, `DB15K::<http://dbpedia.org/ontology/birthPlace>` 2,944, `DB15K::<http://dbpedia.org/ontology/genre>` 1,940, `DB15K::<http://www.w3.org/2000/01/rdf-schema#seeAlso>` 1,605, `DB15K::<http://dbpedia.org/ontology/country>` 1,342.
+- Quan hệ: top-1 chiếm 5.9% train, top-5 22.6%, top-10 36.3%; quan hệ có < 10 bộ ba train: 0/237; quan hệ không có trong train: 0.
+- Quan hệ có trong test nhưng không có trong train: 0 (0 bộ ba test).
+- Top-5 quan hệ train: `/award/award_nominee/award_nominations./award/award_nomination/award_nominee` 15,989, `/film/film/release_date_s./film/film_regional_release_date/film_release_region` 12,893, `/award/award_nominee/award_nominations./award/award_nomination/award` 12,157, `/people/person/profession` 10,945, `/film/actor/film./film/performance/film` 9,494.
 
 | mapping | relations | test triples (%) |
 |---|---:|---:|
-| 1-1 | 216 | 8.5 |
-| 1-N | 40 | 1.5 |
-| N-1 | 141 | 58.6 |
-| N-N | 26 | 31.3 |
-| unseen | 0 | 0.1 |
+| 1-1 | 17 | 0.9 |
+| 1-N | 26 | 6.3 |
+| N-1 | 86 | 22.0 |
+| N-N | 108 | 70.7 |
 
-- Quan hệ đối xứng (≥ 50% bộ ba có chiều ngược trong train, ≥ 10 bộ ba): 7 (`DB15K::<http://dbpedia.org/ontology/spouse>`, `DB15K::<http://dbpedia.org/ontology/partner>`, `DB15K::<http://dbpedia.org/ontology/sisterCollege>`, `MKG-W::http://www.wikidata.org/entity/P190`, `MKG-W::http://www.wikidata.org/entity/P47`, `MKG-W::http://www.wikidata.org/entity/P26`, `MKG-Y::isMarriedTo`).
-
-| source | relations | train | valid | test |
-|---|---:|---:|---:|---:|
-| DB15K | 263 | 33,748 | 3,791 | 4,566 |
-| MKG-W | 142 | 9,790 | 946 | 1,127 |
-| MKG-Y | 24 | 1,654 | 142 | 187 |
+- Quan hệ đối xứng (≥ 50% bộ ba có chiều ngược trong train, ≥ 10 bộ ba): 24 (`/education/field_of_study/students_majoring./education/education/major_field_of_study`, `/government/legislative_session/members./government/government_position_held/legislative_sessions`, `/people/person/sibling_s./people/sibling_relationship/sibling`, `/base/popstra/celebrity/dated./base/popstra/dated/participant`, `/award/award_winner/awards_won./award/award_honor/award_winner`, `/people/person/spouse_s./people/marriage/spouse`, `/award/award_nominee/award_nominations./award/award_nomination/award_nominee`, `/military/military_combatant/military_conflicts./military/military_combatant_group/combatants`, `/award/award_nominated_work/award_nominations./award/award_nomination/nominated_for`, `/base/localfood/seasonal_month/produce_available./base/localfood/produce_availability/seasonal_months`).
 
 | embedding | shape | dtype | zero rows | NaN rows | rows = n_ent |
 |---|---|---|---:|---:|---|
-| `ent_depth_emb.pt` | 15,458 × 768 | float32 | 0 | 0 | ✓ |
-| `ent_rgb_emb.pt` | 15,458 × 768 | float32 | 0 | 0 | ✓ |
-| `ent_text_emb.pt` | 15,458 × 768 | float32 | 0 | 0 | ✓ |
+| `ent_depth_emb.pt` | 14,541 × 768 | float32 | 0 | 0 | ✓ |
+| `ent_rgb_depth_concat_emb.pt` | 14,541 × 1536 | float32 | 0 | 0 | ✓ |
+| `ent_rgb_depth_mean_emb.pt` | 14,541 × 768 | float32 | 0 | 0 | ✓ |
+| `ent_rgb_emb.pt` | 14,541 × 768 | float32 | 0 | 0 | ✓ |
+| `ent_text_emb.pt` | 14,541 × 768 | float32 | 0 | 0 | ✓ |
+
+## FB15K-237-ind
+
+| split | triples | entities | relations | entity unseen in train (%) | triples with unseen h or t (%) |
+|---|---:|---:|---:|---:|---:|
+| train | 215,082 | 11,633 | 237 | 0.0 | 0.0 |
+| valid | 42,164 | 8,965 | 225 | 16.2 | 100.0 |
+| test | 52,870 | 10,645 | 232 | 22.7 | 100.0 |
+
+- Thực thể trong entity2id: **14,541** (xuất hiện trong ít nhất một split: 14,541); quan hệ: **237**; tổng bộ ba: **310,116**.
+- Bậc trong train: trung bình 36.98, trung vị 22, max 6,851; thực thể bậc 1: 2.0%.
+- Mật độ train (bộ ba / thực thể): 18.49.
+
+- Quan hệ: top-1 chiếm 5.3% train, top-5 22.7%, top-10 35.3%; quan hệ có < 10 bộ ba train: 0/237; quan hệ không có trong train: 0.
+- Quan hệ có trong test nhưng không có trong train: 0 (0 bộ ba test).
+- Top-5 quan hệ train: `/film/film/release_date_s./film/film_regional_release_date/film_release_region` 11,371, `/award/award_nominee/award_nominations./award/award_nomination/award_nominee` 10,437, `/people/person/profession` 9,869, `/award/award_nominee/award_nominations./award/award_nomination/award` 9,572, `/award/award_category/nominees./award/award_nomination/nominated_for` 7,489.
+
+| mapping | relations | test triples (%) |
+|---|---:|---:|
+| 1-1 | 17 | 1.4 |
+| 1-N | 26 | 5.4 |
+| N-1 | 85 | 16.7 |
+| N-N | 109 | 76.6 |
+
+- Quan hệ đối xứng (≥ 50% bộ ba có chiều ngược trong train, ≥ 10 bộ ba): 24 (`/education/field_of_study/students_majoring./education/education/major_field_of_study`, `/government/legislative_session/members./government/government_position_held/legislative_sessions`, `/people/person/sibling_s./people/sibling_relationship/sibling`, `/base/popstra/celebrity/dated./base/popstra/dated/participant`, `/award/award_winner/awards_won./award/award_honor/award_winner`, `/people/person/spouse_s./people/marriage/spouse`, `/award/award_nominee/award_nominations./award/award_nomination/award_nominee`, `/military/military_combatant/military_conflicts./military/military_combatant_group/combatants`, `/award/award_nominated_work/award_nominations./award/award_nomination/nominated_for`, `/base/localfood/seasonal_month/produce_available./base/localfood/produce_availability/seasonal_months`).
+
+| embedding | shape | dtype | zero rows | NaN rows | rows = n_ent |
+|---|---|---|---:|---:|---|
+| `ent_depth_emb.pt` | 14,541 × 768 | float32 | 0 | 0 | ✓ |
+| `ent_rgb_depth_concat_emb.pt` | 14,541 × 1536 | float32 | 0 | 0 | ✓ |
+| `ent_rgb_depth_mean_emb.pt` | 14,541 × 768 | float32 | 0 | 0 | ✓ |
+| `ent_rgb_emb.pt` | 14,541 × 768 | float32 | 0 | 0 | ✓ |
+| `ent_text_emb.pt` | 14,541 × 768 | float32 | 0 | 0 | ✓ |
+
+## MKG-Y
+
+| split | triples | entities | relations | entity unseen in train (%) | triples with unseen h or t (%) |
+|---|---:|---:|---:|---:|---:|
+| train | 21,310 | 14,388 | 28 | 0.0 | 0.0 |
+| valid | 2,665 | 4,265 | 27 | 8.7 | 15.0 |
+| test | 2,663 | 4,332 | 25 | 8.1 | 14.6 |
+
+- Thực thể trong entity2id: **15,000** (xuất hiện trong ít nhất một split: 15,000); quan hệ: **28**; tổng bộ ba: **26,638**.
+- Bậc trong train: trung bình 2.96, trung vị 2, max 78; thực thể bậc 1: 24.6%.
+- Mật độ train (bộ ba / thực thể): 1.48.
+
+- Quan hệ: top-1 chiếm 28.8% train, top-5 79.2%, top-10 95.6%; quan hệ có < 10 bộ ba train: 5/28; quan hệ không có trong train: 0.
+- Quan hệ có trong test nhưng không có trong train: 0 (0 bộ ba test).
+- Top-5 quan hệ train: `actedIn` 6,131, `created` 3,230, `isAffiliatedTo` 3,128, `playsFor` 2,836, `directed` 1,559.
+
+| mapping | relations | test triples (%) |
+|---|---:|---:|
+| 1-1 | 11 | 3.3 |
+| 1-N | 6 | 33.1 |
+| N-1 | 8 | 9.2 |
+| N-N | 3 | 54.3 |
+
+- Quan hệ đối xứng (≥ 50% bộ ba có chiều ngược trong train, ≥ 10 bộ ba): 1 (`isMarriedTo`).
+
+| embedding | shape | dtype | zero rows | NaN rows | rows = n_ent |
+|---|---|---|---:|---:|---|
+| `ent_depth_emb.pt` | 15,000 × 768 | float32 | 0 | 0 | ✓ |
+| `ent_rgb_depth_concat_emb.pt` | 15,000 × 1536 | float32 | 0 | 0 | ✓ |
+| `ent_rgb_depth_mean_emb.pt` | 15,000 × 768 | float32 | 0 | 0 | ✓ |
+| `ent_rgb_emb.pt` | 15,000 × 768 | float32 | 0 | 0 | ✓ |
+| `ent_text_emb.pt` | 15,000 × 768 | float32 | 0 | 0 | ✓ |
 
 ## Spatial-VRD
 
@@ -81,7 +142,7 @@ Sinh bởi `scripts/dataset_stats.py` từ `data/`.
 
 | embedding | shape | dtype | zero rows | NaN rows | rows = n_ent |
 |---|---|---|---:|---:|---|
-| `ent_depth_emb.pt` | 93,809 × 768 | float32 | 10 | 0 | ✓ |
+| `ent_depth_emb.pt` | 93,809 × 768 | float32 | 0 | 0 | ✓ |
 | `ent_rgb_depth_concat_emb.pt` | 93,809 × 1536 | float32 | 0 | 0 | ✓ |
 | `ent_rgb_depth_mean_emb.pt` | 93,809 × 768 | float32 | 0 | 0 | ✓ |
 | `ent_rgb_emb.pt` | 93,809 × 768 | float32 | 0 | 0 | ✓ |
@@ -127,7 +188,7 @@ Sinh bởi `scripts/dataset_stats.py` từ `data/`.
 
 | embedding | shape | dtype | zero rows | NaN rows | rows = n_ent |
 |---|---|---|---:|---:|---|
-| `ent_depth_emb.pt` | 93,809 × 768 | float32 | 10 | 0 | ✓ |
+| `ent_depth_emb.pt` | 93,809 × 768 | float32 | 0 | 0 | ✓ |
 | `ent_rgb_depth_concat_emb.pt` | 93,809 × 1536 | float32 | 0 | 0 | ✓ |
 | `ent_rgb_depth_mean_emb.pt` | 93,809 × 768 | float32 | 0 | 0 | ✓ |
 | `ent_rgb_emb.pt` | 93,809 × 768 | float32 | 0 | 0 | ✓ |
@@ -164,7 +225,4 @@ Sinh bởi `scripts/dataset_stats.py` từ `data/`.
 
 | embedding | shape | dtype | zero rows | NaN rows | rows = n_ent |
 |---|---|---|---:|---:|---|
-| `ent_depth_emb.pt` | 1,441,984 × 768 | float32 | 380 | 0 | ✓ |
-| `ent_rgb_emb.pt` | 1,441,984 × 768 | float32 | 0 | 0 | ✓ |
-| `ent_text_emb.pt` | 1,441,984 × 768 | float32 | 0 | 0 | ✓ |
 

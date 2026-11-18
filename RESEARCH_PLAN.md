@@ -110,7 +110,7 @@ Kết quả kỳ vọng: Δdepth ≈ 0 ở hàng MMKG và Δdepth > 0 ở hàng 
 8. Seed cố định (42), chạy **3 seed (42, 43, 44)** cho các cấu hình chính và báo mean ± std.
    - **Cấu hình chính** = các cặp có Depth / không Depth của mỗi mô hình trên FB15k-237-IMG, FB15K-237-ind, Spatial-VRD và VRD-Trans (các ô dùng để kết luận Δdepth).
    - **Chỉ 1 seed (42):** kiểm tra tái lập paper (P3.0b), ablation fusion phụ (RQ2) nếu thiếu GPU, MKG-Y và Spatial-VG.
-10. Với dataset có thực thể thiếu ảnh: báo trên test đầy đủ, kèm bảng chia nhóm theo số đầu bộ ba có ảnh (cả hai / một / không). Nhóm **"không"** là đối chứng âm: Δdepth ở đó phải xấp xỉ 0. Chỉ kết luận từ nhóm "không" khi nhóm đủ lớn. FB15k-237-IMG chỉ có 14 triplet test ở nhóm này (P0.10), nên số đó chỉ báo cho đủ bảng, không dùng để kết luận; nhóm so sánh chính là nhóm "một" (1.247 triplet). Dự định làm đối chứng âm theo nhóm "không" trên MKG-Y (duyệt 18/11/2026) không thực hiện được: MKG-Y chỉ có 2 triplet test ở nhóm này (P0.12). **Cần quyết định lại.** FB15k-237-IMG báo thêm Δdepth trên thực thể vật lý so với thực thể trừu tượng (ảnh Bing của khái niệm trừu tượng ít mang thông tin hình học).
+10. Với dataset có thực thể thiếu ảnh: báo trên test đầy đủ, kèm bảng chia nhóm theo số đầu bộ ba có ảnh (cả hai / một / không). Nhóm **"không"** là đối chứng âm: Δdepth ở đó phải xấp xỉ 0. Chỉ kết luận từ nhóm "không" khi nhóm đủ lớn. FB15k-237-IMG chỉ có 14 triplet test ở nhóm này (P0.10), nên số đó chỉ báo cho đủ bảng, không dùng để kết luận; nhóm so sánh chính là nhóm "một" (1.247 triplet). Dự định làm đối chứng âm theo nhóm "không" trên MKG-Y (duyệt 18/11/2026) không thực hiện được: MKG-Y chỉ có 2 triplet test ở nhóm này (P0.12). **Cần quyết định lại** (hoãn, ghi 18/11/2026). Phương án đề xuất: tạo nhóm "không" lúc test bằng cách che ảnh (đặt mask = 0, dùng vector thay thế) của cả hai đầu trên toàn bộ test, rồi đo Δdepth. Việc này chỉ đổi cách đánh giá, không đụng dữ liệu, đặc trưng hay huấn luyện, nên chưa cần quyết ngay. Hạn quyết: trước khi chạy đánh giá các cấu hình chính. FB15k-237-IMG báo thêm Δdepth trên thực thể vật lý so với thực thể trừu tượng (ảnh Bing của khái niệm trừu tượng ít mang thông tin hình học).
    - Lý do: khoảng tin cậy bootstrap chỉ phản ánh dao động do mẫu test, không phản ánh dao động do huấn luyện.
 9. Ghi rõ trong bài: VG validation dùng tập con 5.000 mẫu (GeometryMMKG) và 2.000 mẫu (NativE/SNAG, `-valid_max`); NativE trên VG pool 768 → 256.
 
@@ -187,7 +187,10 @@ Kết quả kỳ vọng: Δdepth ≈ 0 ở hàng MMKG và Δdepth > 0 ở hàng 
     | Spatial-VRD | 2 | 0,07 / 0,38 / 0,96 | 40,3 / 11,7 / 98,8% (4,5%; 543 lớp vật thể) | 3,7% (0,01%) |
 
     So với v1–v3 (P0.7: cosine depth 0,97–0,999, probe depth dưới mức đa số), depth giờ mang thông tin. Text VRD gần 100% vì mô tả chứa tên lớp. **Lưu ý cho RQ1:** ở FB15k-237, depth của ảnh web đoán kiểu thực thể gần bằng RGB (57% so với 63%): depth toàn ảnh mã hoá cả "thể loại ảnh" (chân dung, bản đồ, logo), không chỉ hình học, nên Δdepth > 0 ở MMKG không tự động là bằng chứng về thông tin hình học; cần đối chứng (ví dụ depth xáo trộn giữa các thực thể cùng kiểu) khi phân tích.
-- [ ] **P0.14** Phát hành v4 lên HF (repo mới cho FB15k-237-IMG, FB15K-237-ind, MKG-Y; tag `v4` cho các repo cũ), cập nhật `DATA_REVISION` trong notebook, `data/README.md`, `experiment_results/dataset_stats.md`. Liệt kê thay đổi cho người dùng duyệt trước khi đẩy.
+- [~] **P0.14** (18/11/2026, người dùng duyệt: làm lại từ v0, giữ tên repo cũ, public) Người dùng đã xoá mọi repo HF cũ (cả `unified-mmkg` và repo kết quả private `geometry-mmkg-results`). Đã đẩy bằng `scripts/publish_hf.py` (thẻ dataset ở `hf_cards/`), mỗi repo một commit:
+  - Tag `v0`: `callmezuy/fb15k237-img`, `callmezuy/fb15k237-ind`, `callmezuy/mkg-y`, `callmezuy/spatial-vrd`, `callmezuy/spatial-vrd-trans`.
+  - `callmezuy/spatial-vg`: mới có split + H5, **chưa gắn tag**. Notebook `extract-vg-features.py` đọc đúng commit này, chạy xong mở PR đặc trưng; duyệt, merge, sửa mục Features trong thẻ rồi mới gắn `v0`.
+  - Đã cập nhật `data/README.md`, `experiment_results/dataset_stats.md` (`dataset_stats.py` giờ chạy cho 6 bộ v0). Các notebook huấn luyện cũ (`geometry-*.py`, `native-*.py`, `mkgformer-*.py`) còn trỏ tới repo/tên file cũ; sửa ở P1/P3 khi viết lại notebook.
 
 P0.1–P0.3b làm bằng `scripts/clean_splits.py` (11/11/2026). **Bản v2 hiện là dữ liệu chính tại `data/<tên>/`** (cùng tên với repo HF); các file split v1 chỉ còn trên HF (tag `v1`). Chi tiết trong `clean_stats.json` của mỗi thư mục; cấu trúc và lệnh tái tạo ở `data/README.md`.
 
@@ -264,7 +267,7 @@ P0.1–P0.3b làm bằng `scripts/clean_splits.py` (11/11/2026). **Bản v2 hi�
 **Việc cần làm (P3.0d):**
 - [ ] Trả `baselines/NativE/mmkgc/module/model/AdvRelRotatEDB15K.py` về bản gốc (bỏ `orig_pool`); P3.0b dùng đúng bản gốc. Rà lại các file NativE khác so với upstream `zjukg/NativE`, ghi diff phần được phép vào phụ lục.
 - [ ] Thay `baselines/SNAG/` bằng submodule `zjukg/SNAG`; chuyển `ValidSelector`, ghi rank, `-select_on` sang dưới dạng file và cờ ngoài kiến trúc; so diff bản cũ với upstream để chắc không còn sửa nào khác trong kiến trúc.
-- [ ] P0.13 xuất thêm bảng đặc trưng `ent_rgbd_mean_emb.pt` và `ent_rgbd_concat_emb.pt` (đã điền vector hằng) cho các kịch bản +D của baseline.
+- [x] P0.13 xuất thêm bảng đặc trưng `ent_rgb_depth_mean_emb.pt` và `ent_rgb_depth_concat_emb.pt` (đã điền vector hằng) cho các kịch bản +D của baseline. Xong cho FB15k-237-IMG, FB15K-237-ind, MKG-Y, Spatial-VRD, Spatial-VRD-Trans. Spatial-VG không xuất (người dùng quyết, 18/11/2026).
 - [ ] Sửa notebook NativE theo 3 kịch bản mới (Control / +D mean / +D concat) và bỏ đường 3-modal.
 - [ ] SNAG trên MKG-Y: code gốc đọc `missing.json` khi tên dataset chứa "MKG". Tạo `missing.json` từ mặt nạ ảnh của mình, đúng định dạng file của tác giả (xem `baselines/SNAG/SNAG_MKGC/embeddings/missing.json` và cách code gốc dùng nó), không sửa code để bỏ qua.
 
