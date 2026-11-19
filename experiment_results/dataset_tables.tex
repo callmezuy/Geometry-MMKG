@@ -1,0 +1,134 @@
+% Sinh bởi scripts/dataset_tables.py. Cần \usepackage{booktabs,graphicx,amssymb}.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Tổng quan các bộ dữ liệu}
+\label{tab:data-t1}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lllrrrrrr}
+\toprule
+Dataset & Graph & Setting & \#Ent & \#Rel & \#Train & \#Valid & \#Test & \#Images \\
+\midrule
+FB15k-237-IMG & MMKG & Trans. & 14,541 & 237 & 272,115 & 17,535 & 20,466 & 144,478 \\
+FB15K-237-ind & MMKG & Ind. & 14,541 & 237 & 215,082 & 42,164 & 52,870 & 144,478 \\
+MKG-Y & MMKG & Trans. & 15,000 & 28 & 21,310 & 2,665 & 2,663 & 43,264 \\
+Spatial-VRD & MMSG & Ind. & 93,809 & 52 & 77,227 & 8,614 & 21,563 & 4,999 \\
+Spatial-VRD-Trans & MMSG & Trans. & 93,809 & 52 & 77,371 & 8,578 & 21,455 & 4,999 \\
+Spatial-VG & MMSG & Ind. & 1,441,984 & 50 & 319,069 & 26,372 & 137,984 & 105,814 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\begin{table}[t]
+\centering
+\small
+\caption{Độ phủ và đặc điểm các modality}
+\label{tab:data-t2}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lrrrrrrr}
+\toprule
+Dataset & Ent. w/ image (\%) & Img/ent. mean / med. / max & Images removed & Ent. w/ description (\%) & Text words mean / med. / max & Truncated @512 tok. & Test: both / one / no image \\
+\midrule
+FB15k-237-IMG & 14,292 (98.29) & 10.11 / 10 / 48 & 1,541 (1.06\%) & 99.82 & 138.7 / 132 / 697 & 24 & 19,205 / 1,247 / 14 \\
+FB15K-237-ind & 14,292 (98.29) & 10.11 / 10 / 48 & 1,541 (1.06\%) & 99.82 & 138.7 / 132 / 697 & 24 & 49,338 / 3,494 / 38 \\
+MKG-Y & 14,481 (96.54) & 2.99 / 3 / 3 & 86 (0.20\%) & 82.11 & 67.7 / 47 / 834 & 154 & 2,496 / 165 / 2 \\
+Spatial-VRD & 93,807 (100.00) & 1 / 1 / 1 & 2 box ngoài ảnh & – & 2.3 / 2 / 21 & 0 & 21,563 / 0 / 0 \\
+Spatial-VRD-Trans & 93,807 (100.00) & 1 / 1 / 1 & 2 box ngoài ảnh & – & 2.3 / 2 / 21 & 0 & 21,455 / 0 / 0 \\
+Spatial-VG & 1,441,978 (100.00) & 1 / 1 / 1 & 6 box ngoài ảnh & – & 1.0 / 1 / 1 & 0 & 137,984 / 0 / 0 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\begin{table}[t]
+\centering
+\small
+\caption{Cấu trúc đồ thị (tính trên train)}
+\label{tab:data-t3}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lrrrrrrrr}
+\toprule
+Dataset & Deg. mean / med. / max & Deg.-1 ent. (\%) & Isolated ent. & Triples / ent. & 1-1 / 1-N / N-1 / N-N (\#rel) & Test in N-N (\%) & Top-5 rel. (\% train) & Rel. $<$ 10 train \\
+\midrule
+FB15k-237-IMG & 37.52 / 22 / 7,614 & 2.5 & 0 & 18.76 & 17 / 26 / 86 / 108 & 70.7 & 22.6 & 0 \\
+FB15K-237-ind & 36.98 / 22 / 6,851 & 2.0 & 0 & 18.49 & 17 / 26 / 85 / 109 & 76.6 & 22.7 & 0 \\
+MKG-Y & 2.96 / 2 / 78 & 24.6 & 0 & 1.48 & 11 / 6 / 8 / 3 & 54.3 & 79.2 & 5 \\
+Spatial-VRD & 2.58 / 2 / 22 & 44.7 & 10,257 & 1.29 & 50 / 1 / 1 / 0 & 0.0 & 65.2 & 2 \\
+Spatial-VRD-Trans & 1.85 / 1 / 18 & 63.1 & 10,257 & 0.93 & 51 / 1 / 0 / 0 & 0.0 & 65.2 & 2 \\
+Spatial-VG & 1.64 / 1 / 26 & 67.1 & 843,179 & 0.82 & 50 / 0 / 0 / 0 & 0.0 & 68.8 & 0 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\begin{table}[t]
+\centering
+\small
+\caption{Thực thể theo split và mức độ inductive}
+\label{tab:data-t4}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lrrrrrrr}
+\toprule
+Dataset & Ent. train / valid / test & Unseen ent. valid (\%) & Unseen ent. test (\%) & Test: both seen & Test: only head new & Test: only tail new & Test: both new \\
+\midrule
+FB15k-237-IMG & 14,505 / 9,809 / 10,348 & 0.1 & 0.3 & 20,438 (99.9\%) & 23 (0.1\%) & 3 (0.0\%) & 2 (0.0\%) \\
+FB15K-237-ind & 11,633 / 8,965 / 10,645 & 16.2 & 22.7 & 0 (0.0\%) & 25,949 (49.1\%) & 20,431 (38.6\%) & 6,490 (12.3\%) \\
+MKG-Y & 14,388 / 4,265 / 4,332 & 8.7 & 8.1 & 2,275 (85.4\%) & 128 (4.8\%) & 224 (8.4\%) & 36 (1.4\%) \\
+Spatial-VRD & 59,950 / 6,694 / 16,908 & 100.0 & 100.0 & 0 (0.0\%) & 0 (0.0\%) & 0 (0.0\%) & 21,563 (100.0\%) \\
+Spatial-VRD-Trans & 83,552 / 14,210 / 27,937 & 0.0 & 0.0 & 21,455 (100.0\%) & 0 (0.0\%) & 0 (0.0\%) & 0 (0.0\%) \\
+Spatial-VG & 389,413 / 33,049 / 176,343 & 100.0 & 100.0 & 0 (0.0\%) & 0 (0.0\%) & 0 (0.0\%) & 137,984 (100.0\%) \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\begin{table}[t]
+\centering
+\small
+\caption{Thống kê đồ thị cảnh (MMSG)}
+\label{tab:data-t5}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lrrrrrrrrr}
+\toprule
+Dataset & Images train / valid / test & \#Obj. classes ($\geq$ 10 boxes) & \#Pred. & \#Boxes (in $\geq$1 triple) & Boxes / img. & Triples / img. & Pred. head / body / tail & Box area / img. (med.) & Subj.-obj. boxes overlap (\%) \\
+\midrule
+Spatial-VRD & 3,600 / 400 / 999 & 6,745 (855) & 52 & 93,809 (83,552) & 18.77 & 21.49 & 3 / 12 / 37 & 2.3\% & 79.2 \\
+Spatial-VRD-Trans & 4,999 / 4,080 / 4,888 & 6,745 (855) & 52 & 93,809 (83,552) & 18.77 & 21.49 & 3 / 12 / 37 & 2.3\% & 79.2 \\
+Spatial-VG & 59,949 / 4,875 / 26,980 & 150 (150) & 50 & 1,441,984 (598,805) & 13.63 & 5.27 & 8 / 29 / 13 & 4.0\% & 89.0 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\begin{table}[t]
+\centering
+\small
+\caption{Nhóm quan hệ (phân loại của chúng tôi theo định nghĩa của Zellers et al., 2018)}
+\label{tab:data-t6}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lrrrr}
+\toprule
+Dataset & GEOMETRIC \#rel / train \% / test \% & POSSESSIVE \#rel / train \% / test \% & SEMANTIC \#rel / train \% / test \% & MISC \#rel / train \% / test \% \\
+\midrule
+Spatial-VRD & 21 / 70.4 / 70.3 & 5 / 25.0 / 25.3 & 24 / 4.6 / 4.5 & 2 / 0.0 / 0.0 \\
+Spatial-VRD-Trans & 21 / 70.3 / 70.5 & 5 / 25.1 / 24.9 & 24 / 4.5 / 4.6 & 2 / 0.0 / 0.0 \\
+Spatial-VG & 15 / 50.1 / 49.5 & 6 / 38.4 / 38.5 & 25 / 10.8 / 11.5 & 4 / 0.7 / 0.5 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\begin{table}[t]
+\centering
+\small
+\caption{Đối chiếu với số công bố của nguồn gốc}
+\label{tab:data-t7}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lllll}
+\toprule
+Dataset & Source & Published & Ours (v0) & Match \\
+\midrule
+FB15k-237-IMG & Toutanova \& Chen (2015); split KG-BERT / MKGformer & 14,541 / 237 / 272,115 / 17,535 / 20,466 & 14,541 / 237 / 272,115 / 17,535 / 20,466 & $\checkmark$ \\
+FB15K-237-ind & Daza et al. (2021); CMR Table 1 & ent. 11,633 / 1,454 / 1,454; triples 215,082 / 42,164 / 52,870 & ent. 11,633 / 1,454 / 1,454; triples 215,082 / 42,164 / 52,870 & $\checkmark$ \\
+MKG-Y & Xu et al. (2022, MMRNS); NativE & 15,000 / 28 / 21,310 / 2,665 / 2,663 & 15,000 / 28 / 21,310 / 2,665 / 2,663 & $\checkmark$ \\
+Spatial-VRD & Lu et al. (2016), sg\_dataset & 5,000 images (4,000 train / 1,000 test) & 4,999 images (999 test) & $\approx$ (thiếu 1 ảnh test GIF) \\
+Spatial-VG & Xu et al. (2017); Neau et al. (2023) & 108,073 images / 150 classes / 50 predicates & 108,073 images / 150 classes / 50 predicates & $\checkmark$ \\
+\bottomrule
+\end{tabular}}
+\end{table}

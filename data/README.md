@@ -16,7 +16,8 @@ repo, tagged `v0` (RESEARCH_PLAN.md P0.8). The dataset card of each repo is `hf_
 
 `spatial-vg` features were extracted on Molab (`notebooks/extract-vg-features.py`) and are on HF only (13 GB; not in
 `data/Spatial-VG/` locally). VG images for the notebook come from the private copy `callmezuy/vg-images-raw`. Statistics of every dataset: `experiment_results/dataset_stats.md`
-(`python scripts/dataset_stats.py --out experiment_results/dataset_stats.md`).
+(`python scripts/dataset_stats.py --out experiment_results/dataset_stats.md`); paper-style tables:
+`experiment_results/dataset_tables.{md,tex}` (`python scripts/dataset_tables.py --out ... --latex ...`).
 
 ## File conventions
 
