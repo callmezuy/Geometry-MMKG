@@ -276,12 +276,15 @@ def _(PLANNED_SEEDS, SCENARIOS, mo):
     valid_steps_ui = mo.ui.number(start=1, stop=500, step=1, value=50, label="Đánh giá valid mỗi N epoch")
     valid_max_ui = mo.ui.number(start=0, stop=100000, step=500, value=0, label="Số bộ valid (0 = tất cả)")
     save_ckpt_ui = mo.ui.checkbox(value=True, label="Lưu checkpoint lên HF")
-    parallel_ui = mo.ui.checkbox(value=True, label="Chạy các kịch bản song song trên cùng GPU")
+    parallel_ui = mo.ui.checkbox(value=False, label="Chạy các kịch bản song song trên cùng GPU")
     train_btn = mo.ui.run_button(label="▶ Train các kịch bản đã chọn")
     mo.vstack([
         mo.md(f"Kế hoạch cho dataset này: **{PLANNED_SEEDS} seed**. Mỗi lần bấm chạy một seed; đổi tham số "
-              "**không** tự chạy lại training. Dùng cùng tham số cho cả 3 kịch bản (Δdepth so trong cùng config). "
-              "Chạy song song không đổi config, chỉ dùng chung GPU (mỗi kịch bản là một tiến trình riêng)."),
+              "**không** tự chạy lại training. Dùng cùng tham số cho cả 3 kịch bản (Δdepth so trong cùng config).\n\n"
+              "**Session Molab tự tắt sau 12 giờ** và kịch bản đang chạy dở bị mất (NativE không chạy tiếp "
+              "từ giữa chừng). Mỗi kịch bản trên FB15k-237-IMG mất khoảng 7,7 giờ (khoảng 0,1 giây/bước, bước = "
+              "số bộ ba train / batch), nên với FB15k-237 chỉ chọn **một kịch bản mỗi session**. Chạy song song "
+              "không nhanh hơn (đo 19/11: mỗi kịch bản chậm gần gấp đôi), nên để tắt."),
         mo.hstack([seed_ui, scen_ui]),
         mo.hstack([epochs_ui, dim_ui, margin_ui, batch_ui, neg_ui]),
         mo.hstack([lr_ui, lrg_ui, mu_ui, valid_steps_ui, valid_max_ui]),
