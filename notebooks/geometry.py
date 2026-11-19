@@ -213,14 +213,14 @@ def _(DATASET, HAS_DEPTH_STATS, PLANNED_SEEDS, VARIANT_NAMES, mo):
     dstat_ui = mo.ui.text(value="", label="Số độ sâu từ file thử nghiệm (P2.9, file trong repo kết quả, ví dụ "
                                          "probe/vrd_depth_stats_dav2.pt:grid9; để trống = tắt; khác cờ depth_stats "
                                          "là bảng của dataset)", full_width=True)
-    epochs_ui = mo.ui.number(start=1, stop=2000, step=1, value=100, label="Epochs")
+    epochs_ui = mo.ui.number(start=0, stop=4000, step=1, value=0, label="Epochs (0 = ngân sách của dataset, P2.10)")
     batch_ui = mo.ui.dropdown(options=["512", "1024", "2048", "4096"], value="1024", label="Batch")
     lr_ui = mo.ui.text(value="1e-4", label="LR")
     margin_ui = mo.ui.text(value="5", label="Margin")
     adv_ui = mo.ui.text(value="1.0", label="Nhiệt độ self-adversarial")
     dropout_ui = mo.ui.text(value="0.1", label="Dropout")
     wd_ui = mo.ui.text(value="1e-5", label="Weight decay")
-    valid_every_ui = mo.ui.number(start=1, stop=500, step=1, value=10, label="Đánh giá valid mỗi N epoch")
+    valid_every_ui = mo.ui.number(start=0, stop=500, step=1, value=0, label="Valid mỗi N epoch (0 = theo ngân sách)")
     save_ckpt_ui = mo.ui.checkbox(value=True, label="Lưu checkpoint lên HF (không áp dụng cho dev)")
     train_btn = mo.ui.run_button(label="▶ Train các biến thể đã chọn")
     mo.vstack([
@@ -346,14 +346,14 @@ def _(
             "--data", DATA_DIR,
             "--variant", _v,
             "--seed", str(_seed),
-            "--epochs", str(int(epochs_ui.value)),
+            *(["--epochs", str(int(epochs_ui.value))] if int(epochs_ui.value) > 0 else []),
             "--batch-size", str(int(batch_ui.value)),
             "--lr", str(float(lr_ui.value)),
             "--margin", str(float(margin_ui.value)),
             "--adv-temp", str(float(adv_ui.value)),
             "--dropout", str(float(dropout_ui.value)),
             "--weight-decay", str(float(wd_ui.value)),
-            "--valid-every", str(int(valid_every_ui.value)),
+            *(["--valid-every", str(int(valid_every_ui.value))] if int(valid_every_ui.value) > 0 else []),
             "--out", _out,
             *_flags,
         ]
@@ -443,6 +443,101 @@ def _(DATASET, RESULTS_REPO, WORK_DIR, hf_token_ui, json, mo, os, snapshot_downl
                      "| Cờ | Biến thể | Seed | Epochs | Epoch tốt nhất | MRR valid tốt nhất | MRR valid cuối | "
                      "Phần depth của gate |",
                      "|---|---|---|---|---|---|---|---|", *_rows]) if _rows else "Chưa có lần chạy dev nào.")
+    return
+
+
+@app.cell
+def _(DATASET, VARIANT_NAMES, mo):
+    # P2.10 (quyết định 19/11/2026): lưới lr x dropout, tune riêng mọi biến thể (cách A), seed 42, chỉ valid.
+    # Thiết kế đóng băng và ngân sách epoch = mặc định của scripts/train.py (EPOCH_BUDGET), không truyền tay.
+    _ablation = DATASET in ("FB15k-237-IMG", "Spatial-VRD")  # 6 biến thể ở đây, full + no_depth ở các bộ khác
+    tune_variants_ui = mo.ui.multiselect(options=VARIANT_NAMES,
+                                         value=list(VARIANT_NAMES) if _ablation else ["full", "no_depth"],
+                                         label="Biến thể tune")
+    tune_lrs_ui = mo.ui.text(value="1e-4,3e-4,1e-3", label="LR (lưới)")
+    tune_dos_ui = mo.ui.text(value="0.1,0.3", label="Dropout (lưới)")
+    tune_btn = mo.ui.run_button(label="▶ Chạy lưới tune (P2.10)")
+    mo.vstack([
+        mo.md(f"### Tune `{DATASET}` (P2.10)\n\nMỗi điểm lưới là một lần `train.py --tune` (chỉ valid, seed 42, "
+              "thiết kế đóng băng, số epoch theo ngân sách của dataset). Điểm đã có kết quả trên HF thì bỏ qua, nên "
+              "bấm lại sau khi bị ngắt sẽ chạy tiếp phần còn thiếu. Kết quả: `geometry-tune/<dataset>/<biến thể>/<cấu hình>/`."),
+        mo.hstack([tune_variants_ui, tune_lrs_ui, tune_dos_ui]),
+        tune_btn,
+    ])
+    return tune_btn, tune_dos_ui, tune_lrs_ui, tune_variants_ui
+
+
+@app.cell
+def _(
+    CODE_COMMIT,
+    DATASET,
+    DATA_DIR,
+    HAS_DEPTH_STATS,
+    REPO_ROOT,
+    WORK_DIR,
+    hf_token_ui,
+    mo,
+    os,
+    push_results,
+    remote_files,
+    run_streaming,
+    tune_btn,
+    tune_dos_ui,
+    tune_lrs_ui,
+    tune_variants_ui,
+):
+    mo.stop(not tune_btn.value, mo.md("⏸ Bấm **▶ Chạy lưới tune** để bắt đầu."))
+    _token = hf_token_ui.value.strip()
+    mo.stop(not _token, mo.md("⚠ Chưa nhập HF token ở ô phía trên."))
+    _lrs = [float(_x) for _x in tune_lrs_ui.value.split(",") if _x.strip()]
+    _dos = [float(_x) for _x in tune_dos_ui.value.split(",") if _x.strip()]
+    # same tag as scripts/train.py options_tag() for the frozen design
+    _tag = "inorm-ddrop0.3-tproj" + ("-dstat" if HAS_DEPTH_STATS else "")
+    _prefix = f"geometry-tune/{DATASET}"
+    _done = remote_files(_prefix, _token)
+    tune_status = {}
+    for _v in tune_variants_ui.value:
+        for _lr in _lrs:
+            for _do in _dos:
+                _cfg = f"lr{_lr:g}-do{_do:g}"
+                _stem = f"geometry_{DATASET}_{_v}_{_tag}_{_cfg}_seed42"
+                _out = os.path.join(WORK_DIR, "results", "geometry-tune", DATASET, _v, _cfg)
+                os.makedirs(_out, exist_ok=True)
+                _metrics = f"metrics_{_stem}.json"
+                if f"{_v}/{_cfg}/{_metrics}" in _done or os.path.exists(os.path.join(_out, _metrics)):
+                    tune_status[f"{_v} {_cfg}"] = "đã có"
+                    continue
+                print(f"=== tune {_v} {_cfg}, code {CODE_COMMIT} ===", flush=True)
+                _rc = run_streaming(
+                    ["python", os.path.join(REPO_ROOT, "scripts", "train.py"), "--data", DATA_DIR, "--variant", _v,
+                     "--seed", "42", "--tune", "--lr", str(_lr), "--dropout", str(_do), "--out", _out],
+                    REPO_ROOT, os.path.join(_out, f"{_stem}.log"))
+                tune_status[f"{_v} {_cfg}"] = "xong" if _rc == 0 else f"lỗi (exit {_rc})"
+                push_results(_out, f"{_prefix}/{_v}/{_cfg}", _token)
+    mo.md("### Lưới tune\n\n" + "\n".join(f"- `{_k}`: {_s}" for _k, _s in tune_status.items()))
+    return (tune_status,)
+
+
+@app.cell
+def _(DATASET, REPO_ROOT, RESULTS_REPO, WORK_DIR, hf_token_ui, mo, os, snapshot_download, subprocess, sys,
+      tune_status):
+    # Bảng lưới và cấu hình chọn cho mỗi biến thể (scripts/tune_summary.py, kèm luật hội tụ), từ metric trên HF.
+    _ = tune_status
+    _token = hf_token_ui.value.strip()
+    mo.stop(not _token, mo.md("Nhập HF token để xem bảng tune."))
+    _local = os.path.join(WORK_DIR, "hf_results")
+    try:
+        snapshot_download(RESULTS_REPO, repo_type="dataset", token=_token, local_dir=_local,
+                          allow_patterns=[f"geometry-tune/{DATASET}/*/*/metrics_*.json"])
+    except Exception as _e:
+        print(f"Không tải được metric tune: {_e}")
+    _root = os.path.join(_local, "geometry-tune", DATASET)
+    mo.stop(not os.path.isdir(_root), mo.md("Chưa có lần chạy tune nào."))
+    _out = os.path.join(WORK_DIR, "results", f"tune_{DATASET}")
+    _res = subprocess.run([sys.executable, os.path.join(REPO_ROOT, "scripts", "tune_summary.py"), "--root", _root,
+                           "--out", _out], text=True, capture_output=True)
+    mo.md(open(_out + ".md", encoding="utf-8").read() if _res.returncode == 0
+          else f"tune_summary lỗi (exit {_res.returncode}):\n\n```\n{_res.stderr[-2000:]}\n```")
     return
 
 

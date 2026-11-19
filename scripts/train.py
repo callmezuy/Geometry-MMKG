@@ -18,6 +18,10 @@ Train and evaluate GeometryMMKG on one v0 dataset (RESEARCH_PLAN.md P2.1, P2.8, 
   the best checkpoint is evaluated on test once. Spatial-VG validates on a fixed 5,000-triple subset (4.9),
   the same subset for every variant and seed. Each validation also logs the gate's weight on depth.
 * --dev: model development (P2.8). Valid only: test is never evaluated, no ranks, no checkpoint.
+* --tune: one point of the P2.10 grid (implies --dev); the stem and folder carry the configuration
+  (lr<lr>-do<dropout>), default folder results/geometry-tune/<dataset>/<variant>/<config>/.
+  scripts/tune_summary.py picks the best configuration per variant.
+* Epoch budget (P2.10): --epochs / --valid-every default to EPOCH_BUDGET of the dataset.
 * Output: metrics_<stem>.json, plus ranks_<stem>_test.csv (for scripts/compute_metrics.py) and ckpt_<stem>.pt
   outside --dev; stem = geometry_<dataset>_<variant>[_<options tag>]_seed<seed>.
   Default folder: results/geometry/<dataset>/<variant>/, or results/geometry-dev/<dataset>/<tag>/<variant>/.
@@ -42,6 +46,16 @@ from core.models.kg_reasoning import TripleIndex, in_batch_loss  # noqa: E402
 from core.reproducibility import set_seed  # noqa: E402
 
 VALID_SUBSET_SEED = 0       # fixed: every variant / seed validates on the same subset
+# P2.10 (decided 19/11/2026): maximum epochs and validation interval per dataset; the checkpoint is chosen on valid.
+EPOCH_BUDGET = {
+    "FB15k-237-IMG": (200, 10),
+    "FB15K-237-ind": (200, 10),
+    "MKG-Y": (1000, 50),
+    "Spatial-VRD": (100, 10),
+    "Spatial-VRD-Trans": (100, 10),
+    "Spatial-VG": (100, 10),
+}
+DEFAULT_BUDGET = (100, 10)
 VG_VALID_MAX = 5000         # RESEARCH_PLAN.md 4.9
 GATE_SAMPLE = 4096          # entities (with an image) used for the gate statistics
 
@@ -50,7 +64,7 @@ def parse_args(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--data", required=True, help="dataset folder, e.g. data/Spatial-VRD")
     p.add_argument("--variant", default="full", choices=list(VARIANTS))
-    p.add_argument("--epochs", type=int, default=100)
+    p.add_argument("--epochs", type=int, default=None, help="default: EPOCH_BUDGET of the dataset (P2.10)")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--batch-size", type=int, default=1024)
     p.add_argument("--lr", type=float, default=1e-4)
@@ -70,7 +84,9 @@ def parse_args(argv=None):
                         "auto (design) = the dataset table on scene graphs, none elsewhere; none = off; data = "
                         "<data>/ent_depth_stats.pt; or a scripts/vrd_depth_stats.py output (KEY default grid9)")
     p.add_argument("--dev", action="store_true", help="development run: valid only, never test")
-    p.add_argument("--valid-every", type=int, default=10, help="epochs between validations")
+    p.add_argument("--valid-every", type=int, default=None,
+                   help="epochs between validations (default: EPOCH_BUDGET of the dataset)")
+    p.add_argument("--tune", action="store_true", help="a P2.10 grid point: --dev plus the configuration in the names")
     p.add_argument("--valid-max", type=int, default=None,
                    help=f"validate on a fixed random subset of this size (0 = all; default {VG_VALID_MAX} for "
                         "Spatial-VG, else all)")
@@ -99,6 +115,11 @@ def options_tag(args):
 
 
 SCENE_GRAPHS = ("Spatial-VRD", "Spatial-VRD-Trans", "Spatial-VG")
+
+
+def config_tag(args):
+    """Grid-point tag of a --tune run, e.g. 'lr0.0003-do0.1'."""
+    return f"lr{args.lr:g}-do{args.dropout:g}"
 
 
 def resolve_depth_stats(spec, data_dir, dataset):
@@ -183,10 +204,18 @@ def main(argv=None):
     data_dir = os.path.abspath(args.data)
     dataset = os.path.basename(os.path.normpath(data_dir))
     args.depth_stats = resolve_depth_stats(args.depth_stats, data_dir, dataset)
+    budget_epochs, budget_valid = EPOCH_BUDGET.get(dataset, DEFAULT_BUDGET)
+    args.epochs = args.epochs or budget_epochs
+    args.valid_every = args.valid_every or budget_valid
+    if args.tune:
+        args.dev = True
     tag = options_tag(args)
-    stem = f"geometry_{dataset}_{args.variant}{'' if tag == 'base' else '_' + tag}_seed{args.seed}"
+    stem = (f"geometry_{dataset}_{args.variant}{'' if tag == 'base' else '_' + tag}"
+            + (f"_{config_tag(args)}" if args.tune else "") + f"_seed{args.seed}")
     if args.out:
         out_dir = args.out
+    elif args.tune:
+        out_dir = os.path.join(CODE_DIR, "results", "geometry-tune", dataset, args.variant, config_tag(args))
     elif args.dev:
         out_dir = os.path.join(CODE_DIR, "results", "geometry-dev", dataset, tag, args.variant)
     else:
@@ -284,6 +313,9 @@ def main(argv=None):
     metrics = {
         "model": "GeometryMMKG", "dataset": dataset, "variant": args.variant, "model_kwargs": model_kwargs,
         "options": options, "options_tag": tag, "dev": args.dev, "depth_stats": depth_stats_info,
+        "tune": args.tune, "config": {"lr": args.lr, "dropout": args.dropout} if args.tune else None,
+        "epoch_budget": {"epochs": args.epochs, "valid_every": args.valid_every,
+                         "dataset_default": [budget_epochs, budget_valid]},
         "seed": args.seed, "args": vars(args), "code_commit": code_commit(), "n_parameters": n_params,
         "n_entities": n_ent, "n_relations": n_rel, "n_missing_image": n_missing,
         "n_train": len(train), "n_valid_used": len(valid), "valid_subset_seed": VALID_SUBSET_SEED if valid_max else None,

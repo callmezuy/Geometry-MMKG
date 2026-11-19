@@ -411,6 +411,12 @@ Sáu bộ, mỗi bộ một repo HF public, tag `v0`; cấu trúc file, lệnh d
     tune). Lý do: so sánh fusion (RQ2) công bằng, không chỉ Δdepth.
   - **Giao thức:** seed 42, chế độ dev (chỉ valid, không bao giờ test); mỗi biến thể chọn cấu hình có MRR valid cao nhất; sau
     đó chạy chính thức (3 seed cho các ô chính, mục 4.8), mỗi lần test đúng một lần.
+  - **Code:** `train.py --tune --lr --dropout` (bật `--dev`; tên file và thư mục kèm cấu hình `lr<lr>-do<dropout>`; số epoch
+    và khoảng valid mặc định theo `EPOCH_BUDGET` của dataset); `scripts/tune_summary.py` chọn cấu hình tốt nhất mỗi biến thể
+    (bằng MRR thì lấy lr nhỏ hơn, rồi dropout nhỏ hơn) và áp luật hội tụ; notebook có mục "Tune" chạy cả lưới cho các biến thể
+    đã chọn, bỏ qua điểm đã có trên HF (`geometry-tune/<dataset>/<biến thể>/<cấu hình>/`), và bảng tổng hợp. Kiểm tra:
+    `tests/test_train_cli.py`; chạy thử 2 điểm lưới × 2 epoch trên VRD trên máy (lr 1e-3 đã cho MRR valid 0,232 sau 2 epoch so
+    với 0,162 của lr 1e-4, nên lưới lr có ý nghĩa).
 
 ### P3. Baseline
 

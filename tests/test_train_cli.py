@@ -49,6 +49,28 @@ def test_tags():
     assert train.options_tag(a) == "inorm-ddrop0.3-tproj"
 
 
+def test_budget_and_tune_names():
+    assert train.EPOCH_BUDGET["MKG-Y"] == (1000, 50) and train.EPOCH_BUDGET["FB15k-237-IMG"] == (200, 10)
+    a = train.parse_args(["--data", "x", "--tune", "--lr", "3e-4", "--dropout", "0.3"])
+    assert a.epochs is None and a.valid_every is None                  # filled from the budget in main()
+    assert train.config_tag(a) == "lr0.0003-do0.3"
+
+
+def test_tune_summary_choice_and_convergence_rule():
+    sys.path.insert(0, os.path.join(CODE, "scripts"))
+    import tune_summary
+
+    def run(v, lr, do, mrr, best, epochs=100):
+        return {"variant": v, "config": {"lr": lr, "dropout": do}, "valid_mrr": mrr, "best_epoch": best,
+                "epochs": epochs, "options_tag": "t", "file": f"{v}/{lr}-{do}"}
+    runs = [run("full", 1e-4, 0.1, 0.20, 30), run("full", 3e-4, 0.1, 0.25, 95), run("full", 1e-3, 0.3, 0.25, 40),
+            run("no_depth", 1e-4, 0.1, 0.30, 50)]
+    c = tune_summary.choose(runs)
+    assert c["full"]["config"] == {"lr": 3e-4, "dropout": 0.1}          # tie on MRR -> lower lr
+    assert c["full"]["late_best_epoch"] and c["full"]["action"] == "rerun with --epochs 200"
+    assert c["no_depth"]["action"] == "converged" and c["full"]["n_configs"] == 3
+
+
 if __name__ == "__main__":
     for _name, _fn in list(globals().items()):
         if _name.startswith("test_") and callable(_fn):
