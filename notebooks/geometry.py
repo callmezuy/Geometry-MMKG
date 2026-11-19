@@ -201,6 +201,9 @@ def _(DATASET, PLANNED_SEEDS, VARIANT_NAMES, mo):
     options_ui = mo.ui.multiselect(options=["rel_gate", "input_norm", "depth_dropout", "text_proj"], value=[],
                                    label="Cờ phát triển")
     ddrop_ui = mo.ui.text(value="0.3", label="Xác suất depth_dropout")
+    # P2.9: số độ sâu theo vùng (scripts/vrd_depth_stats.py), file nằm trong repo kết quả private, dạng PATH[:KEY]
+    dstat_ui = mo.ui.text(value="", label="Số độ sâu (P2.9, file trong repo kết quả, ví dụ "
+                                         "probe/vrd_depth_stats_dav2.pt:grid9; để trống = tắt)", full_width=True)
     epochs_ui = mo.ui.number(start=1, stop=2000, step=1, value=100, label="Epochs")
     batch_ui = mo.ui.dropdown(options=["512", "1024", "2048", "4096"], value="1024", label="Batch")
     lr_ui = mo.ui.text(value="1e-4", label="LR")
@@ -218,6 +221,7 @@ def _(DATASET, PLANNED_SEEDS, VARIANT_NAMES, mo):
               + (" Valid dùng tập con 5.000 bộ ba (mục 4.9)." if DATASET == "Spatial-VG" else "")),
         mo.hstack([seed_ui, variants_ui]),
         mo.hstack([dev_ui, options_ui, ddrop_ui]),
+        dstat_ui,
         mo.hstack([epochs_ui, batch_ui, lr_ui, margin_ui]),
         mo.hstack([adv_ui, dropout_ui, wd_ui, valid_every_ui]),
         save_ckpt_ui,
@@ -229,6 +233,7 @@ def _(DATASET, PLANNED_SEEDS, VARIANT_NAMES, mo):
         ddrop_ui,
         dev_ui,
         dropout_ui,
+        dstat_ui,
         epochs_ui,
         lr_ui,
         margin_ui,
@@ -248,12 +253,14 @@ def _(
     DATASET,
     DATA_DIR,
     REPO_ROOT,
+    RESULTS_REPO,
     WORK_DIR,
     adv_ui,
     batch_ui,
     ddrop_ui,
     dev_ui,
     dropout_ui,
+    dstat_ui,
     epochs_ui,
     hf_token_ui,
     lr_ui,
@@ -280,10 +287,22 @@ def _(
     _ddrop = float(ddrop_ui.value) if "depth_dropout" in _opts else 0.0
     _flags = (["--rel-gate"] if "rel_gate" in _opts else []) + (["--input-norm"] if "input_norm" in _opts else []) \
         + (["--depth-dropout", str(_ddrop)] if _ddrop > 0 else []) + (["--text-proj"] if "text_proj" in _opts else [])
+    _dstat_tag = []
+    if dstat_ui.value.strip():
+        from huggingface_hub import hf_hub_download as _hf_download
+
+        _spec = dstat_ui.value.strip()
+        _remote, _key = _spec.rsplit(":", 1) if ":" in _spec else (_spec, "grid9")
+        _local = _hf_download(RESULTS_REPO, _remote, repo_type="dataset", token=_token,
+                              local_dir=os.path.join(WORK_DIR, "depth_stats"))
+        _flags += ["--depth-stats", f"{_local}:{_key}"]
+        _name = os.path.splitext(os.path.basename(_remote))[0].split("depth_stats_", 1)[-1]
+        _dstat_tag = [f"dstat_{_name}_{_key}"]
     # same tag as scripts/train.py options_tag()
     OPTIONS_TAG = "-".join(
         (["relgate"] if "rel_gate" in _opts else []) + (["inorm"] if "input_norm" in _opts else [])
-        + ([f"ddrop{_ddrop:g}"] if _ddrop > 0 else []) + (["tproj"] if "text_proj" in _opts else [])) or "base"
+        + ([f"ddrop{_ddrop:g}"] if _ddrop > 0 else []) + (["tproj"] if "text_proj" in _opts else [])
+        + _dstat_tag) or "base"
     # dev: geometry-dev/<dataset>/<tag>/<variant>/ ; chính thức: geometry/<dataset>/<variant>/
     _prefix = f"geometry-dev/{DATASET}/{OPTIONS_TAG}" if _dev else f"geometry/{DATASET}"
     RESULTS_DIR = os.path.join(WORK_DIR, "results", *_prefix.split("/"))

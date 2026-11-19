@@ -90,6 +90,7 @@ def in_batch_loss(model, feats, h, r, t, index, margin, adv_temp):
     device = feats.device
     cand = torch.unique(torch.cat([h, t]))                          # sorted distinct entities
     cand_feats = feats.gather(cand)
+    cand_geo = feats.gather_geo(cand)                               # None without depth_stats
     h_col = torch.searchsorted(cand, h.contiguous()).to(device)
     t_col = torch.searchsorted(cand, t.contiguous()).to(device)
     r_dev = r.to(device)
@@ -104,10 +105,10 @@ def in_batch_loss(model, feats, h, r, t, index, margin, adv_temp):
     parts = {"tail": [], "head": []}
     for rows in groups:
         if rows is None:
-            e = model.forward_fusion(*cand_feats)                   # [C, d]
+            e = model.forward_fusion(*cand_feats, geo=cand_geo)     # [C, d]
             rows = torch.arange(len(h_col), device=device)
         else:
-            e = model.forward_fusion(*cand_feats, r_dev[rows[0]].expand(len(cand)))
+            e = model.forward_fusion(*cand_feats, r_dev[rows[0]].expand(len(cand)), geo=cand_geo)
         rr = rel[rows]
         d_tail = l1_cdist(e[h_col[rows]] + rr, e)                   # ||h + r - c||_1
         d_head = l1_cdist(e[t_col[rows]] - rr, e)                   # ||c + r - t||_1 = ||(t - r) - c||_1

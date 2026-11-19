@@ -29,6 +29,13 @@ Inputs are frozen per-entity features: text t, RGB x, depth z (all [B, d]) and a
    inflate the whole space during training, which changes what the margin and the self-adversarial
    temperature mean (measured on Spatial-VRD: true-answer distance 435 at init, 88 after one epoch).
 
+4. (option depth_stats, P2.9) h <- h + W_s s, with s = a few per-entity depth numbers computed on the depth map
+   normalised per image (scripts/vrd_depth_stats.py; standardised with train statistics) and W_s a linear map
+   without bias, zero at init. The term is added after the normalisation, on purpose: in TransE,
+   h + r - t then contains W_s (s_h - s_t), i.e. the depth difference between head and tail (as the relative depth
+   of ADVRD, Gan & He 2022). It is zero for entities without an image and for entities whose depth is dropped by
+   depth_dropout (both go through the no-depth path), so h only has norm 1 when the term is zero.
+
 With rel_gate the entity representation depends on the relation of the query (like TransR's relation-specific
 projections), so training and evaluation fuse the candidates once per relation.
 """
@@ -99,7 +106,14 @@ class VisionFusion(nn.Module):
             logits = logits + self.gate_rel(rel)
         return torch.sigmoid(logits)
 
-    def forward(self, rgb, depth, rel=None):
+    def drop_mask(self, n, device):
+        """Entities whose depth is dropped in this training step (None when depth dropout is off)."""
+        if self.training and self.depth_dropout > 0:
+            return torch.rand(n, device=device) < self.depth_dropout
+        return None
+
+    def forward(self, rgb, depth, rel=None, drop=None):
+        """drop: optional bool [B] from drop_mask (shared with the depth-stats term); drawn here when None."""
         rgb, depth = self._norm(rgb, depth)
         if not self.use_depth:
             return rgb
@@ -113,8 +127,9 @@ class VisionFusion(nn.Module):
         else:  # fixed
             a = torch.sigmoid(self.alpha)
             v = a * rgb + (1 - a) * depth
-        if self.training and self.depth_dropout > 0:
-            drop = torch.rand(v.shape[0], device=v.device) < self.depth_dropout
+        if drop is None:
+            drop = self.drop_mask(v.shape[0], v.device)
+        if drop is not None:
             v = torch.where(drop.unsqueeze(-1), rgb, v)
         return v
 
@@ -146,7 +161,8 @@ class TextVisionGate(nn.Module):
 
 class GeometryGuidedFusion(nn.Module):
     def __init__(self, dim=768, use_depth=True, fusion_mode="gate", missing_mode="learned_mask", dropout=0.1,
-                 num_relations=None, rel_gate=False, input_norm=False, depth_dropout=0.0, text_proj=False):
+                 num_relations=None, rel_gate=False, input_norm=False, depth_dropout=0.0, text_proj=False,
+                 depth_stats_dim=0):
         super().__init__()
         if missing_mode not in MISSING_MODES:
             raise ValueError(f"missing_mode must be one of {MISSING_MODES}, got {missing_mode!r}")
@@ -158,12 +174,31 @@ class GeometryGuidedFusion(nn.Module):
         else:
             self.missing_vision = None
         self.text_vision = TextVisionGate(dim, dropout, text_proj)
+        if depth_stats_dim and not use_depth:
+            raise ValueError("depth_stats needs use_depth=True")
+        self.depth_stats_proj = None
+        if depth_stats_dim:
+            self.depth_stats_proj = nn.Linear(depth_stats_dim, dim, bias=False)
+            nn.init.zeros_(self.depth_stats_proj.weight)
 
-    def forward(self, text, rgb, depth, mask=None, rel=None):
-        """text, rgb, depth: [B, d]; mask: bool [B] (True = has an image); rel: long [B] (rel_gate only)."""
-        v = self.vision_fusion(rgb, depth, rel)
+    def forward(self, text, rgb, depth, mask=None, rel=None, geo=None):
+        """text, rgb, depth: [B, d]; mask: bool [B] (True = has an image); rel: long [B] (rel_gate only);
+        geo: [B, k] standardised depth statistics (depth_stats only)."""
+        drop = self.vision_fusion.drop_mask(len(rgb), rgb.device)
+        v = self.vision_fusion(rgb, depth, rel, drop)
         if self.missing_mode == "learned_mask":
             if mask is None:
                 raise ValueError("missing_mode='learned_mask' needs the image mask (ent_img_mask.pt)")
             v = torch.where(mask.to(v.device).unsqueeze(-1), v, self.missing_vision.expand_as(v))
-        return self.text_vision(text, v)
+        h = self.text_vision(text, v)
+        if self.depth_stats_proj is not None:
+            if geo is None:
+                raise ValueError("a model with depth_stats needs the depth statistics (geo)")
+            g = self.depth_stats_proj(geo.to(h.device))
+            keep = torch.ones(len(h), dtype=torch.bool, device=h.device)
+            if self.missing_mode == "learned_mask":
+                keep &= mask.to(h.device)
+            if drop is not None:
+                keep &= ~drop
+            h = h + g * keep.unsqueeze(-1)
+        return h

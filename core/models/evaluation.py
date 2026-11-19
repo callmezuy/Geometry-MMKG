@@ -58,9 +58,10 @@ def _pick_store_device(num_entities, embed_dim, device, keep_on_gpu):
 
 @torch.no_grad()
 def fused_entity_table(model, all_text, all_rgb, all_depth, device, store_device, batch_size=2048, all_mask=None,
-                       rel=None):
+                       rel=None, all_geo=None):
     """all_mask: optional bool [N] image mask, passed to forward_fusion when given (P2.6).
-    rel: relation id (int) for a relation-conditioned model: every entity is fused under that relation."""
+    rel: relation id (int) for a relation-conditioned model: every entity is fused under that relation.
+    all_geo: optional [N, k] depth statistics, passed as geo= when given (P2.9)."""
     out = []
     n = len(all_text)
     for i in range(0, n, batch_size):
@@ -70,7 +71,8 @@ def fused_entity_table(model, all_text, all_rgb, all_depth, device, store_device
             args.append(None if all_mask is None else all_mask[i:j].to(device))
         if rel is not None:
             args.append(torch.full((j - i,), int(rel), dtype=torch.long, device=device))
-        fused = model.forward_fusion(*args)
+        kw = {} if all_geo is None else {"geo": all_geo[i:j].to(device)}
+        fused = model.forward_fusion(*args, **kw)
         out.append(fused.to(store_device))
     return torch.cat(out, dim=0)
 
@@ -127,10 +129,11 @@ def _rank_batch(model, table, h_ids, r_ids, t_ids, all_true_triplets, head_filte
 @torch.no_grad()
 def evaluate_link_prediction(model, all_text, all_rgb, all_depth, dataloader, all_true_triplets, device,
                              entity_chunk_size=32768, keep_on_gpu=None, return_ranks=False, desc="Evaluating",
-                             all_mask=None):
+                             all_mask=None, all_geo=None):
     """
     Args:
         all_mask: optional bool [N] image mask (ent_img_mask.pt) for models that take it (P2.6).
+        all_geo: optional [N, k] depth statistics for models with depth_stats (P2.9).
         all_true_triplets: {(h, r): set(t)} over train+valid+test (get_all_true_triplets).
         keep_on_gpu: None = automatic (P1.6), True / False to force.
         return_ranks: also return per-triplet ranks (for save_ranks / compute_metrics).
@@ -167,14 +170,15 @@ def evaluate_link_prediction(model, all_text, all_rgb, all_depth, dataloader, al
             if rel != table_rel:
                 del table
                 table = fused_entity_table(model, all_text, all_rgb, all_depth, device, store_device,
-                                           all_mask=all_mask, rel=rel)
+                                           all_mask=all_mask, rel=rel, all_geo=all_geo)
                 table_rel = rel
             rh, rt = _rank_batch(model, table, h_all[idx], r_all[idx], t_all[idx], all_true_triplets,
                                  head_filter, device, entity_chunk_size)
             rank_h[idx.numpy()], rank_t[idx.numpy()] = rh, rt
     else:
         print(f"Pre-computing fused representations for all {num_entities:,} entities (stored on {store_device})...")
-        table = fused_entity_table(model, all_text, all_rgb, all_depth, device, store_device, all_mask=all_mask)
+        table = fused_entity_table(model, all_text, all_rgb, all_depth, device, store_device, all_mask=all_mask,
+                                   all_geo=all_geo)
         pos = 0
         for batch in tqdm(batches, desc=desc):
             n = len(batch["h_id"])

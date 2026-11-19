@@ -230,6 +230,142 @@ Sáu bộ, mỗi bộ một repo HF public, tag `v0`; cấu trúc file, lệnh d
     khác nếu cờ ảnh hưởng tới nó). **Luật giữ một cờ:** MRR valid của các biến thể chịu ảnh hưởng tăng trung bình trên hai bộ và
     không tụt quá 0,005 ở bộ nào. Ghi mọi lần thử vào đây, kể cả lần không cải thiện. Mục tiêu là mô hình tốt hơn nói chung,
     không phải làm Δdepth dương.
+  - **Nhật ký các vòng** (MRR valid tốt nhất / epoch; seed 42, 100 epoch, cấu hình mặc định, Molab RTX PRO 6000):
+
+    | Vòng | Cờ | VRD `full` | VRD `no_depth` | FB15k `full` | FB15k `no_depth` | Quyết định |
+    |---|---|---|---|---|---|---|
+    | 0 | không (`base`, code `1c81cfd`) | 0,1887 / 20 | 0,2315 / 100 | 0,2977 / 90 | 0,3013 / 100 | mốc so sánh |
+    | 1 | `rel_gate` | 0,1853 / 20 | (= vòng 0) | 0,2963 / 70 | (= vòng 0) | **bỏ** (−0,0034 / −0,0014) |
+    | 2 | `input_norm` | 0,1928 / 20 | 0,2384 / 100 | 0,2970 / 100 | 0,3011 / 100 | **giữ** (`full` +0,0041 / −0,0007; `no_depth` +0,0069 / −0,0002) |
+    | 3 | + `depth_dropout 0.3` | 0,2059 / 30 | (= vòng 2) | 0,3028 / 100 | (= vòng 2) | **giữ** (+0,0131 / +0,0058) |
+    | 4 | + `text_proj` | 0,2364 / 30 | 0,2512 / 70 | 0,3225 / 100 | 0,3253 / 100 | **giữ** (`full` +0,0305 / +0,0197; `no_depth` +0,0128 / +0,0242) |
+
+    Vòng 0 (19/11/2026): lặp lại lần chạy thử với code đã sửa lỗi đánh giá; MRR valid cao hơn lần chạy thử 0,011–0,021, epoch
+    tốt nhất và hình dạng đường valid giống. VRD `full` vẫn học thuộc: loss train 1,11 ở epoch 100 (so với 2,37 của `no_depth`),
+    valid tụt từ 0,189 (epoch 20) xuống 0,106. Phần depth của gate: VRD 0,34 ở epoch tốt nhất (sd giữa thực thể 0,03), tăng dần lên
+    0,44; FB15k ở yên quanh 0,50 (giá trị lúc khởi tạo), sd 0,03, tức gate gần như không học. VRD `no_depth` và FB15k cả hai biến
+    thể còn tăng nhẹ ở epoch 100.
+
+    Vòng 1 (19/11/2026): `rel_gate` làm MRR valid của `full` giảm nhẹ ở cả hai bộ (trung bình −0,0024), nên bỏ theo luật giữ cờ.
+    Bias theo quan hệ gần như không rời 0: độ lệch phần depth giữa các quan hệ chỉ 0,0006 (VRD) và 0,0014 (FB15k), nhỏ hơn nhiều so
+    với độ lệch giữa thực thể (0,02–0,03); đường valid và loss train gần trùng vòng 0, chênh lệch cỡ nhiễu. Kết luận chỉ là: với
+    cấu hình mặc định, gate theo quan hệ không học được gì thêm; chưa kiểm định được giả thuyết "quan hệ không gian cần depth".
+    Chi phí: 10,2 s/epoch so với khoảng 4,7 trên VRD, 108 s/epoch so với khoảng 13 trên FB15k (182 phút cho 100 epoch).
+    Vì bias theo quan hệ gần như không học, vòng 1 xấp xỉ một lần chạy lại vòng 0 với dòng ngẫu nhiên khác, nên chênh lệch
+    0,001–0,003 của nó là ước lượng thô cho mức nhiễu giữa hai lần chạy cùng seed.
+
+    Vòng 2 (19/11/2026): `input_norm` đạt luật giữ cờ ở cả hai biến thể (trung bình `full` +0,0017, `no_depth` +0,0034; không bộ
+    nào tụt quá 0,005), nên **giữ** và bật ở các vòng sau. Mức tăng nằm ở VRD (+0,004 và +0,007); FB15k gần như không đổi. Mức tăng
+    của `full` chỉ hơi lớn hơn mức nhiễu ước lượng ở vòng 1, nên chưa chắc chắn; các lần chạy 3 seed sau khi đóng băng sẽ cho biết.
+    Trước khi chạy đã lường trước tác dụng nhỏ: `pooler_output` của DINOv2 đã đi qua LayerNorm, nên độ lớn từng vector RGB và depth
+    vốn gần nhau. Trên VRD `full` vẫn học thuộc (đỉnh ở epoch 20, valid còn 0,115 ở epoch 100); khoảng cách với `no_depth` tăng lên
+    −0,046. Phần depth của gate ở FB15k nhích từ 0,50 lên 0,53.
+    Ghi chú dữ liệu (`feature_quality.json`): vector depth giống nhau hơn hẳn vector RGB (cosine trung bình giữa thực thể: VRD 0,38
+    so với 0,07; FB15k 0,61 so với 0,18), tức các mảnh depth dồn về một hướng chung trong không gian DINOv2. LayerNorm theo từng vector
+    không sửa được điều này.
+
+    Vòng 3 (19/11/2026): `depth_dropout 0.3` (cộng `input_norm`) tăng MRR valid của `full` ở cả hai bộ (+0,0131 VRD, +0,0058 FB15k,
+    trung bình +0,0095, lớn hơn rõ mức nhiễu) → **giữ**. Học thuộc trên VRD giảm nhưng chưa hết: đỉnh dời từ epoch 20 sang 30,
+    loss train ở epoch 100 là 2,08 (vòng 2: 1,16), valid ở epoch 100 là 0,174 (vòng 2: 0,115). Phần depth của gate giảm (VRD 0,32 →
+    0,25, FB15k 0,53 → 0,36) và khác nhau giữa thực thể nhiều hơn ở FB15k (sd 0,03 → 0,06). So với `no_depth` (vòng 2): VRD −0,0325,
+    FB15k +0,0017 (cỡ nhiễu). Chỉ thử P = 0,3; P có đưa vào lưới tune hay không quyết định lúc chốt lưới (lưu ý tiêu chí 5: cùng số
+    cấu hình cho mọi biến thể).
+
+    Vòng 4 (19/11/2026): `text_proj` (cộng hai cờ đã giữ) tăng mạnh ở cả hai biến thể và cả hai bộ (`full` +0,0305 VRD, +0,0197
+    FB15k; `no_depth` +0,0128, +0,0242) → **giữ**. Đây là mức tăng lớn nhất trong 4 vòng: text là xương sống của biểu diễn, và
+    vector RoBERTa đi thẳng vào mà không được biến đổi là nút thắt chính. Thêm 590 nghìn tham số (VRD `full` 3,59 triệu). Trên VRD
+    `full` vẫn học thuộc (đỉnh epoch 30, còn 0,2075 ở epoch 100); `no_depth` đạt đỉnh ở epoch 70 rồi đi ngang. FB15k cả hai biến thể
+    còn tăng nhẹ ở epoch 100 (valid H@10 khoảng 0,49, MR khoảng 155). So với `no_depth`: VRD −0,0148, FB15k −0,0028 (cỡ nhiễu).
+  - **Thiết kế chốt sau P2.8:** `input_norm` + `depth_dropout 0.3` + `text_proj`; bỏ `rel_gate`. So với vòng 0, MRR valid `full`
+    tăng +0,048 (VRD) và +0,025 (FB15k), `no_depth` +0,020 và +0,024. Giới hạn của giao thức: thử tham lam theo thứ tự cố định, một
+    seed, nên `rel_gate` chỉ được thử trên cấu hình cũ (tham số của nó gần như không học, nên không thử lại); chọn cờ trên valid làm
+    valid hơi lạc quan, test chưa bị đụng tới.
+- [ ] **P2.9** Có làm tiếp thiết kế sau P2.8 không (quyết định 19/11/2026: kiểm tra trước, tối đa 3 vòng cờ nữa với cùng luật,
+  rồi đóng băng).
+  - [x] **A. Probe depth** (`scripts/depth_probe.py`, kết quả `experiment_results/depth_probe.{md,_mlp.json,_linear.json}`):
+    đặc trưng depth có chứa thông tin về quan hệ không gian mà RGB, text và khung 2D không có không? Cặp vật cùng ảnh trong
+    Spatial-VRD, bộ phân loại nhỏ (MLP 512 ẩn và tuyến tính) trên đặc trưng cố định, train trên ảnh train (giữ 10% ảnh để dừng
+    sớm), báo trên valid, không đọc test, 3 seed. Tác vụ: 52 quan hệ; "in front of" / "behind" (thứ tự sâu, nơi depth phải giúp);
+    trên / dưới và trái / phải (đối chứng 2D). `box` = khung chuẩn hoá của hai vật và hình học cặp (lấy từ annotation).
+    Kết quả (MLP, độ chính xác top-1; tuyến tính cho cùng kết luận):
+
+    | Đặc trưng | 52 quan hệ | trước / sau | trên / dưới | trái / phải |
+    |---|---|---|---|---|
+    | đoán lớp đông nhất | 0,243 | 0,629 | 0,563 | 0,503 |
+    | rgb | 0,487 | 0,748 | 0,847 | 0,509 |
+    | depth | 0,452 | 0,723 | 0,833 | 0,504 |
+    | rgb + depth | 0,500 | 0,757 | 0,875 | 0,572 |
+    | text + rgb | 0,593 | 0,779 | 0,899 | 0,534 |
+    | text + rgb + depth | 0,587 | 0,789 | 0,904 | 0,497 |
+    | box | 0,565 | **0,804** | **0,956** | **0,986** |
+    | text + rgb + box | **0,621** | 0,808 | 0,920 | 0,644 |
+
+    (sd giữa seed 0,001–0,02.) Kết luận: (1) vector depth có tín hiệu (hơn hẳn đoán bừa) nhưng yếu hơn RGB, kể cả ở tác vụ
+    trước / sau là nơi depth lẽ ra mạnh nhất; khi đã có text + RGB, thêm depth chỉ đổi −0,006 đến +0,010, tức thông tin gần như
+    trùng lặp. Khớp với kết quả KG (Δdepth ≤ 0). (2) Khung 2D một mình đoán trước / sau (0,804) tốt hơn mọi tổ hợp đặc trưng ảnh,
+    và là thứ duy nhất giải được trái / phải (mảnh cắt không biết vị trí của vật trong ảnh). Mô hình hiện tại không có thông tin
+    này. Giới hạn: ghép 24 chiều của box với 1.536+ chiều đặc trưng ảnh làm bộ phân loại kém hơn box một mình (ví dụ trái / phải
+    0,644 so với 0,986, chỉ 1.717 mẫu train), nên probe không trả lời sạch được câu "depth có thêm gì ngoài box"; và probe phân loại
+    quan hệ cho một cặp đã biết, khác với bài toán xếp hạng của KG.
+  - **Nguyên tắc (19/11/2026): không dùng tọa độ box làm đặc trưng của mô hình.** Box chỉ có ở 3/6 dataset (scene graph), các quan
+    hệ như left of / above được gán nhãn từ chính vị trí hai khung (probe: box một mình giải trái / phải 0,986), và baseline KGC không
+    nhận box. Box vẫn được dùng như hiện tại để xác định vùng của thực thể (cắt RGB / depth), tương đương "ảnh của thực thể" ở MMKG.
+    Kết quả với box trong probe chỉ dùng để phân tích.
+  - [x] **A2. Số độ sâu theo vùng** (`scripts/vrd_depth_stats.py` → `results/probe/vrd_depth_stats.pt`; probe
+    `--depth-stats`, kết quả `experiment_results/depth_probe_a2_{mlp,linear,mlp_pca64}.json`). Giả thuyết: cắt mảnh depth rồi đưa qua
+    DINOv2 làm mất thang so sánh chung giữa các vật cùng ảnh (DINOv2 gần như bỏ qua mức sáng tuyệt đối, LayerNorm ở đầu ra, mảnh nào
+    cũng co về 224×224). `dstat` = 5 con số trên depth map đã chuẩn hoá theo ảnh, trong vùng của vật: trung bình, trung vị, phân vị
+    10 / 90, độ lệch chuẩn (cùng ZipDepth, cùng vùng như lúc trích đặc trưng; 1,5 phút trên RTX 3050). Kiểm tra nhanh: với
+    "in front of", vật đầu gần hơn (trung vị lớn hơn) ở 71% cặp, "behind" 29%, "near" và "wearing" 50%.
+    Thay đổi so với `text + rgb` khi thêm từng loại depth (3 seed):
+
+    | Probe | trước / sau: + vector depth | trước / sau: + `dstat` | 52 quan hệ: + vector depth | 52 quan hệ: + `dstat` |
+    |---|---|---|---|---|
+    | MLP | +0,010 | **+0,022** | −0,006 | +0,006 |
+    | tuyến tính | +0,001 | +0,008 | +0,002 | +0,003 |
+    | MLP, PCA 64 chiều | −0,005 | **+0,017** | −0,008 | +0,002 |
+
+    Kết luận: giả thuyết được ủng hộ. 10 con số (5 cho mỗi vật) mang thông tin thứ tự sâu nhiều hơn vector 1.536 chiều: `dstat` một
+    mình đoán trước / sau ngang vector depth (0,715 so với 0,723), và thêm vào text + RGB thì tăng đều ở cả ba kiểu probe, còn vector
+    depth thì không. Thêm cả hai không hơn `dstat` một mình. Nhưng mức tăng nhỏ (trước / sau +0,02; 52 quan hệ +0,006), và "in front
+    of" / "behind" chỉ chiếm khoảng 12% bộ ba của VRD, nên lợi ích trên KG nếu có cũng khiêm tốn. Ngoài khung 2D thì `dstat` không thêm
+    gì (box + `dstat` so với box: −0,013 đến +0,004), tức phần lớn thông tin gần / xa trùng với vị trí trong ảnh. Ở FB15k / MKG-Y mỗi
+    thực thể là một ảnh riêng, không có thang chung giữa các thực thể, nên `dstat` không có nghĩa "gần / xa hơn vật kia".
+  - [x] **A3. Mô hình depth và cách tính số độ sâu** (`scripts/vrd_depth_stats.py --model {zipdepth,dav2}`, kết quả
+    `experiment_results/depth_probe_a3_{mlp,linear}.json`). Tài liệu: Sharifzadeh et al. (bản ICLR 2020) cho thấy đưa depth map
+    qua mạng pretrained trên RGB thì không tăng (predicate R@50 45,8–48,9 so với 90,5 khi train từ đầu trên depth), khớp chẩn đoán
+    vector DINOv2 của depth yếu; ADVRD (Gan & He, KBS 2022) và DM-KG (arXiv 2607.12319) đều tách một giá trị độ sâu cho mỗi vật (trung
+    bình theo vùng có trọng số / trung vị trong khoảng P10–P90) rồi lấy hiệu giữa hai vật; mức tăng do depth trong các bài này nhỏ
+    (Sharifzadeh: VRD predicate R@50 90,34 → 90,47, zero-shot 70,06 → 72,28). So hai mô hình: ZipDepth (bản đang dùng, mô hình
+    nhẹ) và Depth Anything V2 base (`depth-anything/Depth-Anything-V2-Base-hf`, 518 px; 5 phút cho 5.000 ảnh trên RTX 3050); ba cách
+    tính: `stats5` (5 số như A2), `robust` (trung vị trong khoảng P10–P90, 1 số), `grid9` (trung bình lưới 3×3). Tỉ lệ vật đầu gần hơn
+    (trung vị): "in front of" 0,706 (ZipDepth) / 0,784 (DAV2), "behind" 0,286 / 0,147, "above" 0,144 / 0,216, "under" 0,831 / 0,698;
+    tương quan giữa hai mô hình chỉ 0,47. ZipDepth dựa nhiều vào vị trí dọc (thấp hơn = gần hơn), DAV2 tách thứ tự sâu rõ hơn.
+    Probe MLP (3 seed; tuyến tính cùng xu hướng):
+
+    | Số độ sâu | trước / sau, một mình | trước / sau, + text + rgb | trên / dưới, + text + rgb | 52 quan hệ, + text + rgb |
+    |---|---|---|---|---|
+    | (không, text + rgb) | | 0,779 | 0,899 | 0,593 |
+    | ZipDepth `stats5` | 0,715 | 0,801 | 0,909 | 0,599 |
+    | ZipDepth `grid9` | 0,729 | 0,799 | 0,910 | 0,598 |
+    | DAV2 `stats5` | **0,816** | 0,810 | 0,903 | 0,594 |
+    | DAV2 `robust` | 0,815 | 0,793 | 0,897 | 0,594 |
+    | DAV2 `grid9` | 0,813 | **0,821** | 0,903 | 0,599 |
+
+    Kết luận: mô hình depth quan trọng hơn cách tính. 10 số của DAV2 một mình đoán trước / sau 0,816, hơn text + RGB (0,779) và ngang
+    khung 2D (0,804); thêm vào text + RGB tăng tới +0,042 (`grid9`; tuyến tính +0,042), so với +0,020 của ZipDepth. Trung vị đơn
+    lẻ (`robust`) yếu nhất khi ghép. Ở 52 quan hệ mức tăng vẫn nhỏ (tối đa +0,006), vì trước / sau chỉ khoảng 12% bộ ba.
+  - [ ] **Vòng 5 (quyết định 19/11/2026: thử trên KG trước, chưa đổi dữ liệu v0).** Cờ `--depth-stats PATH[:KEY]` (train.py,
+    notebook ô "Số độ sâu"): h ← h + W_s s sau bước chuẩn hoá, s = `grid9` của DAV2 (9 số, chuẩn hoá bằng trung bình / độ lệch của
+    thực thể train có ảnh), W_s tuyến tính không bias, khởi tạo 0 (lúc đầu mô hình giống hệt bản không cờ). Vì cộng sau chuẩn hoá,
+    h + r − t chứa đúng W_s (s_h − s_t), tức hiệu độ sâu đầu − đuôi như ADVRD. Số hạng bằng 0 với thực thể thiếu ảnh và với thực thể
+    bị depth_dropout bỏ depth; `no_depth` không dùng cờ này (thông tin depth). Log thêm độ lớn trung bình của W_s s (biểu diễn không
+    có nó có chuẩn 1). Kiểm tra: `tests/test_model_options.py` (khởi tạo 0, bỏ qua thực thể thiếu ảnh, tuyến tính theo hiệu độ sâu,
+    p = 1 bằng `no_depth`, loss và đánh giá truyền đúng s, chuẩn hoá chỉ dùng thực thể train). File `probe/vrd_depth_stats_dav2.pt`
+    nằm trong repo kết quả private (chỉ có cho Spatial-VRD). Giao thức: chỉ Spatial-VRD (số độ sâu không có nghĩa so sánh ở MMKG),
+    `full` với thiết kế chốt (+ `input_norm`, `depth_dropout 0.3`, `text_proj`), seed 42, 100 epoch; mốc là vòng 4 (0,2364). **Luật
+    giữ:** MRR valid tăng > 0,005 (hơn mức nhiễu). Đạt thì mới tính trích lại depth bằng DAV2 cho cả 6 dataset (phiên bản dữ liệu
+    mới, chạy lại các run baseline có depth).
 
 ### P3. Baseline
 

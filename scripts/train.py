@@ -5,7 +5,8 @@ Train and evaluate GeometryMMKG on one v0 dataset (RESEARCH_PLAN.md P2.1, P2.8, 
   python scripts/train.py --data data/Spatial-VRD --variant full --rel-gate --dev     # development run
 
 * Variants (section 3.1): full, no_depth, concat, mean, fixed, constant (core/models/end_to_end.py VARIANTS).
-* Development options (P2.8, off by default): --rel-gate, --input-norm, --depth-dropout P, --text-proj.
+* Development options (P2.8, off by default): --rel-gate, --input-norm, --depth-dropout P, --text-proj;
+  P2.9: --depth-stats PATH[:KEY] (per-entity depth statistics from scripts/vrd_depth_stats.py, default key grid9).
   The same options can be passed to every variant; each variant uses those that apply to it
   (`effective_options`), and the options tag (folder / file names) is the same for all of them.
 * Training: in-batch negatives on both sides, train-only false-negative filter, self-adversarial weighted
@@ -31,7 +32,7 @@ CODE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, CODE_DIR)
 
 from core.data_engineering.fast_dataset import (  # noqa: E402
-    TripleBatches, get_all_true_triplets, load_entity_features, load_triples, read_count)
+    TripleBatches, get_all_true_triplets, load_depth_stats, load_entity_features, load_triples, read_count)
 from core.models.end_to_end import VARIANTS, GeometryMMKGModel, effective_options  # noqa: E402
 from core.models.evaluation import evaluate_link_prediction, format_metrics, save_ranks  # noqa: E402
 from core.models.kg_reasoning import TripleIndex, in_batch_loss  # noqa: E402
@@ -58,6 +59,9 @@ def parse_args(argv=None):
     p.add_argument("--input-norm", action="store_true", help="separate LayerNorm on RGB and depth before fusion")
     p.add_argument("--depth-dropout", type=float, default=0.0, help="drop depth per entity while training")
     p.add_argument("--text-proj", action="store_true", help="learned projection of text (identity at init)")
+    p.add_argument("--depth-stats", default=None, metavar="PATH[:KEY]",
+                   help="per-entity depth statistics (scripts/vrd_depth_stats.py output; KEY default grid9), "
+                        "added as W_s s after the normalisation, W_s = 0 at init (P2.9)")
     p.add_argument("--dev", action="store_true", help="development run: valid only, never test")
     p.add_argument("--valid-every", type=int, default=10, help="epochs between validations")
     p.add_argument("--valid-max", type=int, default=None,
@@ -82,7 +86,17 @@ def options_tag(args):
         parts.append(f"ddrop{args.depth_dropout:g}")
     if args.text_proj:
         parts.append("tproj")
+    if args.depth_stats:
+        parts.append("dstat_" + depth_stats_name(args.depth_stats))
     return "-".join(parts) or "base"
+
+
+def depth_stats_name(spec):
+    """'results/probe/vrd_depth_stats_dav2.pt:grid9' -> 'dav2_grid9' (the file stem after 'depth_stats_')."""
+    path, key = (spec.rsplit(":", 1) if ":" in os.path.basename(spec) else (spec, "grid9"))
+    stem = os.path.splitext(os.path.basename(path))[0]
+    stem = stem.split("depth_stats_", 1)[-1]
+    return f"{stem}_{key}"
 
 
 def code_commit():
@@ -91,6 +105,18 @@ def code_commit():
                               capture_output=True, text=True, check=True).stdout.strip()
     except Exception:
         return None
+
+
+@torch.no_grad()
+def depth_stats_norm(model, feats):
+    """Mean L2 norm of the depth-statistics term W_s s over a fixed sample of entities with an image
+    (entity representations without it have norm 1). None without depth_stats."""
+    if not getattr(model, "uses_depth_stats", False):
+        return None
+    ids = feats.mask.nonzero(as_tuple=True)[0]
+    ids = ids[torch.randperm(len(ids), generator=torch.Generator().manual_seed(0))[:GATE_SAMPLE].to(ids.device)]
+    g = model.fusion_module.depth_stats_proj(feats.gather_geo(ids))
+    return float(g.norm(dim=1).mean())
 
 
 def strip_ranks(m):
@@ -155,12 +181,18 @@ def main(argv=None):
     all_true = get_all_true_triplets(data_dir)   # filter set = train + valid + test (section 4.3)
     train_index = TripleIndex(train, n_ent, n_rel, device=device)
     n_missing = int((~feats.mask).sum())
+    depth_stats_info = None
+    if args.depth_stats:
+        feats.geo, depth_stats_info = load_depth_stats(args.depth_stats, n_ent, feats.mask, train)
+        feats.geo = feats.geo.to(feats.store)
+        print(f"depth statistics: {depth_stats_info}", flush=True)
     print(f"{n_ent:,} entities ({n_missing:,} without image), {n_rel} relations | train {len(train):,} | "
           f"valid {len(valid):,}{' (subset)' if valid_max else ''}"
           f"{'' if test is None else f' | test {len(test):,}'} | features stored on {feats.store}", flush=True)
 
     model_kwargs = dict(VARIANTS[args.variant])
-    options = effective_options(model_kwargs, args.rel_gate, args.input_norm, args.depth_dropout, args.text_proj)
+    options = effective_options(model_kwargs, args.rel_gate, args.input_norm, args.depth_dropout, args.text_proj,
+                                0 if depth_stats_info is None else depth_stats_info["dim"])
     model = GeometryMMKGModel(n_rel, embed_dim=feats.text.shape[1], dropout=args.dropout,
                               **model_kwargs, **options).to(device)
     n_params = sum(p.numel() for p in model.parameters())
@@ -173,7 +205,8 @@ def main(argv=None):
             torch.cuda.empty_cache()  # release training buffers so the fused table can stay on the GPU (P1.6)
         return evaluate_link_prediction(
             model, feats.text, feats.rgb, feats.depth, TripleBatches(triples, args.eval_batch_size), all_true,
-            device, keep_on_gpu=keep, return_ranks=return_ranks, desc=desc, all_mask=feats.mask)
+            device, keep_on_gpu=keep, return_ranks=return_ranks, desc=desc, all_mask=feats.mask,
+            all_geo=feats.geo if model.uses_depth_stats else None)
 
     history, best = [], {"mrr": -1.0, "epoch": 0, "state": None, "valid": None, "gate": None}
     train_dev = train.to(device)
@@ -203,12 +236,14 @@ def main(argv=None):
             m = strip_ranks(evaluate(valid, f"valid@{epoch}"))
             row["valid"] = m
             row["gate"] = gate_stats(model, feats, n_rel)
+            row["depth_stats_norm"] = depth_stats_norm(model, feats)
             g = row["gate"]
             gate_txt = "" if g is None else (
                 f" | depth weight {g['mean']:.3f}"
                 + (f" (sd entities {g['std_entities']:.3f}" if "std_entities" in g else "")
                 + (f", sd relations {g['std_relations']:.3f}" if "std_relations" in g else "")
-                + (")" if "std_entities" in g else ""))
+                + (")" if "std_entities" in g else "")) + (
+                "" if row["depth_stats_norm"] is None else f" | |W_s s| {row['depth_stats_norm']:.3f}")
             print(f"valid @ epoch {epoch}: {format_metrics(m)}{gate_txt}", flush=True)
             if m["mrr"] > best["mrr"]:
                 best = {"mrr": m["mrr"], "epoch": epoch, "valid": m, "gate": g,
@@ -218,7 +253,7 @@ def main(argv=None):
 
     metrics = {
         "model": "GeometryMMKG", "dataset": dataset, "variant": args.variant, "model_kwargs": model_kwargs,
-        "options": options, "options_tag": tag, "dev": args.dev,
+        "options": options, "options_tag": tag, "dev": args.dev, "depth_stats": depth_stats_info,
         "seed": args.seed, "args": vars(args), "code_commit": code_commit(), "n_parameters": n_params,
         "n_entities": n_ent, "n_relations": n_rel, "n_missing_image": n_missing,
         "n_train": len(train), "n_valid_used": len(valid), "valid_subset_seed": VALID_SUBSET_SEED if valid_max else None,

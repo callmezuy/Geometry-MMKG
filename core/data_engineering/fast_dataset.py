@@ -59,10 +59,11 @@ class EntityFeatures:
     """Frozen feature tables and image mask; `gather(ids)` returns them on the compute device.
     `store` is where the tables live (GPU when they fit, else CPU; RESEARCH_PLAN.md P1.6)."""
 
-    def __init__(self, text, rgb, depth, mask, device, store=None):
+    def __init__(self, text, rgb, depth, mask, device, store=None, geo=None):
         store = store or device
         self.text, self.rgb, self.depth = text.to(store), rgb.to(store), depth.to(store)
         self.mask = mask.to(store)
+        self.geo = None if geo is None else geo.to(store)  # optional depth statistics [N, k] (P2.9)
         self.device, self.store = device, store
 
     def __len__(self):
@@ -72,6 +73,12 @@ class EntityFeatures:
         ids = ids.to(self.store)
         return tuple(x[ids].to(self.device, non_blocking=True)
                      for x in (self.text, self.rgb, self.depth, self.mask))
+
+    def gather_geo(self, ids):
+        """Depth statistics of `ids` on the compute device, or None when the table has none."""
+        if self.geo is None:
+            return None
+        return self.geo[ids.to(self.store)].to(self.device, non_blocking=True)
 
 
 def load_entity_features(data_dir, device, keep_on_gpu=None):
@@ -95,3 +102,24 @@ def load_entity_features(data_dir, device, keep_on_gpu=None):
         if keep_on_gpu is False or (keep_on_gpu is None and need >= 0.5 * free):
             store = torch.device("cpu")
     return EntityFeatures(tables["text"], tables["rgb"], tables["depth"], mask, device, store)
+
+
+def load_depth_stats(spec, n_entities, mask, train_triples):
+    """Depth statistics for the depth_stats option (P2.9). spec = 'PATH[:KEY]' (KEY default grid9), a
+    scripts/vrd_depth_stats.py output. Standardised with the mean / std of the TRAIN entities that have an image;
+    entities without an image or without statistics get 0 (the model ignores them through the mask).
+    Returns (float32 [N, k], info dict)."""
+    path, key = (spec.rsplit(":", 1) if ":" in os.path.basename(spec) else (spec, "grid9"))
+    blob = torch.load(path, map_location="cpu", weights_only=False)
+    x = blob[key].float()
+    if x.dim() != 2 or x.shape[0] != n_entities:
+        raise ValueError(f"{spec}: expected [{n_entities}, k], got {tuple(x.shape)}")
+    ok = torch.isfinite(x).all(dim=1) & mask.cpu()
+    tr = torch.zeros(n_entities, dtype=torch.bool)
+    tr[train_triples[:, [0, 2]].reshape(-1)] = True
+    ref = x[tr & ok]
+    mu, sd = ref.mean(0), ref.std(0).clamp_min(1e-6)
+    z = ((x - mu) / sd).masked_fill(~ok.unsqueeze(1), 0.0)
+    info = {"path": path, "key": key, "model": blob.get("model"), "dim": int(x.shape[1]),
+            "n_with_stats": int(ok.sum()), "n_train_ref": int(len(ref))}
+    return z.contiguous(), info
