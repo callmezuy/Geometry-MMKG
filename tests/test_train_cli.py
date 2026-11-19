@@ -71,6 +71,20 @@ def test_tune_summary_choice_and_convergence_rule():
     assert c["no_depth"]["action"] == "converged" and c["full"]["n_configs"] == 3
 
 
+
+def test_edge_rule_points():
+    sys.path.insert(0, os.path.join(CODE, "scripts"))
+    from tune_summary import edge_points
+    base = [(lr, do) for lr in (1e-4, 3e-4, 1e-3) for do in (0.1, 0.3)]
+    pts = lambda tested, chosen: sorted((p["lr"], p["dropout"]) for p in edge_points(tested, chosen))  # noqa: E731
+    assert pts(base, (3e-4, 0.3)) == [(3e-4, 0.5)]                       # inside on lr, high edge on dropout
+    assert pts(base, (1e-3, 0.1)) == [(1e-3, 0.0), (3e-3, 0.1)]           # two edges -> one point per axis
+    assert pts(base + [(1e-4, 0.0)], (1e-4, 0.0)) == [(3e-5, 0.0)]        # dropout 0 is a natural bound
+    deep = base + [(3e-5, 0.1), (1e-5, 0.1)]
+    assert pts(deep, (1e-5, 0.1)) == [(1e-5, 0.0)]                         # lr already 2 steps below the grid
+    assert pts(base + [(3e-3, 0.1), (1e-3, 0.0)], (1e-3, 0.1)) == []       # chosen inside -> final
+
+
 if __name__ == "__main__":
     for _name, _fn in list(globals().items()):
         if _name.startswith("test_") and callable(_fn):

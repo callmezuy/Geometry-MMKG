@@ -456,15 +456,19 @@ def _(DATASET, VARIANT_NAMES, mo):
                                          label="Biến thể tune")
     tune_lrs_ui = mo.ui.text(value="1e-4,3e-4,1e-3", label="LR (lưới)")
     tune_dos_ui = mo.ui.text(value="0.1,0.3", label="Dropout (lưới)")
-    tune_btn = mo.ui.run_button(label="▶ Chạy lưới tune (P2.10)")
+    tune_mode_ui = mo.ui.radio(options=["Lưới gốc", "Mở rộng biên"], value="Lưới gốc", label="Chế độ")
+    tune_btn = mo.ui.run_button(label="▶ Chạy tune (P2.10)")
     mo.vstack([
         mo.md(f"### Tune `{DATASET}` (P2.10)\n\nMỗi điểm lưới là một lần `train.py --tune` (chỉ valid, seed 42, "
               "thiết kế đóng băng, số epoch theo ngân sách của dataset). Điểm đã có kết quả trên HF thì bỏ qua, nên "
-              "bấm lại sau khi bị ngắt sẽ chạy tiếp phần còn thiếu. Kết quả: `geometry-tune/<dataset>/<biến thể>/<cấu hình>/`."),
+              "bấm lại sau khi bị ngắt sẽ chạy tiếp phần còn thiếu. Kết quả: `geometry-tune/<dataset>/<biến thể>/<cấu hình>/`.\n\n"
+              "**Mở rộng biên** (luật 20/11/2026): sau lưới gốc, `tune_summary.py` tìm các điểm một bậc ra ngoài biên cho "
+              "biến thể có cấu hình chọn nằm ở biên; notebook chạy chúng rồi tính lại, lặp tới khi không còn điểm nào."),
         mo.hstack([tune_variants_ui, tune_lrs_ui, tune_dos_ui]),
+        tune_mode_ui,
         tune_btn,
     ])
-    return tune_btn, tune_dos_ui, tune_lrs_ui, tune_variants_ui
+    return tune_btn, tune_dos_ui, tune_lrs_ui, tune_mode_ui, tune_variants_ui
 
 
 @app.cell
@@ -474,6 +478,7 @@ def _(
     DATA_DIR,
     HAS_DEPTH_STATS,
     REPO_ROOT,
+    RESULTS_REPO,
     WORK_DIR,
     hf_token_ui,
     mo,
@@ -481,40 +486,72 @@ def _(
     push_results,
     remote_files,
     run_streaming,
+    snapshot_download,
+    sys,
     tune_btn,
     tune_dos_ui,
     tune_lrs_ui,
+    tune_mode_ui,
     tune_variants_ui,
 ):
-    mo.stop(not tune_btn.value, mo.md("⏸ Bấm **▶ Chạy lưới tune** để bắt đầu."))
+    mo.stop(not tune_btn.value, mo.md("⏸ Bấm **▶ Chạy tune** để bắt đầu."))
     _token = hf_token_ui.value.strip()
     mo.stop(not _token, mo.md("⚠ Chưa nhập HF token ở ô phía trên."))
-    _lrs = [float(_x) for _x in tune_lrs_ui.value.split(",") if _x.strip()]
-    _dos = [float(_x) for _x in tune_dos_ui.value.split(",") if _x.strip()]
     # same tag as scripts/train.py options_tag() for the frozen design
     _tag = "inorm-ddrop0.3-tproj" + ("-dstat" if HAS_DEPTH_STATS else "")
     _prefix = f"geometry-tune/{DATASET}"
-    _done = remote_files(_prefix, _token)
     tune_status = {}
-    for _v in tune_variants_ui.value:
-        for _lr in _lrs:
-            for _do in _dos:
-                _cfg = f"lr{_lr:g}-do{_do:g}"
-                _stem = f"geometry_{DATASET}_{_v}_{_tag}_{_cfg}_seed42"
-                _out = os.path.join(WORK_DIR, "results", "geometry-tune", DATASET, _v, _cfg)
-                os.makedirs(_out, exist_ok=True)
-                _metrics = f"metrics_{_stem}.json"
-                if f"{_v}/{_cfg}/{_metrics}" in _done or os.path.exists(os.path.join(_out, _metrics)):
-                    tune_status[f"{_v} {_cfg}"] = "đã có"
-                    continue
-                print(f"=== tune {_v} {_cfg}, code {CODE_COMMIT} ===", flush=True)
-                _rc = run_streaming(
-                    ["python", os.path.join(REPO_ROOT, "scripts", "train.py"), "--data", DATA_DIR, "--variant", _v,
-                     "--seed", "42", "--tune", "--lr", str(_lr), "--dropout", str(_do), "--out", _out],
-                    REPO_ROOT, os.path.join(_out, f"{_stem}.log"))
-                tune_status[f"{_v} {_cfg}"] = "xong" if _rc == 0 else f"lỗi (exit {_rc})"
-                push_results(_out, f"{_prefix}/{_v}/{_cfg}", _token)
-    mo.md("### Lưới tune\n\n" + "\n".join(f"- `{_k}`: {_s}" for _k, _s in tune_status.items()))
+
+    def _run_point(_v, _lr, _do, _done):
+        _cfg = f"lr{_lr:g}-do{_do:g}"
+        _stem = f"geometry_{DATASET}_{_v}_{_tag}_{_cfg}_seed42"
+        _out = os.path.join(WORK_DIR, "results", "geometry-tune", DATASET, _v, _cfg)
+        os.makedirs(_out, exist_ok=True)
+        _metrics = f"metrics_{_stem}.json"
+        if f"{_v}/{_cfg}/{_metrics}" in _done or os.path.exists(os.path.join(_out, _metrics)):
+            tune_status[f"{_v} {_cfg}"] = "đã có"
+            return
+        print(f"=== tune {_v} {_cfg}, code {CODE_COMMIT} ===", flush=True)
+        _rc = run_streaming(
+            ["python", os.path.join(REPO_ROOT, "scripts", "train.py"), "--data", DATA_DIR, "--variant", _v,
+             "--seed", "42", "--tune", "--lr", str(_lr), "--dropout", str(_do), "--out", _out],
+            REPO_ROOT, os.path.join(_out, f"{_stem}.log"))
+        tune_status[f"{_v} {_cfg}"] = "xong" if _rc == 0 else f"lỗi (exit {_rc})"
+        push_results(_out, f"{_prefix}/{_v}/{_cfg}", _token)
+
+    if tune_mode_ui.value == "Lưới gốc":
+        _lrs = [float(_x) for _x in tune_lrs_ui.value.split(",") if _x.strip()]
+        _dos = [float(_x) for _x in tune_dos_ui.value.split(",") if _x.strip()]
+        _done = remote_files(_prefix, _token)
+        for _v in tune_variants_ui.value:
+            for _lr in _lrs:
+                for _do in _dos:
+                    _run_point(_v, _lr, _do, _done)
+    else:
+        # edge rule: recompute the choice from every finished point (HF + this session), run the proposed points, repeat
+        sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
+        import tune_summary as _ts
+
+        for _round in range(1, 7):
+            _hf = os.path.join(WORK_DIR, "hf_results")
+            snapshot_download(RESULTS_REPO, repo_type="dataset", token=_token, local_dir=_hf,
+                              allow_patterns=[f"{_prefix}/*/*/metrics_*.json"])
+            _runs = {}
+            for _root in (os.path.join(_hf, *_prefix.split("/")),
+                          os.path.join(WORK_DIR, "results", "geometry-tune", DATASET)):
+                for _r in _ts.load_runs(_root) if os.path.isdir(_root) else []:
+                    _runs[(_r["variant"], _r["config"]["lr"], _r["config"]["dropout"])] = _r
+            _choice = _ts.choose(list(_runs.values()))
+            _todo = [(_v, _p["lr"], _p["dropout"]) for _v in tune_variants_ui.value
+                     for _p in _choice.get(_v, {}).get("edge_points", [])]
+            print(f"--- edge rule, round {_round}: {len(_todo)} point(s) {_todo}", flush=True)
+            if not _todo:
+                break
+            _done = remote_files(_prefix, _token)
+            for _v, _lr, _do in _todo:
+                _run_point(_v, _lr, _do, _done)
+    mo.md("### Tune\n\n" + ("\n".join(f"- `{_k}`: {_s}" for _k, _s in tune_status.items())
+                             or "Không còn điểm nào cần chạy."))
     return (tune_status,)
 
 

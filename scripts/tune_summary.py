@@ -1,7 +1,9 @@
 """
 Summary of the P2.10 grid of one dataset (RESEARCH_PLAN.md P2.10): the best configuration per variant by valid MRR,
-and the convergence rule (if the best epoch of the chosen configuration lies in the last 10% of the epoch budget,
-rerun it with twice the budget).
+the convergence rule (if the best epoch of the chosen configuration lies in the last 10% of the epoch budget,
+rerun it with twice the budget) and the edge rule (decided 20/11/2026): if the chosen configuration lies at an edge
+of the tested range of an axis, the point one step further along that axis (other axis at its chosen value) is added,
+until the choice is inside, at most EXTRA_STEPS steps beyond the base grid in each direction.
 
 Input: a folder <root>/<variant>/<config>/metrics_*.json written by `scripts/train.py --tune` (only --tune runs
 are read; test numbers never exist there).
@@ -14,6 +16,33 @@ import json
 import os
 
 LATE_FRACTION = 0.9   # best epoch > 90% of the budget -> not converged
+LR_LADDER = [1e-5, 3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2]
+DROPOUT_LADDER = [0.0, 0.1, 0.3, 0.5]
+BASE_GRID = {"lr": [1e-4, 3e-4, 1e-3], "dropout": [0.1, 0.3]}
+EXTRA_STEPS = 2
+
+
+def _index(ladder, x):
+    return min(range(len(ladder)), key=lambda i: abs(ladder[i] - x) / max(abs(x), 1e-12))
+
+
+def edge_points(tested, chosen):
+    """Points to add for one variant under the edge rule. tested: list of (lr, dropout); chosen: (lr, dropout)."""
+    out = []
+    for axis, ladder, k in (("lr", LR_LADDER, 0), ("dropout", DROPOUT_LADDER, 1)):
+        vals = sorted({t[k] for t in tested})
+        base = [_index(ladder, v) for v in BASE_GRID[axis]]
+        i = _index(ladder, chosen[k])
+        for edge, step, limit in ((vals[0], -1, min(base) - EXTRA_STEPS), (vals[-1], +1, max(base) + EXTRA_STEPS)):
+            if abs(chosen[k] - edge) > 1e-12 * max(1.0, abs(edge)):   # chosen value not at this edge
+                continue
+            j = i + step
+            if j < 0 or j >= len(ladder) or (step < 0 and j < limit) or (step > 0 and j > limit):
+                continue
+            p = (ladder[j], chosen[1]) if k == 0 else (chosen[0], ladder[j])
+            if not any(abs(p[0] - t[0]) < 1e-12 and abs(p[1] - t[1]) < 1e-12 for t in tested):
+                out.append({"lr": p[0], "dropout": p[1], "axis": axis, "edge": "low" if step < 0 else "high"})
+    return out
 
 
 def load_runs(root):
@@ -43,8 +72,11 @@ def choose(runs):
         best = sorted(rs, key=lambda r: (-r["valid_mrr"], r["config"]["lr"], r["config"]["dropout"]))[0]
         late = best["best_epoch"] > LATE_FRACTION * best["epochs"]
         tags = {r["options_tag"] for r in rs}
+        ext = edge_points([(r["config"]["lr"], r["config"]["dropout"]) for r in rs],
+                          (best["config"]["lr"], best["config"]["dropout"]))
         out[v] = {**best, "n_configs": len(rs), "late_best_epoch": late,
                   "action": f"rerun with --epochs {2 * best['epochs']}" if late else "converged",
+                  "edge_points": ext, "final": not ext and not late,
                   "mixed_options_tags": sorted(tags) if len(tags) > 1 else None}
     return out
 
@@ -57,10 +89,12 @@ def to_markdown(runs, choice, root):
         lines.append(f"| {r['variant']}{mark} | {r['config']['lr']:g} | {r['config']['dropout']:g} | "
                      f"{r['best_epoch']} / {r['epochs']} | {r['valid_mrr']:.4f} | {r['valid_h1']:.3f} | "
                      f"{r['valid_h10']:.3f} | {r['valid_mr']:.0f} |")
-    lines += ["", "| Variant | configs | chosen lr / dropout | valid MRR | convergence |", "|---|---|---|---|---|"]
+    lines += ["", "| Variant | configs | chosen lr / dropout | valid MRR | convergence | points to add (edge rule) |",
+              "|---|---|---|---|---|---|"]
     for v, c in choice.items():
+        ext = ", ".join(f"lr {p['lr']:g} / do {p['dropout']:g}" for p in c["edge_points"]) or "none (final)"
         lines.append(f"| {v} | {c['n_configs']} | {c['config']['lr']:g} / {c['config']['dropout']:g} | "
-                     f"{c['valid_mrr']:.4f} | {c['action']} |")
+                     f"{c['valid_mrr']:.4f} | {c['action']} | {ext} |")
     return "\n".join(lines) + "\n"
 
 

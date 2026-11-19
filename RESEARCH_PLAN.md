@@ -214,6 +214,7 @@ Sáu bộ, mỗi bộ một repo HF public, tag `v0`; cấu trúc file, lệnh d
     | FB15k-237-IMG | 90 / 0,277 | 100 / 0,280 | gần hội tụ, không học thuộc |
 
     Các lần chạy này đã lỡ tính và xem số test (chế độ dev chưa có); từ nay giai đoạn phát triển chỉ nhìn valid.
+    Kết quả của chúng đã chuyển sang `geometry-pilot/` trong repo kết quả (19/11/2026), để `geometry/` chỉ chứa lần chạy chính thức.
     Phân tích checkpoint VRD: phần depth của gate gần như hằng (trung bình 0,34, sd giữa thực thể 0,03), tức gate chưa thích nghi
     theo thực thể; vật thể ở ảnh khác chiếm gần hết các ứng viên xếp trên đáp án đúng (khoảng 1.300–1.600 so với 4 vật thể cùng ảnh).
   - **Chế độ dev** (`train.py --dev`, ô "Chế độ dev" trong notebook): chỉ đánh giá valid, không bao giờ chạy test, không ghi rank;
@@ -417,6 +418,35 @@ Sáu bộ, mỗi bộ một repo HF public, tag `v0`; cấu trúc file, lệnh d
     đã chọn, bỏ qua điểm đã có trên HF (`geometry-tune/<dataset>/<biến thể>/<cấu hình>/`), và bảng tổng hợp. Kiểm tra:
     `tests/test_train_cli.py`; chạy thử 2 điểm lưới × 2 epoch trên VRD trên máy (lr 1e-3 đã cho MRR valid 0,232 sau 2 epoch so
     với 0,162 của lr 1e-4, nên lưới lr có ý nghĩa).
+  - **Kết quả Spatial-VRD (20/11/2026, code `9ed7ce5`, 36/36 lần chạy, không lỗi; bảng đầy đủ: `tune_summary.py` trên
+    `geometry-tune/Spatial-VRD`).** Cấu hình chọn và MRR valid tốt nhất:
+
+    | Biến thể | lr / dropout | MRR valid | Epoch tốt nhất |
+    |---|---|---|---|
+    | concat | 1e-3 / 0,1 | **0,2620** | 30 |
+    | fixed | 1e-3 / 0,1 | **0,2620** | 30 |
+    | mean | 1e-3 / 0,1 | 0,2614 | 30 |
+    | no_depth | 3e-4 / 0,1 | 0,2527 | 30 |
+    | full (gate) | 1e-4 / 0,1 | 0,2465 | 30 |
+    | constant (gate, không mặt nạ) | 3e-4 / 0,1 | 0,2463 | 10 |
+
+    Cả 6 biến thể đạt luật hội tụ. Lần chạy `full` lr 1e-4 / dropout 0,1 cho đúng số của vòng 5b (0,2465 so với 0,2466), tức
+    quy trình lặp lại được. Nhận xét: (1) depth **giúp** khi gộp đơn giản: concat / fixed / mean hơn `no_depth` khoảng +0,009;
+    (2) gate (thiết kế chính) **kém nhất** trong các cách gộp có depth và kém `no_depth` 0,006: valid giảm đều từ epoch 30 trong
+    khi phần depth của gate tăng từ 0,16 lên 0,32, tức gate dùng depth để học thuộc; `fixed` thì ngược lại, trọng số depth giảm từ
+    0,38 xuống 0,10 và ổn định; (3) dropout 0,3 luôn kém 0,1 khoảng 0,04 và cấu hình chọn của `full` nằm ở biên dưới của lr, tức
+    tối ưu có thể nằm ngoài lưới (dropout < 0,1, lr < 1e-4).
+  - **Quyết định (20/11/2026, người dùng duyệt, đặt trước khi có kết quả FB15k-237-IMG):**
+    - **Chọn cách gộp cho `full`:** cách gộp có MRR valid trung bình cao nhất trên Spatial-VRD và FB15k-237-IMG (mỗi biến thể
+      lấy cấu hình đã tune của nó), chọn trong {gate, concat, mean, fixed}, là `full` của 4 dataset còn lại (MKG-Y,
+      FB15K-237-ind, VRD-Trans, Spatial-VG). Trong bài: cách gộp được chọn như một siêu tham số trên valid, cùng ngân sách tune;
+      nếu không phải gate thì RQ2 trả lời là gate thích nghi không tốt hơn cách gộp tĩnh. Biến thể `constant` giữ cách gộp của
+      `full` được chọn.
+    - **Luật mở rộng biên (mọi mô hình, kể cả baseline):** thang lr {1e-5, 3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2}, thang dropout
+      {0; 0,1; 0,3; 0,5}. Nếu cấu hình chọn của một biến thể nằm ở biên của khoảng đã thử theo một trục (và chưa chạm biên tự
+      nhiên, ví dụ dropout 0), thêm điểm một bậc ra ngoài theo trục đó, giữ trục kia ở giá trị đã chọn; lặp lại cho tới khi cấu
+      hình chọn nằm bên trong, tối đa 2 bậc ra ngoài lưới gốc mỗi hướng. `tune_summary.py` tính các điểm cần thêm; notebook chạy
+      chúng. Điểm thêm cũng chỉ nhìn valid.
 
 ### P3. Baseline
 
