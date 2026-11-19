@@ -394,6 +394,23 @@ Sáu bộ, mỗi bộ một repo HF public, tag `v0`; cấu trúc file, lệnh d
       (RTX 3050; notebook `notebooks/vg-depth-stats.py` để dự phòng trên Molab). Bảng VRD lệch bản probe trung bình 0,0004
       (batch fp16 khác).
     - **Baseline có nhận số độ sâu không: quyết sau** (trước khi chạy chính thức).
+    - **Mặc định trong code = thiết kế đóng băng** (19/11/2026): `train.py` bật sẵn `--input-norm`, `--depth-dropout 0.3`,
+      `--text-proj`, `--depth-stats auto` (bảng của dataset trên 3 bộ scene graph, báo lỗi nếu bộ scene graph thiếu bảng; tắt
+      trên MMKG). Ablation tắt bằng `--no-input-norm`, `--depth-dropout 0`, `--no-text-proj`, `--depth-stats none`.
+      Notebook chọn sẵn các cờ này và luôn truyền tường minh bật / tắt. Kiểm tra: `tests/test_train_cli.py`.
+- [ ] **P2.10** Tune GeometryMMKG (quyết định 19/11/2026, người dùng duyệt; thiết kế đã đóng băng ở P2.9).
+  - **Ngân sách epoch** (tối đa; checkpoint chọn theo valid): FB15k-237-IMG 200 và FB15K-237-ind 200 (valid mỗi 10 epoch);
+    MKG-Y 1000 (valid mỗi 50; 21 batch / epoch, lần chạy thử vẫn tăng mạnh ở epoch 100); Spatial-VRD và VRD-Trans 100 (mỗi 10;
+    đỉnh ở epoch 30–70); Spatial-VG 100 (mỗi 10, tập con 5.000 bộ ba). **Luật hội tụ (đặt trước):** nếu epoch tốt nhất của cấu
+    hình được chọn nằm trong 10% cuối ngân sách, chạy lại cấu hình đó với ngân sách gấp đôi.
+  - **Lưới (6 cấu hình):** lr ∈ {1e-4, 3e-4, 1e-3} × dropout ∈ {0,1; 0,3}. Cố định: margin 5, nhiệt độ self-adversarial 1,
+    batch 1024, weight decay 1e-5, `depth_dropout` 0,3. Baseline cũng 6 cấu hình, xuất phát từ config gốc (tiêu chí 5; lưới
+    của từng baseline đề xuất riêng).
+  - **Phạm vi: cách A**, tune riêng **mọi** biến thể: 6 biến thể (full, no_depth, concat, mean, fixed, constant) trên
+    FB15k-237-IMG và Spatial-VRD; full và no_depth trên MKG-Y, FB15K-237-ind, VRD-Trans, Spatial-VG (khoảng 50 giờ GPU cho phần
+    tune). Lý do: so sánh fusion (RQ2) công bằng, không chỉ Δdepth.
+  - **Giao thức:** seed 42, chế độ dev (chỉ valid, không bao giờ test); mỗi biến thể chọn cấu hình có MRR valid cao nhất; sau
+    đó chạy chính thức (3 seed cho các ô chính, mục 4.8), mỗi lần test đúng một lần.
 
 ### P3. Baseline
 

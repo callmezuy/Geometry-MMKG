@@ -5,9 +5,11 @@ Train and evaluate GeometryMMKG on one v0 dataset (RESEARCH_PLAN.md P2.1, P2.8, 
   python scripts/train.py --data data/Spatial-VRD --variant full --rel-gate --dev     # development run
 
 * Variants (section 3.1): full, no_depth, concat, mean, fixed, constant (core/models/end_to_end.py VARIANTS).
-* Development options (P2.8, off by default): --rel-gate, --input-norm, --depth-dropout P, --text-proj;
-  P2.9: --depth-stats data (the dataset's ent_depth_stats.pt, scripts/depth_stats.py; scene graphs only), or
-  --depth-stats PATH[:KEY] for a scripts/vrd_depth_stats.py output (default key grid9; development).
+* Frozen design (P2.8 / P2.9, 19/11/2026) is the default: --input-norm, --depth-dropout 0.3, --text-proj and
+  --depth-stats auto (the dataset's ent_depth_stats.pt on the scene graphs Spatial-VRD, Spatial-VRD-Trans and
+  Spatial-VG; none on the knowledge graphs). Ablations switch them off: --no-input-norm, --depth-dropout 0,
+  --no-text-proj, --depth-stats none. --rel-gate (tried and dropped) stays off by default.
+  --depth-stats also takes data (the dataset table) or PATH[:KEY] (a scripts/vrd_depth_stats.py output, development).
   The same options can be passed to every variant; each variant uses those that apply to it
   (`effective_options`), and the options tag (folder / file names) is the same for all of them.
 * Training: in-batch negatives on both sides, train-only false-negative filter, self-adversarial weighted
@@ -56,13 +58,17 @@ def parse_args(argv=None):
     p.add_argument("--margin", type=float, default=5.0)
     p.add_argument("--adv-temp", type=float, default=1.0, help="self-adversarial temperature")
     p.add_argument("--dropout", type=float, default=0.1)
-    p.add_argument("--rel-gate", action="store_true", help="per-relation gate bias (P2.2)")
-    p.add_argument("--input-norm", action="store_true", help="separate LayerNorm on RGB and depth before fusion")
-    p.add_argument("--depth-dropout", type=float, default=0.0, help="drop depth per entity while training")
-    p.add_argument("--text-proj", action="store_true", help="learned projection of text (identity at init)")
-    p.add_argument("--depth-stats", default=None, metavar="data|PATH[:KEY]",
-                   help="per-entity depth statistics added as W_s s after the normalisation, W_s = 0 at init (P2.9): "
-                        "'data' = <data>/ent_depth_stats.pt, or a scripts/vrd_depth_stats.py output (KEY default grid9)")
+    p.add_argument("--rel-gate", action="store_true", help="per-relation gate bias (P2.2; tried, not in the design)")
+    p.add_argument("--input-norm", action=argparse.BooleanOptionalAction, default=True,
+                   help="separate LayerNorm on RGB and depth before fusion (design: on)")
+    p.add_argument("--depth-dropout", type=float, default=0.3,
+                   help="drop depth per entity while training (design: 0.3; 0 = off)")
+    p.add_argument("--text-proj", action=argparse.BooleanOptionalAction, default=True,
+                   help="learned projection of text, identity at init (design: on)")
+    p.add_argument("--depth-stats", default="auto", metavar="auto|none|data|PATH[:KEY]",
+                   help="per-entity depth statistics added as W_s s after the normalisation, W_s = 0 at init (P2.9). "
+                        "auto (design) = the dataset table on scene graphs, none elsewhere; none = off; data = "
+                        "<data>/ent_depth_stats.pt; or a scripts/vrd_depth_stats.py output (KEY default grid9)")
     p.add_argument("--dev", action="store_true", help="development run: valid only, never test")
     p.add_argument("--valid-every", type=int, default=10, help="epochs between validations")
     p.add_argument("--valid-max", type=int, default=None,
@@ -90,6 +96,27 @@ def options_tag(args):
     if args.depth_stats:
         parts.append("dstat" if args.depth_stats == "data" else "dstat_" + depth_stats_name(args.depth_stats))
     return "-".join(parts) or "base"
+
+
+SCENE_GRAPHS = ("Spatial-VRD", "Spatial-VRD-Trans", "Spatial-VG")
+
+
+def resolve_depth_stats(spec, data_dir, dataset):
+    """--depth-stats -> None (off), 'data' or a file spec. 'auto' = 'data' on the scene graphs (the table must exist),
+    off on the knowledge graphs, whose entities do not share a scene (P2.9)."""
+    if spec in (None, "", "none"):
+        return None
+    table = os.path.join(data_dir, "ent_depth_stats.pt")
+    if spec == "auto":
+        if dataset not in SCENE_GRAPHS:
+            return None
+        if not os.path.exists(table):
+            raise FileNotFoundError(f"{dataset} is a scene graph but {table} is missing (data v0 has it; "
+                                    "pass --depth-stats none to run without it)")
+        return "data"
+    if spec == "data" and not os.path.exists(table):
+        raise FileNotFoundError(table)
+    return spec
 
 
 def depth_stats_name(spec):
@@ -155,6 +182,7 @@ def main(argv=None):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     data_dir = os.path.abspath(args.data)
     dataset = os.path.basename(os.path.normpath(data_dir))
+    args.depth_stats = resolve_depth_stats(args.depth_stats, data_dir, dataset)
     tag = options_tag(args)
     stem = f"geometry_{dataset}_{args.variant}{'' if tag == 'base' else '_' + tag}_seed{args.seed}"
     if args.out:

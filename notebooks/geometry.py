@@ -197,15 +197,17 @@ def _(HfApi, RESULTS_REPO, os, subprocess, sys):
 
 
 @app.cell
-def _(DATASET, PLANNED_SEEDS, VARIANT_NAMES, mo):
-    # Mặc định = scripts/train.py. Giai đoạn phát triển mô hình (P2.8): chế độ dev chỉ đánh giá valid, không
-    # bao giờ chạy test; thử các cờ theo thứ tự rel_gate -> input_norm -> depth_dropout -> text_proj.
-    # Tuning và ngân sách epoch chốt sau khi đóng băng thiết kế.
+def _(DATASET, HAS_DEPTH_STATS, PLANNED_SEEDS, VARIANT_NAMES, mo):
+    # Mặc định = thiết kế đóng băng (P2.8 / P2.9, 19/11/2026): input_norm + depth_dropout 0.3 + text_proj, cộng
+    # depth_stats trên bộ scene graph. Bỏ chọn một cờ = chạy ablation không có cờ đó (truyền --no-... cho train.py).
+    # Chế độ dev chỉ đánh giá valid, không bao giờ chạy test.
     seed_ui = mo.ui.dropdown(options=["42", "43", "44"], value="42", label="Seed")
     variants_ui = mo.ui.multiselect(options=VARIANT_NAMES, value=["full", "no_depth"], label="Biến thể")
     dev_ui = mo.ui.checkbox(value=True, label="Chế độ dev (P2.8): chỉ valid, không chạy test")
-    options_ui = mo.ui.multiselect(options=["rel_gate", "input_norm", "depth_dropout", "text_proj", "depth_stats"],
-                                   value=[], label="Cờ phát triển (depth_stats: chỉ bộ scene graph)")
+    options_ui = mo.ui.multiselect(
+        options=["rel_gate", "input_norm", "depth_dropout", "text_proj", "depth_stats"],
+        value=["input_norm", "depth_dropout", "text_proj"] + (["depth_stats"] if HAS_DEPTH_STATS else []),
+        label="Cờ (mặc định = thiết kế đóng băng; depth_stats chỉ có ở bộ scene graph)")
     ddrop_ui = mo.ui.text(value="0.3", label="Xác suất depth_dropout")
     # P2.9: số độ sâu theo vùng (scripts/vrd_depth_stats.py), file nằm trong repo kết quả private, dạng PATH[:KEY]
     dstat_ui = mo.ui.text(value="", label="Số độ sâu từ file thử nghiệm (P2.9, file trong repo kết quả, ví dụ "
@@ -293,8 +295,11 @@ def _(
     _dev = bool(dev_ui.value)
     _opts = set(options_ui.value)
     _ddrop = float(ddrop_ui.value) if "depth_dropout" in _opts else 0.0
-    _flags = (["--rel-gate"] if "rel_gate" in _opts else []) + (["--input-norm"] if "input_norm" in _opts else []) \
-        + (["--depth-dropout", str(_ddrop)] if _ddrop > 0 else []) + (["--text-proj"] if "text_proj" in _opts else [])
+    # every option explicit, on or off (train.py defaults to the frozen design)
+    _flags = (["--rel-gate"] if "rel_gate" in _opts else []) \
+        + (["--input-norm"] if "input_norm" in _opts else ["--no-input-norm"]) \
+        + ["--depth-dropout", str(_ddrop)] \
+        + (["--text-proj"] if "text_proj" in _opts else ["--no-text-proj"])
     _dstat_tag = []
     mo.stop("depth_stats" in _opts and bool(dstat_ui.value.strip()),
             mo.md("⚠ Chọn cờ `depth_stats` (bảng của dataset) **hoặc** điền file thử nghiệm, không cả hai."))
@@ -303,7 +308,9 @@ def _(
     if "depth_stats" in _opts:
         _flags += ["--depth-stats", "data"]
         _dstat_tag = ["dstat"]
-    elif dstat_ui.value.strip():
+    elif not dstat_ui.value.strip():
+        _flags += ["--depth-stats", "none"]
+    else:
         from huggingface_hub import hf_hub_download as _hf_download
 
         _spec = dstat_ui.value.strip()
