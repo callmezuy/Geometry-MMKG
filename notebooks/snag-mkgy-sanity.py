@@ -137,6 +137,13 @@ def _(glob, hashlib, json, os, shutil, subprocess, sys, torch, zipfile):
         with open(os.path.join(BENCH_DIR, _fn)) as _f:
             assert int(_f.readline()) == _n, _fn
 
+    # SNAG's torchlight logger imports unidecode (not preinstalled on Molab)
+    try:
+        import unidecode as _unidecode  # noqa: F401
+    except ImportError:
+        if subprocess.run([sys.executable, "-m", "pip", "install", "-q", "unidecode"]).returncode != 0:
+            subprocess.run(["uv", "pip", "install", "--python", sys.executable, "unidecode"], check=True)
+
     # 3. Biên dịch C++ Data Loader (Base.so)
     _mmkgc_dir = os.path.join(SNAG_DIR, "mmkgc")
     _make_sh = os.path.join(_mmkgc_dir, "make.sh")
@@ -222,7 +229,8 @@ def _(
             )
             try:
                 for _line in _proc.stdout:  # text mode: tqdm's '\r' arrives as a line break
-                    if "%|" in _line and ("it/s" in _line or "s/it" in _line):
+                    # tqdm bars carry no newline, so a logger line can land on the same line: never drop INFO
+                    if "%|" in _line and ("it/s" in _line or "s/it" in _line) and "INFO" not in _line:
                         if time.time() - _last < progress_every:
                             continue
                         _last = time.time()
@@ -273,8 +281,10 @@ def _(
         if _found:  # last line of this form = the final test of the selected checkpoint
             _out["test_cpp"] = dict(zip(["mrr", "mr", "hit10", "hit3", "hit1"], map(float, _found[-1])))
         if mode == "original":  # every-100-epoch TEST evaluations (upstream selection on test)
-            _ep = [int(e) for e in re.findall(r"Epoch (\d+) \| loss: [^,\n]+, saving", _log)]
+            # Trainer evaluates when (epoch + 1) % save_steps == 0 (save_steps=100), so the k-th logged
+            # evaluation is epoch 100k-1. The evaluation that triggers the early stop is not logged.
             _mr = [float(m[0]) for m in _found[:-1]]
+            _ep = [100 * (k + 1) - 1 for k in range(len(_mr))]
             _out["test_history"] = [{"epoch": e, "test_mrr": m} for e, m in zip(_ep, _mr)]
             _out["early_stop"] = "Early Stop" in _log
             if _mr:
