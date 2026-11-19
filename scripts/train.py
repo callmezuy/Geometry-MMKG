@@ -6,7 +6,8 @@ Train and evaluate GeometryMMKG on one v0 dataset (RESEARCH_PLAN.md P2.1, P2.8, 
 
 * Variants (section 3.1): full, no_depth, concat, mean, fixed, constant (core/models/end_to_end.py VARIANTS).
 * Development options (P2.8, off by default): --rel-gate, --input-norm, --depth-dropout P, --text-proj;
-  P2.9: --depth-stats PATH[:KEY] (per-entity depth statistics from scripts/vrd_depth_stats.py, default key grid9).
+  P2.9: --depth-stats data (the dataset's ent_depth_stats.pt, scripts/depth_stats.py; scene graphs only), or
+  --depth-stats PATH[:KEY] for a scripts/vrd_depth_stats.py output (default key grid9; development).
   The same options can be passed to every variant; each variant uses those that apply to it
   (`effective_options`), and the options tag (folder / file names) is the same for all of them.
 * Training: in-batch negatives on both sides, train-only false-negative filter, self-adversarial weighted
@@ -59,9 +60,9 @@ def parse_args(argv=None):
     p.add_argument("--input-norm", action="store_true", help="separate LayerNorm on RGB and depth before fusion")
     p.add_argument("--depth-dropout", type=float, default=0.0, help="drop depth per entity while training")
     p.add_argument("--text-proj", action="store_true", help="learned projection of text (identity at init)")
-    p.add_argument("--depth-stats", default=None, metavar="PATH[:KEY]",
-                   help="per-entity depth statistics (scripts/vrd_depth_stats.py output; KEY default grid9), "
-                        "added as W_s s after the normalisation, W_s = 0 at init (P2.9)")
+    p.add_argument("--depth-stats", default=None, metavar="data|PATH[:KEY]",
+                   help="per-entity depth statistics added as W_s s after the normalisation, W_s = 0 at init (P2.9): "
+                        "'data' = <data>/ent_depth_stats.pt, or a scripts/vrd_depth_stats.py output (KEY default grid9)")
     p.add_argument("--dev", action="store_true", help="development run: valid only, never test")
     p.add_argument("--valid-every", type=int, default=10, help="epochs between validations")
     p.add_argument("--valid-max", type=int, default=None,
@@ -87,7 +88,7 @@ def options_tag(args):
     if args.text_proj:
         parts.append("tproj")
     if args.depth_stats:
-        parts.append("dstat_" + depth_stats_name(args.depth_stats))
+        parts.append("dstat" if args.depth_stats == "data" else "dstat_" + depth_stats_name(args.depth_stats))
     return "-".join(parts) or "base"
 
 
@@ -183,7 +184,8 @@ def main(argv=None):
     n_missing = int((~feats.mask).sum())
     depth_stats_info = None
     if args.depth_stats:
-        feats.geo, depth_stats_info = load_depth_stats(args.depth_stats, n_ent, feats.mask, train)
+        _spec = os.path.join(data_dir, "ent_depth_stats.pt") if args.depth_stats == "data" else args.depth_stats
+        feats.geo, depth_stats_info = load_depth_stats(_spec, n_ent, feats.mask, train)
         feats.geo = feats.geo.to(feats.store)
         print(f"depth statistics: {depth_stats_info}", flush=True)
     print(f"{n_ent:,} entities ({n_missing:,} without image), {n_rel} relations | train {len(train):,} | "

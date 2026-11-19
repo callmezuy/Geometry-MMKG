@@ -260,6 +260,20 @@ def test_load_depth_stats_standardises_on_train_entities(tmp_path=None):
     assert z[3, 0] == 0 and z[4, 0] == 0                      # no stats / no image -> 0
 
 
+def test_load_depth_stats_reads_the_data_table():
+    # ent_depth_stats.pt of scripts/depth_stats.py is a plain tensor (filled rows for entities without an image)
+    import tempfile
+    x = torch.tensor([[1.0, 2.0], [3.0, 6.0], [9.0, 9.0], [0.5, 0.5]])
+    mask = torch.tensor([1, 1, 1, 0], dtype=torch.bool)
+    train = torch.tensor([[0, 0, 1], [1, 0, 3]])
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "ent_depth_stats.pt")
+        torch.save(x, p)
+        z, info = load_depth_stats(p, 4, mask, train)
+    assert info["dim"] == 2 and info["key"] is None and info["n_train_ref"] == 2
+    assert torch.allclose(z[0], -z[1]) and z[3].abs().sum() == 0  # standardised on entities 0, 1; filled row -> 0
+
+
 if __name__ == "__main__":
     for _name, _fn in list(globals().items()):
         if _name.startswith("test_") and callable(_fn):

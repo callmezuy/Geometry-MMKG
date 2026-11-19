@@ -51,10 +51,11 @@ triple), 50 relations, 108,073 images (105,814 of them have at least one box).
 | `ent_text_emb.pt` | [1441984, 768] | RoBERTa-base masked mean of `entity2text.txt` (the class name: only 150 distinct strings) |
 | `ent_img_mask.pt` | [1441984] bool | True = entity has a usable box |
 | `ent_fill.pt` | dict | vectors written into the rows of entities without a usable box |
+| `ent_depth_stats.pt` | [1441984, 9] | means of a 3x3 grid of the box on the same ZipDepth depth map (per-image min-max, 1 = nearest point of the image); objects of one image stay comparable (`scripts/depth_stats.py`, `depth_stats.json`) |
 
 6 boxes (ids 77901, 77906, 77908, 77914, 77915, 77916, all of image index 5763) lie entirely outside their image
-(annotation error); they are treated as missing and filled with the mean rgb / depth feature of the 389,410 train
-entities that have a box. This repo has **no** mean / concat tables (compute `(rgb + depth) / 2` or `[rgb, depth]`
+(annotation error); they are treated as missing and filled with the mean rgb / depth feature (and depth statistics)
+of the 389,410 train entities that have a box. This repo has **no** mean / concat tables (compute `(rgb + depth) / 2` or `[rgb, depth]`
 from the two tables if needed).
 
 Quality (`feature_quality.json`; linear probe of the 150 object classes on 30,000 entities, majority class 8.2%):
@@ -71,7 +72,7 @@ text 0.986. The 10 nearest neighbours of depth and of rgb overlap by 1.5% (chanc
 
 ## Versions
 
-`v0` (18/11/2026) is the first version of this repo (earlier repos with this name were deleted). Pin it with `snapshot_download("callmezuy/spatial-vg", repo_type="dataset", revision="v0")`.
+`v0` (18/11/2026) is the first version of this repo (earlier repos with this name were deleted). Pin it with `snapshot_download("callmezuy/spatial-vg", repo_type="dataset", revision="v0")`. On 19/11/2026 `ent_depth_stats.pt`, `depth_stats.json` and `depth_stats.log` were added and the tag moved; no other file changed.
 
 ## License
 

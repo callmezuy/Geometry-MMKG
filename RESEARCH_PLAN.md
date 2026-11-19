@@ -239,6 +239,8 @@ Sáu bộ, mỗi bộ một repo HF public, tag `v0`; cấu trúc file, lệnh d
     | 2 | `input_norm` | 0,1928 / 20 | 0,2384 / 100 | 0,2970 / 100 | 0,3011 / 100 | **giữ** (`full` +0,0041 / −0,0007; `no_depth` +0,0069 / −0,0002) |
     | 3 | + `depth_dropout 0.3` | 0,2059 / 30 | (= vòng 2) | 0,3028 / 100 | (= vòng 2) | **giữ** (+0,0131 / +0,0058) |
     | 4 | + `text_proj` | 0,2364 / 30 | 0,2512 / 70 | 0,3225 / 100 | 0,3253 / 100 | **giữ** (`full` +0,0305 / +0,0197; `no_depth` +0,0128 / +0,0242) |
+    | 5 (P2.9) | + `depth_stats` DAV2 `grid9` | 0,2492 / 30 | (= vòng 4) | (không chạy) | (không áp dụng) | **giữ** (+0,0128, chỉ VRD) |
+    | 5b (P2.9) | + `depth_stats` ZipDepth `grid9` | 0,2466 / 30 | (= vòng 4) | (không chạy) | (không áp dụng) | +0,0102; DAV2 − ZipDepth = +0,0026 (cỡ nhiễu) |
 
     Vòng 0 (19/11/2026): lặp lại lần chạy thử với code đã sửa lỗi đánh giá; MRR valid cao hơn lần chạy thử 0,011–0,021, epoch
     tốt nhất và hình dạng đường valid giống. VRD `full` vẫn học thuộc: loss train 1,11 ở epoch 100 (so với 2,37 của `no_depth`),
@@ -366,6 +368,31 @@ Sáu bộ, mỗi bộ một repo HF public, tag `v0`; cấu trúc file, lệnh d
     `full` với thiết kế chốt (+ `input_norm`, `depth_dropout 0.3`, `text_proj`), seed 42, 100 epoch; mốc là vòng 4 (0,2364). **Luật
     giữ:** MRR valid tăng > 0,005 (hơn mức nhiễu). Đạt thì mới tính trích lại depth bằng DAV2 cho cả 6 dataset (phiên bản dữ liệu
     mới, chạy lại các run baseline có depth).
+
+    **Kết quả (19/11/2026, code `3a66fa6`):** MRR valid tốt nhất **0,2492** (epoch 30; H@1 0,167, H@10 0,409, MR 1162) so với 0,2364
+    của vòng 4 → **+0,0128, đạt luật giữ.** Cao hơn vòng 4 ở mọi lần đánh giá (+0,010 đến +0,017 từ epoch 10 đến 100), nên không phải
+    nhiễu của một điểm. |W_s s| trung bình 0,16–0,19 (biểu diễn không có nó có chuẩn 1), tức mô hình dùng số độ sâu thật. So với
+    `no_depth` vòng 4 (0,2512): −0,002, cỡ nhiễu (vòng 4: −0,0148). Học thuộc vẫn còn (đỉnh epoch 30, 0,2166 ở epoch 100). Chưa tách
+    được phần tăng do cách biểu diễn (số độ sâu thay vì vector DINOv2) và do mô hình depth (DAV2 thay vì ZipDepth): cần thêm lần
+    chạy cùng cờ với `grid9` của ZipDepth.
+
+    **Vòng 5b (19/11/2026, cùng cờ, `grid9` của ZipDepth):** MRR valid tốt nhất **0,2466** (epoch 30; H@1 0,165, H@10 0,405, MR
+    1216), +0,0102 so với vòng 4. DAV2 hơn ZipDepth 0,0026 (0,002–0,004 ở mọi lần đánh giá, một seed, cỡ nhiễu). Vậy khoảng 80% mức
+    tăng đến từ **cách biểu diễn** (số độ sâu giữ thang chung của ảnh, cộng tuyến tính để TransE thấy hiệu độ sâu), phần còn lại
+    nhỏ từ mô hình depth. Probe cho DAV2 hơn hẳn ở trước / sau (0,816 so với 0,715) nhưng ZipDepth hơn ở trên / dưới (0,865 so với
+    0,800), và trước / sau chỉ khoảng 12% bộ ba, nên trên KG hai mô hình gần nhau.
+  - **Quyết định (19/11/2026, người dùng duyệt):**
+    - **Thiết kế đóng băng:** `input_norm` + `depth_dropout 0.3` + `text_proj` + `depth_stats` (ZipDepth `grid9`, bảng của dataset,
+      `--depth-stats data`); bỏ `rel_gate`. `depth_stats` **chỉ dùng cho 3 bộ scene graph** (Spatial-VRD, Spatial-VRD-Trans,
+      Spatial-VG): ở MMKG mỗi thực thể là một ảnh riêng, không có cảnh chung để so gần / xa. Ghi rõ quy tắc này trong bài.
+    - **Mô hình depth: ZipDepth** (giữ nhất quán với `ent_depth_emb.pt` của v0; DAV2 chỉ hơn 0,0026, cỡ nhiễu).
+    - **Dữ liệu: cách (a)**: thêm `ent_depth_stats.pt` (n × 9) + `depth_stats.json` vào repo HF của 3 bộ scene graph rồi dời tag
+      `v0`; không file nào khác đổi. Script `scripts/depth_stats.py` (cùng depth map, cùng box, cùng cắt box như
+      `extract_features.py`; dòng thiếu ảnh = trung bình thực thể train; kiểm tra tập có số độ sâu đúng bằng `ent_img_mask.pt`).
+      VRD-Trans dùng lại giá trị của VRD, chỉ điền lại dòng thiếu ảnh theo train của nó (`fill`). VG chạy trên máy
+      (RTX 3050; notebook `notebooks/vg-depth-stats.py` để dự phòng trên Molab). Bảng VRD lệch bản probe trung bình 0,0004
+      (batch fp16 khác).
+    - **Baseline có nhận số độ sâu không: quyết sau** (trước khi chạy chính thức).
 
 ### P3. Baseline
 

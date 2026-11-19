@@ -105,13 +105,16 @@ def load_entity_features(data_dir, device, keep_on_gpu=None):
 
 
 def load_depth_stats(spec, n_entities, mask, train_triples):
-    """Depth statistics for the depth_stats option (P2.9). spec = 'PATH[:KEY]' (KEY default grid9), a
-    scripts/vrd_depth_stats.py output. Standardised with the mean / std of the TRAIN entities that have an image;
-    entities without an image or without statistics get 0 (the model ignores them through the mask).
-    Returns (float32 [N, k], info dict)."""
+    """Depth statistics for the depth_stats option (P2.9). spec = a data table (ent_depth_stats.pt of
+    scripts/depth_stats.py, a plain tensor) or 'PATH[:KEY]' of a scripts/vrd_depth_stats.py output (KEY default grid9).
+    Standardised with the mean / std of the TRAIN entities that have an image; entities without an image or without
+    statistics get 0 (the model ignores them through the mask). Returns (float32 [N, k], info dict)."""
     path, key = (spec.rsplit(":", 1) if ":" in os.path.basename(spec) else (spec, "grid9"))
     blob = torch.load(path, map_location="cpu", weights_only=False)
-    x = blob[key].float()
+    if torch.is_tensor(blob):
+        x, key, blob = blob.float(), None, {"model": "zipdepth"}
+    else:
+        x = blob[key].float()
     if x.dim() != 2 or x.shape[0] != n_entities:
         raise ValueError(f"{spec}: expected [{n_entities}, k], got {tuple(x.shape)}")
     ok = torch.isfinite(x).all(dim=1) & mask.cpu()

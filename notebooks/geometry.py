@@ -97,6 +97,7 @@ def _(DATASETS, DATA_REVISION, WORK_DIR, dataset_ui, mo, os, snapshot_download, 
             "entity2id.txt", "relation2id.txt", "train2id.txt", "valid2id.txt", "test2id.txt",
             "ent_text_emb.pt", "ent_rgb_emb.pt", "ent_depth_emb.pt", "ent_img_mask.pt", "ent_fill.pt",
             "relation_category.tsv", "feature_stats.json",
+            "ent_depth_stats.pt", "depth_stats.json",  # scene graphs only (P2.9)
         ],
     )
 
@@ -118,6 +119,11 @@ def _(DATASETS, DATA_REVISION, WORK_DIR, dataset_ui, mo, os, snapshot_download, 
                 f"{_fn}: missing-image rows are not the constant fill"
         _rows.append(f"| `{_fn}` | {tuple(_x.shape)} |")
         del _x
+    HAS_DEPTH_STATS = os.path.exists(os.path.join(DATA_DIR, "ent_depth_stats.pt"))
+    if HAS_DEPTH_STATS:
+        _x = _load("ent_depth_stats.pt")
+        assert _x.dim() == 2 and _x.shape[0] == N_ENT and torch.isfinite(_x).all(), tuple(_x.shape)
+        _rows.append(f"| `ent_depth_stats.pt` | {tuple(_x.shape)} |")
 
     mo.md("\n".join([
         f"### Dữ liệu `{DATASET}` ({SETTING}, `{_repo}@{DATA_REVISION}`)",
@@ -128,7 +134,7 @@ def _(DATASETS, DATA_REVISION, WORK_DIR, dataset_ui, mo, os, snapshot_download, 
         "|---|---|",
         *_rows,
     ]))
-    return DATASET, DATA_DIR, N_ENT, PLANNED_SEEDS, SETTING
+    return DATASET, DATA_DIR, HAS_DEPTH_STATS, N_ENT, PLANNED_SEEDS, SETTING
 
 
 @app.cell(hide_code=False)
@@ -198,12 +204,13 @@ def _(DATASET, PLANNED_SEEDS, VARIANT_NAMES, mo):
     seed_ui = mo.ui.dropdown(options=["42", "43", "44"], value="42", label="Seed")
     variants_ui = mo.ui.multiselect(options=VARIANT_NAMES, value=["full", "no_depth"], label="Biến thể")
     dev_ui = mo.ui.checkbox(value=True, label="Chế độ dev (P2.8): chỉ valid, không chạy test")
-    options_ui = mo.ui.multiselect(options=["rel_gate", "input_norm", "depth_dropout", "text_proj"], value=[],
-                                   label="Cờ phát triển")
+    options_ui = mo.ui.multiselect(options=["rel_gate", "input_norm", "depth_dropout", "text_proj", "depth_stats"],
+                                   value=[], label="Cờ phát triển (depth_stats: chỉ bộ scene graph)")
     ddrop_ui = mo.ui.text(value="0.3", label="Xác suất depth_dropout")
     # P2.9: số độ sâu theo vùng (scripts/vrd_depth_stats.py), file nằm trong repo kết quả private, dạng PATH[:KEY]
-    dstat_ui = mo.ui.text(value="", label="Số độ sâu (P2.9, file trong repo kết quả, ví dụ "
-                                         "probe/vrd_depth_stats_dav2.pt:grid9; để trống = tắt)", full_width=True)
+    dstat_ui = mo.ui.text(value="", label="Số độ sâu từ file thử nghiệm (P2.9, file trong repo kết quả, ví dụ "
+                                         "probe/vrd_depth_stats_dav2.pt:grid9; để trống = tắt; khác cờ depth_stats "
+                                         "là bảng của dataset)", full_width=True)
     epochs_ui = mo.ui.number(start=1, stop=2000, step=1, value=100, label="Epochs")
     batch_ui = mo.ui.dropdown(options=["512", "1024", "2048", "4096"], value="1024", label="Batch")
     lr_ui = mo.ui.text(value="1e-4", label="LR")
@@ -252,6 +259,7 @@ def _(
     CODE_COMMIT,
     DATASET,
     DATA_DIR,
+    HAS_DEPTH_STATS,
     REPO_ROOT,
     RESULTS_REPO,
     WORK_DIR,
@@ -288,7 +296,14 @@ def _(
     _flags = (["--rel-gate"] if "rel_gate" in _opts else []) + (["--input-norm"] if "input_norm" in _opts else []) \
         + (["--depth-dropout", str(_ddrop)] if _ddrop > 0 else []) + (["--text-proj"] if "text_proj" in _opts else [])
     _dstat_tag = []
-    if dstat_ui.value.strip():
+    mo.stop("depth_stats" in _opts and bool(dstat_ui.value.strip()),
+            mo.md("⚠ Chọn cờ `depth_stats` (bảng của dataset) **hoặc** điền file thử nghiệm, không cả hai."))
+    mo.stop("depth_stats" in _opts and not HAS_DEPTH_STATS,
+            mo.md(f"⚠ `{DATASET}` không có `ent_depth_stats.pt` (chỉ bộ scene graph có), bỏ cờ `depth_stats`."))
+    if "depth_stats" in _opts:
+        _flags += ["--depth-stats", "data"]
+        _dstat_tag = ["dstat"]
+    elif dstat_ui.value.strip():
         from huggingface_hub import hf_hub_download as _hf_download
 
         _spec = dstat_ui.value.strip()

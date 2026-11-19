@@ -33,13 +33,15 @@ its entities keep a triple in train. `split_stats.json` has the details.
 
 Same formats as `spatial-vrd` (see its card): split files with a count line, OpenKE `*2id.txt`, `entity2text.txt`,
 `relation_category.tsv`, and the same features (`ent_rgb_emb.pt`, `ent_depth_emb.pt`, `ent_text_emb.pt`,
-`ent_rgb_depth_mean_emb.pt`, `ent_rgb_depth_concat_emb.pt`, `ent_img_mask.pt`, `ent_fill.pt`).
-Only the fill differs: the 2 entities without a usable box get the mean feature of the train entities of **this** split.
+`ent_rgb_depth_mean_emb.pt`, `ent_rgb_depth_concat_emb.pt`, `ent_img_mask.pt`, `ent_fill.pt`, `ent_depth_stats.pt`
+[93809, 9] with `depth_stats.json`). Only the fill differs: the 2 entities without a usable box get the mean feature
+(and depth statistics) of the train entities of **this** split.
 
 ## Versions
 
 `v0` (18/11/2026) is the first version of this repo (earlier repos with this name were deleted). Pin it with
-`snapshot_download("callmezuy/spatial-vrd-trans", repo_type="dataset", revision="v0")`.
+`snapshot_download("callmezuy/spatial-vrd-trans", repo_type="dataset", revision="v0")`. On 19/11/2026
+`ent_depth_stats.pt` and `depth_stats.json` were added and the tag moved; no other file changed.
 
 ## License
 

@@ -37,6 +37,7 @@ repo, tagged `v0` (RESEARCH_PLAN.md P0.8). The dataset card of each repo is `hf_
 | `ent_rgb_depth_concat_emb.pt` [n, 1536] | [rgb, depth] (not for Spatial-VG) |
 | `ent_img_mask.pt` [n] bool | entity has at least one usable image / box |
 | `ent_fill.pt` | the constant written into the rgb / depth rows of entities without an image |
+| `ent_depth_stats.pt` [n, 9] | scene graphs only (`scripts/depth_stats.py`): means of a 3x3 grid of the box on the same ZipDepth depth map (per-image min-max, 1 = nearest); rows without an image = mean of the train entities; `depth_stats.json` logs the run and the fill |
 
 Missing images (RESEARCH_PLAN.md 3.2): rows with mask False hold the mean feature of the **train** entities that have
 an image, so baselines can read the tables as they are; GeometryMMKG replaces those rows by its learned missing
@@ -84,5 +85,11 @@ python scripts/extract_features.py vrd --data data/Spatial-VRD --out data/_feat/
 python scripts/extract_features.py fill --feat data/_feat/Spatial-VRD --data data/Spatial-VRD-Trans \
     --out data/_feat/Spatial-VRD-Trans --mean-concat
 # Spatial-VG: notebooks/extract-vg-features.py on Molab (no --mean-concat)
+# Depth statistics table, scene graphs only (P2.9; VRD-Trans re-fills the VRD table for its own train split)
+python scripts/depth_stats.py vrd --data data/Spatial-VRD --out data/_feat/Spatial-VRD \
+    --zip data/raw/vrd/visual-relationship-detection-vrd-dataset.zip
+python scripts/depth_stats.py fill --src data/Spatial-VRD --data data/Spatial-VRD-Trans --out data/_feat/Spatial-VRD-Trans
+python scripts/depth_stats.py vg --data data/Spatial-VG --out data/_feat/Spatial-VG \
+    --zip data/raw/vg/images.zip data/raw/vg/images2.zip --image-data data/raw/vg/image_data.json.zip
 python scripts/feature_quality.py --data data/FB15k-237-IMG --labels fb15k237   # also: vrd, vg, none (MKG-Y)
 ```

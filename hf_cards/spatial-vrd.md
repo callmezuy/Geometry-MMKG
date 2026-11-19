@@ -53,9 +53,10 @@ Code: [github.com/callmezuy/Geometry-MMKG](https://github.com/callmezuy/Geometry
 | `ent_rgb_depth_concat_emb.pt` | [93809, 1536] | [rgb, depth] |
 | `ent_img_mask.pt` | [93809] bool | True = entity has a usable box |
 | `ent_fill.pt` | dict | vectors written into the rows of entities without a usable box |
+| `ent_depth_stats.pt` | [93809, 9] | means of a 3x3 grid of the box on the same ZipDepth depth map (per-image min-max, 1 = nearest point of the image); objects of one image stay comparable (`scripts/depth_stats.py`, `depth_stats.json`) |
 
 2 boxes (ids 61233, 61284) lie entirely outside their image (annotation error); they are treated as missing and
-filled with the mean rgb / depth feature of the train entities. Note that the text names the object class, so text
+filled with the mean rgb / depth feature (and depth statistics) of the train entities. Note that the text names the object class, so text
 alone predicts the class almost perfectly (`feature_quality.json`).
 
 ## File formats
@@ -67,7 +68,8 @@ alone predicts the class almost perfectly (`feature_quality.json`).
 ## Versions
 
 `v0` (18/11/2026) is the first version of this repo (earlier repos with this name were deleted). Pin it with
-`snapshot_download("callmezuy/spatial-vrd", repo_type="dataset", revision="v0")`.
+`snapshot_download("callmezuy/spatial-vrd", repo_type="dataset", revision="v0")`. On 19/11/2026 `ent_depth_stats.pt`
+and `depth_stats.json` were added and the tag moved; no other file changed.
 
 ## License
 
