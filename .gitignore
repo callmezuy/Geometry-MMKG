@@ -64,3 +64,6 @@ hf_weights/
 
 # Local training outputs (scripts/train.py --out default; results go to the private HF results repo)
 results/
+
+# Serena (coding-assistant tool) local config and memories
+.serena/
