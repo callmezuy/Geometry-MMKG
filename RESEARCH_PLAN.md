@@ -447,6 +447,17 @@ Sáu bộ, mỗi bộ một repo HF public, tag `v0`; cấu trúc file, lệnh d
       nhiên, ví dụ dropout 0), thêm điểm một bậc ra ngoài theo trục đó, giữ trục kia ở giá trị đã chọn; lặp lại cho tới khi cấu
       hình chọn nằm bên trong, tối đa 2 bậc ra ngoài lưới gốc mỗi hướng. `tune_summary.py` tính các điểm cần thêm; notebook chạy
       chúng. Điểm thêm cũng chỉ nhìn valid.
+  - **FB15k-237-IMG (đang chạy, 20/11/2026):** 5/36 lần xong (`full`, 5 cấu hình; sandbox dừng sau 03:11). Tốt nhất đến lúc này
+    0,3247 (lr 1e-4 / dropout 0,1, epoch tốt nhất 190/200 → luật hội tụ: chạy lại 400 epoch); nhiều cấu hình đạt đỉnh ở epoch
+    140–200, dropout 0,1 và 0,3 gần nhau. Lần chạy lại hội tụ mang hậu tố `-ep<epochs>` trong tên cấu hình (`train.py`
+    `config_tag`) để không trùng lần chạy theo ngân sách; `tune_summary.py` đề xuất nó đúng một lần (đã có lần gấp đôi thì không
+    đề xuất nữa) và chọn cấu hình tốt nhất trên mọi lần chạy; chế độ "Mở rộng biên" của notebook chạy cả hai luật.
+  - **Chạy tiếp khi bị ngắt (20/11/2026):** sau mỗi lần valid, `train.py` ghi `resume_<stem>.pt`. File gồm model, optimizer,
+    trạng thái RNG, checkpoint tốt nhất và lịch sử, và được ghi nguyên khối nên không bị hỏng nếu bị ngắt giữa lúc ghi. Lần chạy
+    sau có cùng stem và cùng tham số huấn luyện sẽ train tiếp từ đó, với cùng batch và dropout như khi không bị ngắt. Nếu tham
+    số khác thì từ chối. Các epoch đã chạy tiếp được ghi vào `resumed_at` trong metric, và file bị xoá khi chạy xong. Notebook
+    GeometryMMKG đẩy file này cùng log lên repo private `geometry-mmkg-resume`, cách nhau ít nhất N phút (mặc định 10). Khi bấm
+    lại, notebook tải về để chạy tiếp. Baseline không có cơ chế này, vì phải sửa code gốc.
 
 ### P3. Baseline
 

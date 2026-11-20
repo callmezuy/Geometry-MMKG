@@ -36,7 +36,9 @@ def _():
         **Thứ tự dùng:** chọn dataset (cell dữ liệu tự tải) → dán HF token, nhấn Enter → chọn biến thể, tham số →
         bấm ▶. Mỗi biến thể xong là đẩy log, rank, metric và checkpoint lên
         `geometry-mmkg-results/geometry/<dataset>/<variant>/`; biến thể đã có metric của seed đó thì bỏ qua,
-        nên session tắt giữa chừng thì chỉ cần bấm lại.
+        nên session tắt giữa chừng thì chỉ cần bấm lại. Lần chạy dở dang cũng không mất: `train.py` lưu trạng thái
+        huấn luyện sau mỗi lần valid, notebook đẩy nó (kèm log) lên repo private `geometry-mmkg-resume` và bấm lại
+        thì chạy tiếp từ epoch đã lưu (xong thì file đó bị xoá).
         """
     )
     return HfApi, json, mo, os, shutil, snapshot_download, subprocess, sys, torch
@@ -46,6 +48,8 @@ def _():
 def _(mo):
     DATA_REVISION = "v0"
     RESULTS_REPO = "callmezuy/geometry-mmkg-results"  # dataset repo private, tự tạo nếu chưa có
+    # trạng thái huấn luyện dở dang (train.py resume_<stem>.pt), chỉ là file tạm: repo riêng để dọn lịch sử thoải mái
+    RESUME_REPO = "callmezuy/geometry-mmkg-resume"
     # tên -> (repo HF, chế độ, số seed theo kế hoạch: 3 ở các ô chính, 1 ở MKG-Y và Spatial-VG; mục 4.8)
     DATASETS = {
         "FB15k-237-IMG": ("callmezuy/fb15k237-img", "transductive", 3),
@@ -58,7 +62,7 @@ def _(mo):
     VARIANT_NAMES = ["full", "no_depth", "concat", "mean", "fixed", "constant"]
     dataset_ui = mo.ui.dropdown(options=list(DATASETS), value="Spatial-VRD", label="Dataset")
     dataset_ui
-    return DATASETS, DATA_REVISION, RESULTS_REPO, VARIANT_NAMES, dataset_ui
+    return DATASETS, DATA_REVISION, RESULTS_REPO, RESUME_REPO, VARIANT_NAMES, dataset_ui
 
 
 @app.cell
@@ -148,12 +152,30 @@ def _(mo):
     return (hf_token_ui,)
 
 
+@app.cell(hide_code=False)
+def _(mo):
+    resume_min_ui = mo.ui.number(start=0, stop=240, step=1, value=10,
+                                 label="Đẩy trạng thái dở dang lên HF tối đa mỗi N phút (0 = không đẩy, chỉ giữ trên máy)")
+    mo.vstack([
+        mo.md("**Chạy tiếp khi bị ngắt.** `train.py` ghi trạng thái huấn luyện (model, optimizer, RNG, checkpoint tốt "
+              "nhất, lịch sử) sau mỗi lần valid; notebook đẩy nó cùng log lên `geometry-mmkg-resume`, cách nhau ít "
+              "nhất N phút. Bấm chạy lại thì notebook tải về và train tiếp từ epoch đã lưu, cùng batch và dropout như "
+              "lúc chưa ngắt; metric ghi lại các epoch đã chạy tiếp (`resumed_at`). Bị ngắt thì mất tối đa N phút "
+              "cộng một khoảng valid."),
+        resume_min_ui,
+    ])
+    return (resume_min_ui,)
+
+
 @app.cell
-def _(HfApi, RESULTS_REPO, os, subprocess, sys):
-    def run_streaming(cmd, cwd, log_path):
-        """Chạy lệnh, in log theo thời gian thực và ghi đồng thời vào log_path."""
+def _(HfApi, RESULTS_REPO, RESUME_REPO, os, shutil, subprocess, sys):
+    import time as _time
+    from huggingface_hub import CommitOperationAdd as _CommitOperationAdd, hf_hub_download as _hf_hub_download
+
+    def run_streaming(cmd, cwd, log_path, on_line=None, append=False):
+        """Chạy lệnh, in log theo thời gian thực và ghi đồng thời vào log_path (append: nối vào log của phần trước)."""
         print("$ " + " ".join(cmd), flush=True)
-        with open(log_path, "w", encoding="utf-8") as _log:
+        with open(log_path, "a" if append else "w", encoding="utf-8") as _log:
             _proc = subprocess.Popen(
                 [sys.executable if cmd[0] == "python" else cmd[0]] + cmd[1:],
                 cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
@@ -166,6 +188,8 @@ def _(HfApi, RESULTS_REPO, os, subprocess, sys):
                     print(_line, end="", flush=True)
                     _log.write(_line)
                     _log.flush()
+                    if on_line is not None:
+                        on_line(_line)
             except BaseException:  # interrupt/stop: kill training so it does not keep running unattended
                 _proc.kill()
                 _proc.wait()
@@ -178,7 +202,8 @@ def _(HfApi, RESULTS_REPO, os, subprocess, sys):
             _api = HfApi(token=token)
             _api.create_repo(RESULTS_REPO, repo_type="dataset", private=True, exist_ok=True)
             _api.upload_folder(repo_id=RESULTS_REPO, repo_type="dataset", folder_path=folder,
-                               path_in_repo=subdir, commit_message=f"Add {subdir} results")
+                               path_in_repo=subdir, commit_message=f"Add {subdir} results",
+                               ignore_patterns=["resume_*.pt", "*.tmp"])
             print(f"Uploaded {folder} -> {RESULTS_REPO}/{subdir}")
             return True
         except Exception as _e:
@@ -193,7 +218,56 @@ def _(HfApi, RESULTS_REPO, os, subprocess, sys):
             return set()
         return {_p[len(prefix) + 1:] for _p in _fs if _p.startswith(prefix + "/")}
 
-    return push_results, remote_files, run_streaming
+    def run_resumable(cmd, cwd, out, subdir, stem, token, minutes):
+        """run_streaming cho một lần train.py, chạy tiếp được khi bị ngắt:
+        1. nếu RESUME_REPO/subdir có resume_<stem>.pt (lần trước bị ngắt) thì tải nó và log của phần trước về `out`;
+        2. mỗi khi train.py báo `resume state saved`, đẩy resume_<stem>.pt + log lên RESUME_REPO/subdir (một commit),
+           nếu lần đẩy trước đã cách ít nhất `minutes` phút (0 = không đẩy);
+        3. chạy xong (exit 0) thì xoá chúng trên RESUME_REPO. Lỗi mạng không bao giờ làm dừng training."""
+        _api = HfApi(token=token)
+        _names = [f"resume_{stem}.pt", f"{stem}.log"]
+        _log = os.path.join(out, _names[1])
+        _append = os.path.exists(os.path.join(out, _names[0]))   # cùng session: file vẫn còn trên máy
+        if not _append:
+            try:
+                _remote = set(_api.list_repo_files(RESUME_REPO, repo_type="dataset"))
+            except Exception:
+                _remote = set()   # repo chưa có
+            if f"{subdir}/{_names[0]}" in _remote:
+                for _n in _names:
+                    if f"{subdir}/{_n}" in _remote:
+                        _src = _hf_hub_download(RESUME_REPO, f"{subdir}/{_n}", repo_type="dataset", token=token)
+                        shutil.copyfile(_src, os.path.join(out, _n))
+                _append = True
+                print(f"[resume] tải trạng thái dở dang từ {RESUME_REPO}/{subdir}, train tiếp từ đó", flush=True)
+        _last = [0.0]
+
+        def _on_line(line):
+            if minutes <= 0 or not line.startswith("resume state saved: ") or _time.time() - _last[0] < minutes * 60:
+                return
+            try:
+                _api.create_repo(RESUME_REPO, repo_type="dataset", private=True, exist_ok=True)
+                _api.create_commit(RESUME_REPO, repo_type="dataset", commit_message=f"{subdir}: {line.strip()[20:]}",
+                                   operations=[_CommitOperationAdd(f"{subdir}/{_n}", os.path.join(out, _n))
+                                               for _n in _names])
+                _last[0] = _time.time()
+                print(f"[resume] đã đẩy trạng thái lên HF ({line.strip().rsplit('(', 1)[-1]}", flush=True)
+            except Exception as _e:
+                print(f"[resume] đẩy lên HF thất bại ({_e}); training vẫn chạy tiếp", flush=True)
+
+        _rc = run_streaming(cmd, cwd, _log, on_line=_on_line, append=_append)
+        if _rc == 0:
+            try:
+                _remote = set(_api.list_repo_files(RESUME_REPO, repo_type="dataset"))
+                for _n in _names:
+                    if f"{subdir}/{_n}" in _remote:
+                        _api.delete_file(f"{subdir}/{_n}", RESUME_REPO, repo_type="dataset",
+                                         commit_message=f"{subdir}: finished")
+            except Exception:
+                pass   # repo chưa có hoặc lỗi mạng: file tạm còn lại không ảnh hưởng kết quả
+        return _rc
+
+    return push_results, remote_files, run_resumable, run_streaming
 
 
 @app.cell
@@ -280,7 +354,8 @@ def _(
     os,
     push_results,
     remote_files,
-    run_streaming,
+    resume_min_ui,
+    run_resumable,
     save_ckpt_ui,
     seed_ui,
     train_btn,
@@ -361,7 +436,7 @@ def _(
             _cmd.append("--dev")
         elif not save_ckpt_ui.value:
             _cmd.append("--no-ckpt")
-        _rc = run_streaming(_cmd, REPO_ROOT, os.path.join(_out, f"{_stem}.log"))
+        _rc = run_resumable(_cmd, REPO_ROOT, _out, f"{_prefix}/{_v}", _stem, _token, int(resume_min_ui.value))
         train_status[_v] = "xong" if _rc == 0 else f"lỗi (exit {_rc})"
         push_results(_out, f"{_prefix}/{_v}", _token)
     mo.md("### Kết quả train, seed {}, cờ `{}`{}\n\n".format(_seed, OPTIONS_TAG, " (dev)" if _dev else "")
@@ -456,7 +531,7 @@ def _(DATASET, VARIANT_NAMES, mo):
                                          label="Biến thể tune")
     tune_lrs_ui = mo.ui.text(value="1e-4,3e-4,1e-3", label="LR (lưới)")
     tune_dos_ui = mo.ui.text(value="0.1,0.3", label="Dropout (lưới)")
-    tune_mode_ui = mo.ui.radio(options=["Lưới gốc", "Mở rộng biên"], value="Lưới gốc", label="Chế độ")
+    tune_mode_ui = mo.ui.radio(options=["Lưới gốc", "Mở rộng biên"], value="Lưới gốc", label="Chế độ (Mở rộng biên = luật biên + luật hội tụ)")
     tune_btn = mo.ui.run_button(label="▶ Chạy tune (P2.10)")
     mo.vstack([
         mo.md(f"### Tune `{DATASET}` (P2.10)\n\nMỗi điểm lưới là một lần `train.py --tune` (chỉ valid, seed 42, "
@@ -485,7 +560,8 @@ def _(
     os,
     push_results,
     remote_files,
-    run_streaming,
+    resume_min_ui,
+    run_resumable,
     snapshot_download,
     sys,
     tune_btn,
@@ -502,8 +578,9 @@ def _(
     _prefix = f"geometry-tune/{DATASET}"
     tune_status = {}
 
-    def _run_point(_v, _lr, _do, _done):
-        _cfg = f"lr{_lr:g}-do{_do:g}"
+    def _run_point(_v, _lr, _do, _done, _epochs=None):
+        # _epochs: only for the convergence rerun (twice the budget); same '-ep' suffix as train.py config_tag()
+        _cfg = f"lr{_lr:g}-do{_do:g}" + (f"-ep{_epochs}" if _epochs else "")
         _stem = f"geometry_{DATASET}_{_v}_{_tag}_{_cfg}_seed42"
         _out = os.path.join(WORK_DIR, "results", "geometry-tune", DATASET, _v, _cfg)
         os.makedirs(_out, exist_ok=True)
@@ -512,10 +589,11 @@ def _(
             tune_status[f"{_v} {_cfg}"] = "đã có"
             return
         print(f"=== tune {_v} {_cfg}, code {CODE_COMMIT} ===", flush=True)
-        _rc = run_streaming(
+        _rc = run_resumable(
             ["python", os.path.join(REPO_ROOT, "scripts", "train.py"), "--data", DATA_DIR, "--variant", _v,
-             "--seed", "42", "--tune", "--lr", str(_lr), "--dropout", str(_do), "--out", _out],
-            REPO_ROOT, os.path.join(_out, f"{_stem}.log"))
+             "--seed", "42", "--tune", "--lr", str(_lr), "--dropout", str(_do), "--out", _out,
+             *(["--epochs", str(_epochs)] if _epochs else [])],
+            REPO_ROOT, _out, f"{_prefix}/{_v}/{_cfg}", _stem, _token, int(resume_min_ui.value))
         tune_status[f"{_v} {_cfg}"] = "xong" if _rc == 0 else f"lỗi (exit {_rc})"
         push_results(_out, f"{_prefix}/{_v}/{_cfg}", _token)
 
@@ -540,16 +618,18 @@ def _(
             for _root in (os.path.join(_hf, *_prefix.split("/")),
                           os.path.join(WORK_DIR, "results", "geometry-tune", DATASET)):
                 for _r in _ts.load_runs(_root) if os.path.isdir(_root) else []:
-                    _runs[(_r["variant"], _r["config"]["lr"], _r["config"]["dropout"])] = _r
+                    _runs[(_r["variant"], _r["config"]["lr"], _r["config"]["dropout"], _r["epochs"])] = _r
             _choice = _ts.choose(list(_runs.values()))
-            _todo = [(_v, _p["lr"], _p["dropout"]) for _v in tune_variants_ui.value
+            _todo = [(_v, _p["lr"], _p["dropout"], None) for _v in tune_variants_ui.value
                      for _p in _choice.get(_v, {}).get("edge_points", [])]
-            print(f"--- edge rule, round {_round}: {len(_todo)} point(s) {_todo}", flush=True)
+            _todo += [(_v, _c["rerun"]["lr"], _c["rerun"]["dropout"], _c["rerun"]["epochs"])
+                      for _v, _c in _choice.items() if _v in tune_variants_ui.value and _c.get("rerun")]
+            print(f"--- edge / convergence rules, round {_round}: {len(_todo)} point(s) {_todo}", flush=True)
             if not _todo:
                 break
             _done = remote_files(_prefix, _token)
-            for _v, _lr, _do in _todo:
-                _run_point(_v, _lr, _do, _done)
+            for _v, _lr, _do, _ep in _todo:
+                _run_point(_v, _lr, _do, _done, _ep)
     mo.md("### Tune\n\n" + ("\n".join(f"- `{_k}`: {_s}" for _k, _s in tune_status.items())
                              or "Không còn điểm nào cần chạy."))
     return (tune_status,)

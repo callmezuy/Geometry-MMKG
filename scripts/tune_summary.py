@@ -63,20 +63,30 @@ def load_runs(root):
 
 
 def choose(runs):
-    """Best run per variant (highest valid MRR; ties: lower lr, then lower dropout) and its convergence flag."""
+    """Best run per variant (highest valid MRR; ties: lower lr, then lower dropout, then fewer epochs), its
+    convergence flag and the points still to run: the convergence rerun (same configuration, twice the budget; once,
+    as decided) and the edge-rule points. A variant is final when nothing is left."""
     out = {}
     for v in sorted({r["variant"] for r in runs}):
         rs = [r for r in runs if r["variant"] == v and r["valid_mrr"] is not None]
         if not rs:
             continue
-        best = sorted(rs, key=lambda r: (-r["valid_mrr"], r["config"]["lr"], r["config"]["dropout"]))[0]
+        best = sorted(rs, key=lambda r: (-r["valid_mrr"], r["config"]["lr"], r["config"]["dropout"],
+                                         r["epochs"]))[0]
         late = best["best_epoch"] > LATE_FRACTION * best["epochs"]
+        same = [r for r in rs if r["config"] == best["config"]]
+        budget = min(r["epochs"] for r in same)
+        doubled = any(r["epochs"] >= 2 * budget for r in same)
+        rerun = None
+        if late and not doubled:
+            rerun = {"lr": best["config"]["lr"], "dropout": best["config"]["dropout"], "epochs": 2 * best["epochs"]}
         tags = {r["options_tag"] for r in rs}
         ext = edge_points([(r["config"]["lr"], r["config"]["dropout"]) for r in rs],
                           (best["config"]["lr"], best["config"]["dropout"]))
-        out[v] = {**best, "n_configs": len(rs), "late_best_epoch": late,
-                  "action": f"rerun with --epochs {2 * best['epochs']}" if late else "converged",
-                  "edge_points": ext, "final": not ext and not late,
+        action = ("converged" if not late else f"rerun with --epochs {rerun['epochs']}" if rerun
+                  else "late best epoch after the doubled budget (rule applied once; report it)")
+        out[v] = {**best, "n_configs": len(rs), "late_best_epoch": late, "action": action, "rerun": rerun,
+                  "edge_points": ext, "final": not ext and rerun is None,
                   "mixed_options_tags": sorted(tags) if len(tags) > 1 else None}
     return out
 

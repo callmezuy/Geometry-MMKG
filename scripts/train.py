@@ -22,6 +22,11 @@ Train and evaluate GeometryMMKG on one v0 dataset (RESEARCH_PLAN.md P2.1, P2.8, 
   (lr<lr>-do<dropout>), default folder results/geometry-tune/<dataset>/<variant>/<config>/.
   scripts/tune_summary.py picks the best configuration per variant.
 * Epoch budget (P2.10): --epochs / --valid-every default to EPOCH_BUDGET of the dataset.
+* Resume (every run): after each validation the full training state (model, optimizer, RNG states, best
+  checkpoint, history) is written atomically to <out>/resume_<stem>.pt; a later start with the same stem and
+  the same training arguments continues from it (same batches and dropout masks as an uninterrupted run), and the
+  epochs where a run was resumed are recorded in the metrics (resumed_at). The file is removed once the run has
+  finished. --no-resume neither reads nor writes it.
 * Output: metrics_<stem>.json, plus ranks_<stem>_test.csv (for scripts/compute_metrics.py) and ckpt_<stem>.pt
   outside --dev; stem = geometry_<dataset>_<variant>[_<options tag>]_seed<seed>.
   Default folder: results/geometry/<dataset>/<variant>/, or results/geometry-dev/<dataset>/<tag>/<variant>/.
@@ -29,10 +34,12 @@ Train and evaluate GeometryMMKG on one v0 dataset (RESEARCH_PLAN.md P2.1, P2.8, 
 import argparse
 import json
 import os
+import random
 import subprocess
 import sys
 import time
 
+import numpy as np
 import torch
 
 CODE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -95,6 +102,7 @@ def parse_args(argv=None):
                    help="feature / fused tables on the GPU (auto: if < 50%% of free memory)")
     p.add_argument("--out", default=None, help="output folder (default: see above)")
     p.add_argument("--no-ckpt", action="store_true", help="do not write the best checkpoint")
+    p.add_argument("--no-resume", action="store_true", help="do not read or write <out>/resume_<stem>.pt")
     return p.parse_args(argv)
 
 
@@ -117,9 +125,13 @@ def options_tag(args):
 SCENE_GRAPHS = ("Spatial-VRD", "Spatial-VRD-Trans", "Spatial-VG")
 
 
-def config_tag(args):
-    """Grid-point tag of a --tune run, e.g. 'lr0.0003-do0.1'."""
-    return f"lr{args.lr:g}-do{args.dropout:g}"
+def config_tag(args, default_epochs=None):
+    """Grid-point tag of a --tune run, e.g. 'lr0.0003-do0.1', plus '-ep<epochs>' when the run does not use the
+    dataset's epoch budget (the convergence rerun of P2.10), so it never collides with the budget run."""
+    tag = f"lr{args.lr:g}-do{args.dropout:g}"
+    if default_epochs is not None and args.epochs not in (None, default_epochs):
+        tag += f"-ep{args.epochs}"
+    return tag
 
 
 def resolve_depth_stats(spec, data_dir, dataset):
@@ -146,6 +158,54 @@ def depth_stats_name(spec):
     stem = os.path.splitext(os.path.basename(path))[0]
     stem = stem.split("depth_stats_", 1)[-1]
     return f"{stem}_{key}"
+
+
+RESUME_IGNORED_ARGS = ("data", "out", "keep_on_gpu", "eval_batch_size", "no_ckpt", "no_resume")
+
+
+def resume_key(args):
+    """Training arguments a resume state must match (paths that change between machines are compared by name)."""
+    k = {a: v for a, v in vars(args).items() if a not in RESUME_IGNORED_ARGS}
+    k["dataset"] = os.path.basename(os.path.normpath(args.data))
+    if isinstance(k.get("depth_stats"), str) and k["depth_stats"] not in ("data", "none"):
+        k["depth_stats"] = os.path.basename(k["depth_stats"])
+    return k
+
+
+def rng_state(gen):
+    return {"gen": gen.get_state(), "torch": torch.get_rng_state(), "python": random.getstate(),
+            "numpy": np.random.get_state(),
+            "cuda": torch.cuda.get_rng_state() if torch.cuda.is_available() else None}
+
+
+def set_rng_state(gen, s):
+    gen.set_state(s["gen"])
+    torch.set_rng_state(s["torch"])
+    random.setstate(s["python"])
+    np.random.set_state(s["numpy"])
+    if s["cuda"] is not None and torch.cuda.is_available():
+        torch.cuda.set_rng_state(s["cuda"])
+
+
+def save_resume(path, state):
+    """Atomic write: a run killed while saving keeps the previous resume state."""
+    tmp = path + ".tmp"
+    torch.save(state, tmp)
+    os.replace(tmp, path)
+
+
+def load_resume(path, args):
+    """The resume state at path, or None if there is none; refuses a state written with other training arguments."""
+    if args.no_resume or not os.path.exists(path):
+        return None
+    s = torch.load(path, map_location="cpu", weights_only=False)
+    want, got = resume_key(args), s["resume_key"]
+    diff = sorted(k for k in set(want) | set(got) if want.get(k) != got.get(k))
+    if diff:
+        changes = ", ".join(f"{k}: {got.get(k)!r} -> {want.get(k)!r}" for k in diff)
+        raise SystemExit(f"{path} was written with other training arguments ({changes}); "
+                         "delete it to start again, or rerun with those arguments")
+    return s
 
 
 def code_commit():
@@ -211,11 +271,11 @@ def main(argv=None):
         args.dev = True
     tag = options_tag(args)
     stem = (f"geometry_{dataset}_{args.variant}{'' if tag == 'base' else '_' + tag}"
-            + (f"_{config_tag(args)}" if args.tune else "") + f"_seed{args.seed}")
+            + (f"_{config_tag(args, budget_epochs)}" if args.tune else "") + f"_seed{args.seed}")
     if args.out:
         out_dir = args.out
     elif args.tune:
-        out_dir = os.path.join(CODE_DIR, "results", "geometry-tune", dataset, args.variant, config_tag(args))
+        out_dir = os.path.join(CODE_DIR, "results", "geometry-tune", dataset, args.variant, config_tag(args, budget_epochs))
     elif args.dev:
         out_dir = os.path.join(CODE_DIR, "results", "geometry-dev", dataset, tag, args.variant)
     else:
@@ -268,8 +328,23 @@ def main(argv=None):
             all_geo=feats.geo if model.uses_depth_stats else None)
 
     history, best = [], {"mrr": -1.0, "epoch": 0, "state": None, "valid": None, "gate": None}
+    resume_path = os.path.join(out_dir, f"resume_{stem}.pt")
+    resumed_at, start_epoch, sec_before = [], 1, 0.0
+    r = load_resume(resume_path, args)
+    if r is not None:
+        model.load_state_dict(r["model"])
+        optimizer.load_state_dict(r["optimizer"])
+        set_rng_state(gen, r["rng"])
+        history, best, sec_before = r["history"], r["best"], r["elapsed_sec"]
+        resumed_at = r["resumed_at"] + [{"epoch": r["epoch"], "code_commit": code_commit(),
+                                         "previous_code_commit": r["code_commit"]}]
+        start_epoch = r["epoch"] + 1
+        print(f"resumed from {resume_path}: epoch {r['epoch']} done, best valid MRR {best['mrr']:.4f} "
+              f"(epoch {best['epoch']})" + ("" if r["code_commit"] == code_commit() else
+                                            f" | WARNING: written by code {r['code_commit']}, now {code_commit()}"),
+              flush=True)
     train_dev = train.to(device)
-    for epoch in range(1, args.epochs + 1):
+    for epoch in range(start_epoch, args.epochs + 1):
         model.train()
         t0 = time.time()
         perm = torch.randperm(len(train), generator=gen).to(device)
@@ -309,6 +384,13 @@ def main(argv=None):
                         "state": {k: v.detach().to("cpu", copy=True) for k, v in model.state_dict().items()}}
                 print(f"  new best valid MRR {m['mrr']:.4f}", flush=True)
         history.append(row)
+        if not args.no_resume and "valid" in row and epoch < args.epochs:
+            save_resume(resume_path, {
+                "epoch": epoch, "model": model.state_dict(), "optimizer": optimizer.state_dict(),
+                "rng": rng_state(gen), "history": history, "best": best, "resume_key": resume_key(args),
+                "code_commit": code_commit(), "resumed_at": resumed_at,
+                "elapsed_sec": sec_before + time.time() - t_start})
+            print(f"resume state saved: {resume_path} (epoch {epoch})", flush=True)
 
     metrics = {
         "model": "GeometryMMKG", "dataset": dataset, "variant": args.variant, "model_kwargs": model_kwargs,
@@ -320,6 +402,7 @@ def main(argv=None):
         "n_entities": n_ent, "n_relations": n_rel, "n_missing_image": n_missing,
         "n_train": len(train), "n_valid_used": len(valid), "valid_subset_seed": VALID_SUBSET_SEED if valid_max else None,
         "best_epoch": best["epoch"], "best_valid": best["valid"], "best_gate": best["gate"],
+        "resumed_at": resumed_at,
     }
     if args.dev:
         print(f"[dev] best epoch {best['epoch']}, valid MRR {best['mrr']:.4f}; test not evaluated.", flush=True)
@@ -335,9 +418,11 @@ def main(argv=None):
                         "options": options, "args": vars(args), "epoch": best["epoch"]},
                        os.path.join(out_dir, f"ckpt_{stem}.pt"))
     metrics["history"] = history
-    metrics["total_sec"] = time.time() - t_start
+    metrics["total_sec"] = sec_before + time.time() - t_start
     with open(os.path.join(out_dir, f"metrics_{stem}.json"), "w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=2)
+    if os.path.exists(resume_path):
+        os.remove(resume_path)   # finished: the metrics (and the best checkpoint) are the result
     print(f"Wrote metrics{'' if args.dev else ' / ranks' + ('' if args.no_ckpt else ' / checkpoint')} to "
           f"{out_dir} ({(time.time() - t_start) / 60:.1f} min)", flush=True)
 

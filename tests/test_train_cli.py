@@ -85,6 +85,52 @@ def test_edge_rule_points():
     assert pts(base + [(3e-3, 0.1), (1e-3, 0.0)], (1e-3, 0.1)) == []       # chosen inside -> final
 
 
+
+def test_convergence_rerun_names_and_once():
+    a = train.parse_args(["--data", "x", "--tune", "--lr", "1e-4", "--dropout", "0.1", "--epochs", "400"])
+    assert train.config_tag(a, 200) == "lr0.0001-do0.1-ep400"            # rerun never collides with the budget run
+    a.epochs = 200
+    assert train.config_tag(a, 200) == "lr0.0001-do0.1"
+    sys.path.insert(0, os.path.join(CODE, "scripts"))
+    import tune_summary
+
+    def run(mrr, best, epochs, lr=1e-4):
+        return {"variant": "full", "config": {"lr": lr, "dropout": 0.1}, "valid_mrr": mrr, "best_epoch": best,
+                "epochs": epochs, "options_tag": "t", "file": f"{lr}-{epochs}"}
+    c = tune_summary.choose([run(0.32, 190, 200), run(0.30, 50, 200, lr=3e-4)])["full"]
+    assert c["rerun"] == {"lr": 1e-4, "dropout": 0.1, "epochs": 400} and not c["final"]
+    c = tune_summary.choose([run(0.32, 190, 200), run(0.33, 390, 400), run(0.30, 50, 200, lr=3e-4)])["full"]
+    assert c["epochs"] == 400 and c["rerun"] is None                      # doubled once: the rule is not repeated
+
+
+def test_resume_state_must_match_the_training_arguments():
+    a = train.parse_args(["--data", "/a/Spatial-VRD", "--tune", "--lr", "1e-4", "--out", "/x"])
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "resume_s.pt")
+        assert train.load_resume(path, a) is None                        # nothing to resume
+        train.save_resume(path, {"epoch": 3, "resume_key": train.resume_key(a)})
+        assert not os.path.exists(path + ".tmp")
+        moved = train.parse_args(["--data", "/b/Spatial-VRD", "--tune", "--lr", "1e-4", "--out", "/y",
+                                  "--eval-batch-size", "64"])
+        assert train.load_resume(path, moved)["epoch"] == 3               # other machine / folders: same run
+        other = train.parse_args(["--data", "/a/Spatial-VRD", "--tune", "--lr", "3e-4", "--out", "/x"])
+        try:
+            train.load_resume(path, other)
+        except SystemExit as e:
+            assert "lr" in str(e)
+        else:
+            raise AssertionError("a resume state of another configuration must be refused")
+        other = train.parse_args(["--data", "/a/MKG-Y", "--tune", "--lr", "1e-4", "--out", "/x"])
+        try:
+            train.load_resume(path, other)
+        except SystemExit as e:
+            assert "dataset" in str(e)
+        else:
+            raise AssertionError("a resume state of another dataset must be refused")
+        a.no_resume = True
+        assert train.load_resume(path, a) is None
+
+
 if __name__ == "__main__":
     for _name, _fn in list(globals().items()):
         if _name.startswith("test_") and callable(_fn):
