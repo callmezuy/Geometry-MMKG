@@ -11,8 +11,12 @@ Steps, in this order:
      Relations with fewer than --min-rel-count triples are dropped.
   1. (optional) --valid-group image-prefix: pool train+valid and re-split BY IMAGE
      (entity names "<image_id>_<obj_idx>") so valid is inductive like test.
-  2. Remove exact duplicate triples inside every split.
-  3. Remove leakage: valid triples also in train or test, test triples also in train.
+  2. Remove self-loops (subject == object): a relation needs two different objects. Same rule as the
+     VG150 preprocessing of Xu et al. 2017 (data_tools/vg_to_roidb.py, "sub and obj can't be the same
+     box"), kept by VG150-curated; in the raw VRD JSON they are index errors (objects [7, 7] for
+     "man wearing jacket"). Done after the valid re-grouping, so the images in train / valid do not move.
+  3. Remove exact duplicate triples inside every split.
+  4. Remove leakage: valid triples also in train or test, test triples also in train.
 
 entity2id.txt is never changed, so ent_*_emb.pt stay valid; they are hard-linked
 into --dst (no extra disk space) when possible.
@@ -283,6 +287,14 @@ def main():
             splits["train"], splits["valid"], args.valid_group, ratio, args.seed, ent2id)
         stats["valid_regroup"] = {"mode": args.valid_group, "ratio": round(ratio, 4), "groups": n_groups}
 
+    # ---- 2b. self-loops (subject == object) ----
+    removed_self = {}
+    for sp in SPLITS:
+        before = len(splits[sp])
+        splits[sp] = [t for t in splits[sp] if t[0] != t[2]]
+        removed_self[sp] = before - len(splits[sp])
+    stats["removed_self_loops"] = removed_self
+
     # ---- 3. dedupe within split ----
     removed_dup = {}
     for sp in SPLITS:
@@ -311,6 +323,7 @@ def main():
     for sp in SPLITS:
         assert len(splits[sp]) == len(set(splits[sp])), f"{sp}: duplicates left"
         assert all(s in ent2id and o in ent2id and p in rel2id for s, p, o in splits[sp]), f"{sp}: unknown id"
+        assert all(s != o for s, _, o in splits[sp]), f"{sp}: self-loops left"
     sets = {sp: set(v) for sp, v in splits.items()}
     assert not (sets["train"] & sets["valid"]) and not (sets["train"] & sets["test"]) and not (sets["valid"] & sets["test"])
     train_rels = {p for _, p, _ in splits["train"]}

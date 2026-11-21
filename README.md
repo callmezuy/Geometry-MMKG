@@ -17,8 +17,8 @@ The baselines are NativE, SNAG, MoMoK, MKGformer and CMR (RESEARCH_PLAN.md 3.2).
 | FB15k-237-IMG | `callmezuy/fb15k237-img` | 272,115 / 17,535 / 20,466 | MMKG, transductive (main) |
 | MKG-Y | `callmezuy/mkg-y` | 21,310 / 2,665 / 2,663 | MMKG, transductive |
 | FB15K-237-ind | `callmezuy/fb15k237-ind` | 215,082 / 42,164 / 52,870 | MMKG, inductive |
-| Spatial-VRD | `callmezuy/spatial-vrd` | 77,227 / 8,614 / 21,563 | MMSG, inductive (split by image) |
-| Spatial-VRD-Trans | `callmezuy/spatial-vrd-trans` | 77,371 / 8,578 / 21,455 | MMSG, transductive control |
+| Spatial-VRD | `callmezuy/spatial-vrd` | 76,959 / 8,571 / 21,486 | MMSG, inductive (split by image) |
+| Spatial-VRD-Trans | `callmezuy/spatial-vrd-trans` | 77,083 / 8,550 / 21,383 | MMSG, transductive control |
 | Spatial-VG | `callmezuy/spatial-vg` | 319,069 / 26,372 / 137,984 | MMSG, inductive (official image split) |
 
 Every entity has 768-d `ent_{rgb,depth,text}_emb.pt` features (DINOv2 for RGB and ZipDepth depth, RoBERTa for text).

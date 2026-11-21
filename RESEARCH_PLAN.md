@@ -125,8 +125,8 @@ Sáu bộ, mỗi bộ một repo HF public, tag `v0`; cấu trúc file, lệnh d
 | FB15k-237-IMG | 272.115 / 17.535 / 20.466 | 14.541 | 237 | split + văn bản KG-BERT, ảnh MKGformer |
 | FB15K-237-ind | 215.082 / 42.164 / 52.870 | 14.541 | 237 | split BLP; văn bản, ảnh, `entity2id` của FB15k-237-IMG |
 | MKG-Y | 21.310 / 2.665 / 2.663 | 15.000 | 28 | split, ảnh, mô tả chính thức của MMRNS; id của NativE |
-| Spatial-VRD | 77.227 / 8.614 / 21.563 | 93.809 | 52 | `sg_dataset` của VRD + `relation_review.tsv` |
-| Spatial-VRD-Trans | 77.371 / 8.578 / 21.455 | 93.809 | 52 | chia lại Spatial-VRD, phân tầng theo quan hệ |
+| Spatial-VRD | 76.959 / 8.571 / 21.486 | 93.809 | 52 | `sg_dataset` của VRD + `relation_review.tsv` |
+| Spatial-VRD-Trans | 77.083 / 8.550 / 21.383 | 93.809 | 52 | chia lại Spatial-VRD, phân tầng theo quan hệ |
 | Spatial-VG | 319.069 / 26.372 / 137.984 | 1.441.984 | 50 | VG150-curated `no_part_whole` (`VG-SGG.h5`) |
 
 - [x] **P0.1 FB15k-237-IMG** (`scripts/build_fb15k237_img.py`).
@@ -149,6 +149,7 @@ Sáu bộ, mỗi bộ một repo HF public, tag `v0`; cấu trúc file, lệnh d
   - Văn bản: `entity2textlong.txt` là mô tả MMRNS (12.316 thực thể), 2.684 thực thể còn lại dùng tên; `entity2text.txt` là tên.
 - [x] **P0.4 Spatial-VRD** (`scripts/build_vrd_relation_review.py`, `scripts/clean_splits.py`, đọc JSON gốc qua `scripts/vrd_raw.py`).
   - Annotation dạng tự do trong `sg_dataset` (1.310 predicate gốc), không phải bản 70 predicate của Lu et al. 2016. Predicate được gán vào **cùng bộ từ vựng với Spatial-VG** (50 predicate curated) cộng các nhãn riêng của VRD (`left of`, `right of`, `touching`, `around`, `taller than`, `larger than`, `facing`, `pulling`, `cutting`): **52 quan hệ**, loại 1,0% triplet, đảo chiều 115 triplet bị động. Luật làm việc trên từ (không so chuỗi con) để giữ thông tin hướng. Bảng ánh xạ: `data/Spatial-VRD/relation_review.tsv`; các dòng cần duyệt đang theo đề xuất mặc định (cột `needs_review`).
+  - **Loại triplet tự nối** (chủ thể và đối tượng là cùng một box), cùng quy tắc với bước tiền xử lý VG150 của Xu et al. (CVPR 2017, `data_tools/vg_to_roidb.py`: "sub and obj can't be the same box"), được VG150-curated giữ nguyên. Trong JSON gốc của VRD có 431 quan hệ như vậy (train 347, test 84), chữ đi kèm ghi hai vật khác nhau (ví dụ "man wearing jacket" với `objects: [7, 7]`), tức lỗi chỉ số; sau khi gán nhãn còn 391 (bỏ ngày 21/11/2026, sau bước chia valid theo ảnh nên ảnh của mỗi split không đổi). Lý do bỏ cả ở train: mô hình có quan hệ gần phép đồng nhất (RotatE) xếp hạng 1 các triplet này mà không cần học gì (NativE v0 trước khi sửa: toàn bộ H@1 đến từ 77 triplet tự nối của test). FB15k-237-IMG / FB15K-237-ind giữ nguyên các triplet tự nối của split chuẩn để so được với số công bố.
   - Loại triplet trùng trong từng split; không có triplet valid/test nằm trong train. Test = ảnh test gốc của VRD; valid = 10% số ảnh train (chia theo tiền tố `image_id`), nên 100% thực thể valid/test chưa thấy trong train.
   - 4.999 / 5.000 ảnh: ảnh test `4392556686_44d71ff5a0_o.gif` (ảnh duy nhất dạng GIF; 23 object, 23 relationship) không có thực thể nào trong `entity2id`, nên test có 999 ảnh.
 - [x] **P0.5 Spatial-VG** (`scripts/clean_splits.py --vg-h5`).

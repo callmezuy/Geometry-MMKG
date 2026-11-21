@@ -23,9 +23,9 @@ Code: [github.com/callmezuy/Geometry-MMKG](https://github.com/callmezuy/Geometry
 
 | Split | Triples | Entities |
 |---|---:|---:|
-| train | 77,227 | 59,950 |
-| valid | 8,614 | 6,694 |
-| test | 21,563 | 16,908 |
+| train | 76,959 | 59,900 |
+| valid | 8,571 | 6,685 |
+| test | 21,486 | 16,900 |
 
 93,809 entities (object boxes of 4,999 images), 52 relations. Entity names are `<photo_id>_<k>` (box k of the image).
 
@@ -36,7 +36,10 @@ Code: [github.com/callmezuy/Geometry-MMKG](https://github.com/callmezuy/Geometry
 - Relations: raw predicates mapped to the curated predicate vocabulary of
   [callmezuy/spatial-vg](https://huggingface.co/datasets/callmezuy/spatial-vg) plus a few VRD-only labels
   (`left of`, `right of`, `touching`, ...); 1.0% of triples dropped, some inverted. Mapping: `relation_review.tsv`.
-- Relations with < 10 triples dropped; duplicates within a split removed; no valid/test triple occurs in train.
+- Relations with < 10 triples dropped; self-loops (subject box = object box) removed, the same rule as the VG150
+  preprocessing of Xu et al. (CVPR 2017); in the raw VRD annotations they are index errors (e.g. `objects: [7, 7]`
+  for "man wearing jacket"; 431 raw relations, 391 after relabelling); duplicates within a split removed; no
+  valid/test triple occurs in train.
 - Test = original VRD test images; valid = 10% of the train images (grouped by image).
 - `relation_category.tsv`: GEOMETRIC / POSSESSIVE / SEMANTIC / MISC per relation (our classification following the
   definitions of Zellers et al., CVPR 2018).
@@ -69,7 +72,10 @@ alone predicts the class almost perfectly (`feature_quality.json`).
 
 `v0` (18/11/2026) is the first version of this repo (earlier repos with this name were deleted). Pin it with
 `snapshot_download("callmezuy/spatial-vrd", repo_type="dataset", revision="v0")`. On 19/11/2026 `ent_depth_stats.pt`
-and `depth_stats.json` were added and the tag moved; no other file changed.
+and `depth_stats.json` were added and the tag moved; no other file changed. On 21/11/2026 the self-loop triples
+were removed (train / valid / test -271 / -43 / -77 before de-duplication), the fill vectors of the 2 boxes outside
+their image were recomputed from the new train entities, and the tag moved; the images of each split and
+`entity2id.txt` did not change, two pairs of relation ids swapped (ids are ordered by count).
 
 ## License
 

@@ -105,17 +105,17 @@ Sinh bởi `scripts/dataset_stats.py` từ `data/`.
 
 | split | triples | entities | relations | entity unseen in train (%) | triples with unseen h or t (%) |
 |---|---:|---:|---:|---:|---:|
-| train | 77,227 | 59,950 | 52 | 0.0 | 0.0 |
-| valid | 8,614 | 6,694 | 50 | 100.0 | 100.0 |
-| test | 21,563 | 16,908 | 52 | 100.0 | 100.0 |
+| train | 76,959 | 59,900 | 52 | 0.0 | 0.0 |
+| valid | 8,571 | 6,685 | 50 | 100.0 | 100.0 |
+| test | 21,486 | 16,900 | 52 | 100.0 | 100.0 |
 
-- Thực thể trong entity2id: **93,809** (xuất hiện trong ít nhất một split: 83,552); quan hệ: **52**; tổng bộ ba: **107,404**.
-- Bậc trong train: trung bình 2.58, trung vị 2, max 22; thực thể bậc 1: 44.7%.
-- Mật độ train (bộ ba / thực thể): 1.29.
+- Thực thể trong entity2id: **93,809** (xuất hiện trong ít nhất một split: 83,485); quan hệ: **52**; tổng bộ ba: **107,016**.
+- Bậc trong train: trung bình 2.57, trung vị 2, max 22; thực thể bậc 1: 44.8%.
+- Mật độ train (bộ ba / thực thể): 1.28.
 
 - Quan hệ: top-1 chiếm 22.2% train, top-5 65.2%, top-10 90.2%; quan hệ có < 10 bộ ba train: 2/52; quan hệ không có trong train: 0.
 - Quan hệ có trong test nhưng không có trong train: 0 (0 bộ ba test).
-- Top-5 quan hệ train: `on` 17,107, `near` 10,848, `has` 10,054, `above` 6,309, `under` 6,055.
+- Top-5 quan hệ train: `on` 17,067, `near` 10,789, `has` 9,982, `above` 6,304, `under` 6,048.
 
 | mapping | relations | test triples (%) |
 |---|---:|---:|
@@ -127,22 +127,23 @@ Sinh bởi `scripts/dataset_stats.py` từ `data/`.
 
 | category | relations | train (%) | test (%) |
 |---|---:|---:|---:|
-| GEOMETRIC | 21 | 70.4 | 70.3 |
-| POSSESSIVE | 5 | 25.0 | 25.3 |
+| GEOMETRIC | 21 | 70.5 | 70.3 |
+| POSSESSIVE | 5 | 24.9 | 25.2 |
 | SEMANTIC | 24 | 4.6 | 4.5 |
 | MISC | 2 | 0.0 | 0.0 |
 
 | split | images | entities / image | triples / image |
 |---|---:|---:|---:|
-| train | 3,600 | 16.65 | 21.45 |
-| valid | 400 | 16.73 | 21.54 |
-| test | 999 | 16.92 | 21.58 |
+| train | 3,600 | 16.64 | 21.38 |
+| valid | 400 | 16.71 | 21.43 |
+| test | 999 | 16.92 | 21.51 |
 
 - Ảnh test cũng có trong train: 0/999 (0.0%).
 
 | embedding | shape | dtype | zero rows | NaN rows | rows = n_ent |
 |---|---|---|---:|---:|---|
 | `ent_depth_emb.pt` | 93,809 × 768 | float32 | 0 | 0 | ✓ |
+| `ent_depth_stats.pt` | 93,809 × 9 | float32 | 9 | 0 | ✓ |
 | `ent_rgb_depth_concat_emb.pt` | 93,809 × 1536 | float32 | 0 | 0 | ✓ |
 | `ent_rgb_depth_mean_emb.pt` | 93,809 × 768 | float32 | 0 | 0 | ✓ |
 | `ent_rgb_emb.pt` | 93,809 × 768 | float32 | 0 | 0 | ✓ |
@@ -152,17 +153,17 @@ Sinh bởi `scripts/dataset_stats.py` từ `data/`.
 
 | split | triples | entities | relations | entity unseen in train (%) | triples with unseen h or t (%) |
 |---|---:|---:|---:|---:|---:|
-| train | 77,371 | 83,552 | 52 | 0.0 | 0.0 |
-| valid | 8,578 | 14,210 | 52 | 0.0 | 0.0 |
-| test | 21,455 | 27,937 | 52 | 0.0 | 0.0 |
+| train | 77,083 | 83,485 | 52 | 0.0 | 0.0 |
+| valid | 8,550 | 14,221 | 52 | 0.0 | 0.0 |
+| test | 21,383 | 27,848 | 52 | 0.0 | 0.0 |
 
-- Thực thể trong entity2id: **93,809** (xuất hiện trong ít nhất một split: 83,552); quan hệ: **52**; tổng bộ ba: **107,404**.
-- Bậc trong train: trung bình 1.85, trung vị 1, max 18; thực thể bậc 1: 63.1%.
-- Mật độ train (bộ ba / thực thể): 0.93.
+- Thực thể trong entity2id: **93,809** (xuất hiện trong ít nhất một split: 83,485); quan hệ: **52**; tổng bộ ba: **107,016**.
+- Bậc trong train: trung bình 1.85, trung vị 1, max 17; thực thể bậc 1: 63.2%.
+- Mật độ train (bộ ba / thực thể): 0.92.
 
-- Quan hệ: top-1 chiếm 22.3% train, top-5 65.2%, top-10 90.3%; quan hệ có < 10 bộ ba train: 2/52; quan hệ không có trong train: 0.
+- Quan hệ: top-1 chiếm 22.4% train, top-5 65.2%, top-10 90.3%; quan hệ có < 10 bộ ba train: 2/52; quan hệ không có trong train: 0.
 - Quan hệ có trong test nhưng không có trong train: 0 (0 bộ ba test).
-- Top-5 quan hệ train: `on` 17,286, `near` 10,772, `has` 10,144, `above` 6,247, `under` 6,031.
+- Top-5 quan hệ train: `on` 17,245, `near` 10,703, `has` 10,074, `above` 6,243, `under` 6,025.
 
 | mapping | relations | test triples (%) |
 |---|---:|---:|
@@ -173,22 +174,23 @@ Sinh bởi `scripts/dataset_stats.py` từ `data/`.
 
 | category | relations | train (%) | test (%) |
 |---|---:|---:|---:|
-| GEOMETRIC | 21 | 70.3 | 70.5 |
-| POSSESSIVE | 5 | 25.1 | 24.9 |
+| GEOMETRIC | 21 | 70.4 | 70.5 |
+| POSSESSIVE | 5 | 25.0 | 24.9 |
 | SEMANTIC | 24 | 4.5 | 4.6 |
 | MISC | 2 | 0.0 | 0.0 |
 
 | split | images | entities / image | triples / image |
 |---|---:|---:|---:|
-| train | 4,999 | 16.71 | 15.48 |
-| valid | 4,080 | 3.48 | 2.10 |
-| test | 4,888 | 5.72 | 4.39 |
+| train | 4,999 | 16.70 | 15.42 |
+| valid | 4,080 | 3.49 | 2.10 |
+| test | 4,895 | 5.69 | 4.37 |
 
-- Ảnh test cũng có trong train: 4,888/4,888 (100.0%).
+- Ảnh test cũng có trong train: 4,895/4,895 (100.0%).
 
 | embedding | shape | dtype | zero rows | NaN rows | rows = n_ent |
 |---|---|---|---:|---:|---|
 | `ent_depth_emb.pt` | 93,809 × 768 | float32 | 0 | 0 | ✓ |
+| `ent_depth_stats.pt` | 93,809 × 9 | float32 | 9 | 0 | ✓ |
 | `ent_rgb_depth_concat_emb.pt` | 93,809 × 1536 | float32 | 0 | 0 | ✓ |
 | `ent_rgb_depth_mean_emb.pt` | 93,809 × 768 | float32 | 0 | 0 | ✓ |
 | `ent_rgb_emb.pt` | 93,809 × 768 | float32 | 0 | 0 | ✓ |
@@ -225,4 +227,5 @@ Sinh bởi `scripts/dataset_stats.py` từ `data/`.
 
 | embedding | shape | dtype | zero rows | NaN rows | rows = n_ent |
 |---|---|---|---:|---:|---|
+| `ent_depth_stats.pt` | 1,441,984 × 9 | float32 | 1,704 | 0 | ✓ |
 
