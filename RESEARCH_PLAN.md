@@ -419,8 +419,9 @@ Sáu bộ, mỗi bộ một repo HF public, tag `v0`; cấu trúc file, lệnh d
     đã chọn, bỏ qua điểm đã có trên HF (`geometry-tune/<dataset>/<biến thể>/<cấu hình>/`), và bảng tổng hợp. Kiểm tra:
     `tests/test_train_cli.py`; chạy thử 2 điểm lưới × 2 epoch trên VRD trên máy (lr 1e-3 đã cho MRR valid 0,232 sau 2 epoch so
     với 0,162 của lr 1e-4, nên lưới lr có ý nghĩa).
-  - **Kết quả Spatial-VRD (20/11/2026, code `9ed7ce5`, 36/36 lần chạy, không lỗi; bảng đầy đủ: `tune_summary.py` trên
-    `geometry-tune/Spatial-VRD`).** Cấu hình chọn và MRR valid tốt nhất:
+  - **Kết quả Spatial-VRD (20/11/2026, code `9ed7ce5`, 36/36 lần chạy, không lỗi). ĐÃ THAY THẾ:** tính trên dữ liệu trước khi
+    bỏ các triplet tự nối (P0.4, 21/11/2026); file đã chuyển sang `superseded/geometry-tune/Spatial-VRD`, chạy lại theo quyết
+    định 22/11/2026 bên dưới. Giữ bảng này chỉ để lưu lại. Cấu hình chọn và MRR valid tốt nhất:
 
     | Biến thể | lr / dropout | MRR valid | Epoch tốt nhất |
     |---|---|---|---|
@@ -448,17 +449,81 @@ Sáu bộ, mỗi bộ một repo HF public, tag `v0`; cấu trúc file, lệnh d
       nhiên, ví dụ dropout 0), thêm điểm một bậc ra ngoài theo trục đó, giữ trục kia ở giá trị đã chọn; lặp lại cho tới khi cấu
       hình chọn nằm bên trong, tối đa 2 bậc ra ngoài lưới gốc mỗi hướng. `tune_summary.py` tính các điểm cần thêm; notebook chạy
       chúng. Điểm thêm cũng chỉ nhìn valid.
-  - **FB15k-237-IMG (đang chạy, 20/11/2026):** 5/36 lần xong (`full`, 5 cấu hình; sandbox dừng sau 03:11). Tốt nhất đến lúc này
-    0,3247 (lr 1e-4 / dropout 0,1, epoch tốt nhất 190/200 → luật hội tụ: chạy lại 400 epoch); nhiều cấu hình đạt đỉnh ở epoch
-    140–200, dropout 0,1 và 0,3 gần nhau. Lần chạy lại hội tụ mang hậu tố `-ep<epochs>` trong tên cấu hình (`train.py`
-    `config_tag`) để không trùng lần chạy theo ngân sách; `tune_summary.py` đề xuất nó đúng một lần (đã có lần gấp đôi thì không
-    đề xuất nữa) và chọn cấu hình tốt nhất trên mọi lần chạy; chế độ "Mở rộng biên" của notebook chạy cả hai luật.
+  - **Kết quả FB15k-237-IMG (xong 22/11/2026; code `a77d949` / `6d6342b`; 49 lần chạy, tất cả trên GPU).** Gồm lưới gốc
+    36 lần, 12 điểm mở rộng biên và 1 lần chạy lại 400 epoch:
+
+    | Biến thể | lr / dropout | MRR valid | Epoch tốt nhất |
+    |---|---|---|---|
+    | fixed | 1e-3 / 0,1 | **0,3302** | 110 |
+    | no_depth | 1e-3 / 0 | **0,3302** | 170 |
+    | mean | 1e-3 / 0,3 | 0,3275 | 150 |
+    | concat | 1e-3 / 0,1 | 0,3264 | 130 |
+    | full (gate) | 1e-4 / 0,1 | 0,3247 | 190 |
+    | constant | 1e-4 / 0,1 | 0,3244 | 150 |
+
+    - **Lưới đã bao đủ.** Mọi điểm mở rộng biên đều kém hơn hoặc ngang cấu hình đã chọn. Ngoại lệ duy nhất là `no_depth`, với
+      dropout 0 hơn dropout 0,1 khoảng 0,0025; dropout 0 là biên tự nhiên nên không mở rộng thêm.
+    - **Luật hội tụ cho `full`:** lần chạy 400 epoch đạt đỉnh ở đúng epoch 190 (0,3247), rồi dao động trong khoảng
+      0,322–0,325 đến epoch 400. Như vậy mô hình đã hội tụ, và ngân sách 200 epoch là đủ.
+    - **Cách các biến thể xếp hạng:** MRR các biến thể chỉ cách nhau khoảng 0,006. Gate kém hơn ba cách gộp tĩnh, và depth
+      không giúp trên FB15k: `no_depth` bằng biến thể có depth tốt nhất.
+    - **Cách đặt tên lần chạy lại:** lần chạy lại hội tụ mang hậu tố `-ep<epochs>` trong tên cấu hình (`train.py`
+      `config_tag`) để không trùng lần chạy theo ngân sách. `tune_summary.py` đề xuất lần chạy lại đúng một lần, xét hội tụ trên
+      lần chạy dài nhất của cấu hình đã chọn, và chọn cấu hình tốt nhất trên mọi lần chạy. Chế độ "Mở rộng biên" của notebook
+      chạy cả hai luật.
+  - **Kết quả Spatial-VRD trên `v0` mới (xong 22/11/2026; 47 lần, tất cả trên GPU).** Dữ liệu là
+    76.959 / 8.571 / 21.486 bộ ba. Gồm lưới gốc 36 lần và 11 điểm mở rộng biên:
+
+    | Biến thể | lr / dropout | MRR valid | Epoch tốt nhất | Tốt nhất trong lưới gốc |
+    |---|---|---|---|---|
+    | concat | 1e-4 / 0 | **0,2670** | 60 | 0,2586 (1e-4 / 0,1) |
+    | fixed | 1e-3 / 0 | 0,2650 | 20 | 0,2576 (1e-3 / 0,1) |
+    | mean | 1e-3 / 0 | 0,2643 | 30 | 0,2583 (1e-3 / 0,1) |
+    | constant | 1e-4 / 0 | 0,2566 | 30 | 0,2446 (1e-4 / 0,1) |
+    | no_depth | 3e-4 / 0 | 0,2560 | 20 | 0,2497 (3e-4 / 0,1) |
+    | full (gate) | 1e-4 / 0 | 0,2542 | 30 | 0,2446 (1e-4 / 0,1) |
+
+    - **Dropout 0 thắng ở cả 6 biến thể,** hơn dropout 0,1 khoảng +0,006 đến +0,012. Dropout 0 là biên tự nhiên, nên lưới kết
+      thúc ở đó. Các điểm lr một bậc ra ngoài (3e-5, 3e-3) đều kém hơn.
+    - **Hạn chế:** ở dropout 0, mỗi biến thể chỉ được thử với đúng một lr (lr đã chọn ở dropout 0,1). Luật mở rộng biên đã chốt
+      trước không đòi thử thêm, vì lr đã chọn nằm bên trong khoảng lr đã thử. Phải ghi điều này trong bài.
+    - **Thứ hạng giữ nguyên như trên dữ liệu cũ:**
+      - các cách gộp tĩnh hơn `no_depth` khoảng +0,008 đến +0,011;
+      - gate kém `no_depth` 0,002.
+    - **Mức MRR:** ở dropout 0,1, mức thấp hơn dữ liệu cũ khoảng 0,003–0,004, đúng bằng phần MRR mà các triplet tự nối từng
+      đóng góp.
+    - **`constant` gần như trùng `full`** vì Spatial-VRD chỉ có 2 thực thể thiếu ảnh.
+  - **Kết quả luật chọn cách gộp (22/11/2026; luật đặt ngày 20/11):** MRR valid trung bình trên Spatial-VRD và FB15k-237-IMG,
+    mỗi biến thể lấy cấu hình đã tune của nó:
+
+    | Cách gộp | Spatial-VRD | FB15k-237-IMG | Trung bình |
+    |---|---|---|---|
+    | **fixed** | 0,2650 | 0,3302 | **0,2976** |
+    | concat | 0,2670 | 0,3264 | 0,2967 |
+    | mean | 0,2643 | 0,3275 | 0,2959 |
+    | gate | 0,2542 | 0,3247 | 0,2895 |
+
+    - **Kết quả:** `full` của 4 dataset còn lại (MKG-Y, FB15K-237-ind, Spatial-VRD-Trans, Spatial-VG) dùng cách gộp **fixed**,
+      tức một trọng số vô hướng học được giữa RGB và depth. Notebook tune hai biến thể `fixed` và `no_depth` ở các bộ này.
+    - **Cách ghi trong bài:**
+      - ba cách gộp tĩnh tương đương nhau, vì cách biệt 0,001 nhỏ hơn mức nhiễu;
+      - gate thích nghi kém rõ, khoảng −0,007 đến −0,008 (trả lời RQ2);
+      - lợi ích của depth chỉ thấy trên scene graph: trên VRD, `fixed` hơn `no_depth` +0,009, còn trên FB15k hai biến thể bằng
+        nhau.
+    - **Còn phải quyết:** biến thể `constant` (giữ cách gộp của `full` được chọn) dùng cho lượt chạy chính thức cần một biến
+      thể mới, gồm cách gộp `fixed` và vector hằng cho thực thể thiếu ảnh. Biến thể này chưa có trong code và chưa được tune.
   - **Chạy tiếp khi bị ngắt (20/11/2026):** sau mỗi lần valid, `train.py` ghi `resume_<stem>.pt`. File gồm model, optimizer,
     trạng thái RNG, checkpoint tốt nhất và lịch sử, và được ghi nguyên khối nên không bị hỏng nếu bị ngắt giữa lúc ghi. Lần chạy
     sau có cùng stem và cùng tham số huấn luyện sẽ train tiếp từ đó, với cùng batch và dropout như khi không bị ngắt. Nếu tham
     số khác thì từ chối. Các epoch đã chạy tiếp được ghi vào `resumed_at` trong metric, và file bị xoá khi chạy xong. Notebook
     GeometryMMKG đẩy file này cùng log lên repo private `geometry-mmkg-resume`, cách nhau ít nhất N phút (mặc định 10). Khi bấm
     lại, notebook tải về để chạy tiếp. Baseline không có cơ chế này, vì phải sửa code gốc.
+  - **Quyết định (22/11/2026, người dùng duyệt), sau khi bỏ triplet tự nối của Spatial-VRD (P0.4, 21/11/2026):**
+    - **Giữ thiết kế đóng băng (P2.9).** Dữ liệu dev cũ chỉ khác ở 43/8.614 bộ ba valid (0,5%), nên MRR valid lệch tối đa khoảng
+      0,005. Mỗi quyết định thiết kế hoặc được xác nhận thêm trên FB15k-237-IMG (không đổi), như `input_norm`, `depth_dropout`
+      và `text_proj`, hoặc có cách biệt lớn hơn mức đó, như số độ sâu theo vùng (+0,010 đến +0,013). `rel_gate` đã bị bỏ nên
+      không bị ảnh hưởng.
+    - **Tune lại Spatial-VRD từ đầu** (lưới gốc và mở rộng biên) trên `v0` mới. Luật chọn cách gộp dùng kết quả VRD mới này.
 
 ### P3. Baseline
 

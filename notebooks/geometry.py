@@ -525,9 +525,13 @@ def _(DATASET, RESULTS_REPO, WORK_DIR, hf_token_ui, json, mo, os, snapshot_downl
 def _(DATASET, VARIANT_NAMES, mo):
     # P2.10 (quyết định 19/11/2026): lưới lr x dropout, tune riêng mọi biến thể (cách A), seed 42, chỉ valid.
     # Thiết kế đóng băng và ngân sách epoch = mặc định của scripts/train.py (EPOCH_BUDGET), không truyền tay.
-    _ablation = DATASET in ("FB15k-237-IMG", "Spatial-VRD")  # 6 biến thể ở đây, full + no_depth ở các bộ khác
+    # 6 biến thể ở FB15k-237-IMG và Spatial-VRD; ở 4 bộ còn lại là cách gộp được chọn + no_depth. Luật chọn cách gộp
+    # (20/11/2026) cho kết quả 22/11/2026: fixed (MRR valid trung bình VRD + FB15k 0,2976; concat 0,2967; mean 0,2959;
+    # gate 0,2895).
+    _fusion = "fixed"
+    _ablation = DATASET in ("FB15k-237-IMG", "Spatial-VRD")
     tune_variants_ui = mo.ui.multiselect(options=VARIANT_NAMES,
-                                         value=list(VARIANT_NAMES) if _ablation else ["full", "no_depth"],
+                                         value=list(VARIANT_NAMES) if _ablation else [_fusion, "no_depth"],
                                          label="Biến thể tune")
     tune_lrs_ui = mo.ui.text(value="1e-4,3e-4,1e-3", label="LR (lưới)")
     tune_dos_ui = mo.ui.text(value="0.1,0.3", label="Dropout (lưới)")
@@ -538,7 +542,9 @@ def _(DATASET, VARIANT_NAMES, mo):
               "thiết kế đóng băng, số epoch theo ngân sách của dataset). Điểm đã có kết quả trên HF thì bỏ qua, nên "
               "bấm lại sau khi bị ngắt sẽ chạy tiếp phần còn thiếu. Kết quả: `geometry-tune/<dataset>/<biến thể>/<cấu hình>/`.\n\n"
               "**Mở rộng biên** (luật 20/11/2026): sau lưới gốc, `tune_summary.py` tìm các điểm một bậc ra ngoài biên cho "
-              "biến thể có cấu hình chọn nằm ở biên; notebook chạy chúng rồi tính lại, lặp tới khi không còn điểm nào."),
+              "biến thể có cấu hình chọn nằm ở biên; notebook chạy chúng rồi tính lại, lặp tới khi không còn điểm nào.\n\n"
+              f"Ở 4 bộ ngoài FB15k-237-IMG và Spatial-VRD, mô hình chính là cách gộp **`{_fusion}`** (luật chọn cách "
+              "gộp, 22/11/2026), so với `no_depth`."),
         mo.hstack([tune_variants_ui, tune_lrs_ui, tune_dos_ui]),
         tune_mode_ui,
         tune_btn,

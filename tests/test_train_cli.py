@@ -101,6 +101,10 @@ def test_convergence_rerun_names_and_once():
     assert c["rerun"] == {"lr": 1e-4, "dropout": 0.1, "epochs": 400} and not c["final"]
     c = tune_summary.choose([run(0.32, 190, 200), run(0.33, 390, 400), run(0.30, 50, 200, lr=3e-4)])["full"]
     assert c["epochs"] == 400 and c["rerun"] is None                      # doubled once: the rule is not repeated
+    assert c["late_best_epoch"] and c["action"].startswith("late best epoch after the doubled budget")
+    c = tune_summary.choose([run(0.32, 190, 200), run(0.32, 190, 400), run(0.30, 50, 200, lr=3e-4)])["full"]
+    assert c["epochs"] == 200 and not c["late_best_epoch"] and c["rerun"] is None   # the doubled run settled it
+    assert c["action"].startswith("converged (doubled budget: best epoch 190 / 400")
 
 
 def test_resume_state_must_match_the_training_arguments():

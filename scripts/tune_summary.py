@@ -73,17 +73,20 @@ def choose(runs):
             continue
         best = sorted(rs, key=lambda r: (-r["valid_mrr"], r["config"]["lr"], r["config"]["dropout"],
                                          r["epochs"]))[0]
-        late = best["best_epoch"] > LATE_FRACTION * best["epochs"]
         same = [r for r in rs if r["config"] == best["config"]]
         budget = min(r["epochs"] for r in same)
-        doubled = any(r["epochs"] >= 2 * budget for r in same)
+        longest = max(same, key=lambda r: r["epochs"])
+        doubled = longest["epochs"] >= 2 * budget
+        # convergence is judged on the longest run of the chosen configuration (the doubled one, once it exists)
+        late = longest["best_epoch"] > LATE_FRACTION * longest["epochs"]
         rerun = None
         if late and not doubled:
             rerun = {"lr": best["config"]["lr"], "dropout": best["config"]["dropout"], "epochs": 2 * best["epochs"]}
         tags = {r["options_tag"] for r in rs}
         ext = edge_points([(r["config"]["lr"], r["config"]["dropout"]) for r in rs],
                           (best["config"]["lr"], best["config"]["dropout"]))
-        action = ("converged" if not late else f"rerun with --epochs {rerun['epochs']}" if rerun
+        conv = f" (doubled budget: best epoch {longest['best_epoch']} / {longest['epochs']})" if doubled else ""
+        action = ("converged" + conv if not late else f"rerun with --epochs {rerun['epochs']}" if rerun
                   else "late best epoch after the doubled budget (rule applied once; report it)")
         out[v] = {**best, "n_configs": len(rs), "late_best_epoch": late, "action": action, "rerun": rerun,
                   "edge_points": ext, "final": not ext and rerun is None,
@@ -102,7 +105,8 @@ def to_markdown(runs, choice, root):
     lines += ["", "| Variant | configs | chosen lr / dropout | valid MRR | convergence | points to add (edge rule) |",
               "|---|---|---|---|---|---|"]
     for v, c in choice.items():
-        ext = ", ".join(f"lr {p['lr']:g} / do {p['dropout']:g}" for p in c["edge_points"]) or "none (final)"
+        ext = ", ".join(f"lr {p['lr']:g} / do {p['dropout']:g}" for p in c["edge_points"]) or (
+            "none (final)" if c["final"] else "none (convergence rerun pending)")
         lines.append(f"| {v} | {c['n_configs']} | {c['config']['lr']:g} / {c['config']['dropout']:g} | "
                      f"{c['valid_mrr']:.4f} | {c['action']} | {ext} |")
     return "\n".join(lines) + "\n"
