@@ -4,7 +4,8 @@ Train and evaluate GeometryMMKG on one v0 dataset (RESEARCH_PLAN.md P2.1, P2.8, 
   python scripts/train.py --data data/Spatial-VRD --variant full --epochs 100 --seed 42
   python scripts/train.py --data data/Spatial-VRD --variant full --rel-gate --dev     # development run
 
-* Variants (section 3.1): full, no_depth, concat, mean, fixed, constant (core/models/end_to_end.py VARIANTS).
+* Variants (section 3.1): full, no_depth, concat, mean, fixed, constant, constant_fixed
+  (core/models/end_to_end.py VARIANTS).
 * Frozen design (P2.8 / P2.9, 19/11/2026) is the default: --input-norm, --depth-dropout 0.3, --text-proj and
   --depth-stats auto (the dataset's ent_depth_stats.pt on the scene graphs Spatial-VRD, Spatial-VRD-Trans and
   Spatial-VG; none on the knowledge graphs). Ablations switch them off: --no-input-norm, --depth-dropout 0,

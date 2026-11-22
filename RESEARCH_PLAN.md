@@ -193,7 +193,7 @@ Sáu bộ, mỗi bộ một repo HF public, tag `v0`; cấu trúc file, lệnh d
 
 **Thiết kế (quyết định 18/11/2026).** Thực thể = hàm của đặc trưng đóng băng (text t, RGB x, depth z), không có embedding theo ID, nên cùng một mô hình chạy ở cả bốn ô 2×2. (1) Gộp RGB–depth thành vision v theo `fusion_mode` (P2.1). (2) Thực thể thiếu ảnh: v ← một vector học được `v_miss` (P2.6). (3) Cổng text–vision: u = W_v v, g = σ(W_tg[t; u]), h = LN(t + Dropout(g ⊙ u)) / √d (P2.3). LN không có gain/bias học được, nên mọi thực thể có chuẩn L2 bằng 1 như TransE gốc (quyết định 19/11/2026): với gain học được, mô hình tự co/giãn cả không gian, làm margin và nhiệt độ đổi ý nghĩa trong lúc train (đo trên Spatial-VRD: khoảng cách tới đáp án đúng 435 lúc khởi tạo, 88 sau 1 epoch; với chuẩn cố định: 35,9 → 32,3 sau 3 epoch). (4) Điểm TransE L1 với embedding quan hệ. Train: âm mẫu **hai phía trong batch** (mọi thực thể khác nhau của batch thay head và thay tail, như BLP); bỏ âm mẫu là đáp án đúng **theo train** (không dùng valid/test khi train); loss margin có trọng số self-adversarial (detach), trung bình hai phía. **Bỏ GCN:** ở chế độ inductive, cạnh của thực thể test chỉ nằm trong chính các bộ ba test (dùng để truyền tin là rò rỉ), còn chỉ dùng đồ thị train thì thực thể test không có hàng xóm, biểu diễn train và test khác bản chất. **Bỏ loss căn chỉnh** text/RGB/depth: nó được tính trên đặc trưng đóng băng nên không có gradient. Code: `core/fusion/geometry_guided_fusion.py`, `core/models/{end_to_end,kg_reasoning}.py`, `core/data_engineering/fast_dataset.py`.
 
-- [x] **P2.1** Cờ ablation (mục 3.1): `use_depth`, `fusion_mode` ∈ {`gate`: G = σ(W_g[x; z]), v = G⊙x + (1−G)⊙z; `concat`: Linear(2d→d); `mean`; `fixed`: một scalar học được α, v = σ(α)x + (1−σ(α))z}, `missing_mode` ∈ {`learned_mask`, `constant`}. Biến thể có tên (`VARIANTS`): `full`, `no_depth` (v = x), `concat`, `mean`, `fixed`, `constant`.
+- [x] **P2.1** Cờ ablation (mục 3.1): `use_depth`, `fusion_mode` ∈ {`gate`: G = σ(W_g[x; z]), v = G⊙x + (1−G)⊙z; `concat`: Linear(2d→d); `mean`; `fixed`: một scalar học được α, v = σ(α)x + (1−σ(α))z}, `missing_mode` ∈ {`learned_mask`, `constant`}. Biến thể có tên (`VARIANTS`): `full`, `no_depth` (v = x), `concat`, `mean`, `fixed`, `constant`; thêm `constant_fixed` (22/11/2026, P2.10).
   - `scripts/train.py --data --variant --epochs --seed` cùng các siêu tham số (`--lr --margin --adv-temp --batch-size --dropout --weight-decay --valid-every --valid-max`). Đánh giá valid mỗi `--valid-every` epoch và sau epoch cuối, giữ checkpoint có MRR valid cao nhất, test một lần. Spatial-VG: valid trên tập con 5.000 bộ ba cố định (seed 0, chung cho mọi biến thể và seed; mục 4.9). Ghi `ranks_geometry_<ds>_<variant>_seed<s>_test.csv`, `metrics_…json` (test, valid tốt nhất, epoch tốt nhất, lịch sử từng epoch, tham số, commit) và checkpoint.
   - Nhiệt độ self-adversarial mặc định 1 (như RotatE): chạy thử 3 epoch trên Spatial-VRD, số âm mẫu hiệu dụng (exp entropy của trọng số, ghi trong log mỗi epoch) giảm từ khoảng 1.300 xuống 250 trên khoảng 1.980 ứng viên; nhiệt độ 2 chỉ còn khoảng 9, gần với chỉ lấy âm mẫu khó nhất.
   - Khoảng cách L1 trong loss dùng backward tự viết, chia khúc (`L1CDist`): backward của `torch.cdist(p=1)` dựng tensor B×C×d (khoảng 6 GB với batch 1024).
@@ -504,14 +504,23 @@ Sáu bộ, mỗi bộ một repo HF public, tag `v0`; cấu trúc file, lệnh d
     | gate | 0,2542 | 0,3247 | 0,2895 |
 
     - **Kết quả:** `full` của 4 dataset còn lại (MKG-Y, FB15K-237-ind, Spatial-VRD-Trans, Spatial-VG) dùng cách gộp **fixed**,
-      tức một trọng số vô hướng học được giữa RGB và depth. Notebook tune hai biến thể `fixed` và `no_depth` ở các bộ này.
+      tức một trọng số vô hướng học được giữa RGB và depth. Notebook tune `fixed`, `no_depth` và `constant_fixed` ở các bộ này (Spatial-VG không có
+      `constant_fixed`, xem bên dưới).
     - **Cách ghi trong bài:**
       - ba cách gộp tĩnh tương đương nhau, vì cách biệt 0,001 nhỏ hơn mức nhiễu;
       - gate thích nghi kém rõ, khoảng −0,007 đến −0,008 (trả lời RQ2);
       - lợi ích của depth chỉ thấy trên scene graph: trên VRD, `fixed` hơn `no_depth` +0,009, còn trên FB15k hai biến thể bằng
         nhau.
-    - **Còn phải quyết:** biến thể `constant` (giữ cách gộp của `full` được chọn) dùng cho lượt chạy chính thức cần một biến
-      thể mới, gồm cách gộp `fixed` và vector hằng cho thực thể thiếu ảnh. Biến thể này chưa có trong code và chưa được tune.
+    - **Biến thể `constant_fixed` (quyết định 22/11/2026, người dùng duyệt):** theo luật ngày 20/11, biến thể vector hằng
+      giữ cách gộp của `full` được chọn. Vì vậy thêm biến thể mới `constant_fixed`: cách gộp `fixed`, vector hằng cho thực
+      thể thiếu ảnh, không mặt nạ. Nó khác `fixed` đúng ở cách xử lý thiếu ảnh, nên chênh lệch `fixed` − `constant_fixed` là
+      phần lợi của mặt nạ + vector học được.
+      - Giữ nguyên `constant` (gate) cùng kết quả đã có, để không lẫn tên.
+      - Tune như mọi biến thể khác (lưới gốc + mở rộng biên + luật hội tụ) trên FB15k-237-IMG, Spatial-VRD, MKG-Y,
+        FB15K-237-ind và Spatial-VRD-Trans.
+      - **Không chạy ở Spatial-VG:** chỉ 6 box thiếu ảnh trên 1,44 triệu thực thể, nên biến thể này gần như trùng `fixed`
+        (giống `constant` trùng `full` trên VRD với 2 thực thể thiếu ảnh), trong khi mỗi lần chạy VG rất đắt. Ghi lý do
+        này trong bài.
   - **Chạy tiếp khi bị ngắt (20/11/2026):** sau mỗi lần valid, `train.py` ghi `resume_<stem>.pt`. File gồm model, optimizer,
     trạng thái RNG, checkpoint tốt nhất và lịch sử, và được ghi nguyên khối nên không bị hỏng nếu bị ngắt giữa lúc ghi. Lần chạy
     sau có cùng stem và cùng tham số huấn luyện sẽ train tiếp từ đó, với cùng batch và dropout như khi không bị ngắt. Nếu tham

@@ -109,7 +109,10 @@ def test_variants_build():
         with torch.no_grad():
             out = m.forward_fusion(text, rgb, depth, mask)
         assert out.shape == (N, D) and torch.isfinite(out).all(), name
-    assert set(VARIANTS) == {"full", "no_depth", "concat", "mean", "fixed", "constant"}
+    assert set(VARIANTS) == {"full", "no_depth", "concat", "mean", "fixed", "constant", "constant_fixed"}
+    # each constant-fill variant differs from a learned-mask variant only in the missing-image handling
+    for const, masked in (("constant", "full"), ("constant_fixed", "fixed")):
+        assert {**VARIANTS[const], "missing_mode": "learned_mask"} == VARIANTS[masked], const
 
 
 if __name__ == "__main__":

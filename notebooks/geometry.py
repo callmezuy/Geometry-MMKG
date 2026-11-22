@@ -28,6 +28,7 @@ def _():
         | `mean` | `(rgb + depth) / 2` | vector học được + mặt nạ |
         | `fixed` | một trọng số vô hướng học được | vector học được + mặt nạ |
         | `constant` | gate | vector hằng của bảng đặc trưng, không mặt nạ (như baseline) |
+        | `constant_fixed` | một trọng số vô hướng học được | vector hằng của bảng đặc trưng, không mặt nạ (như baseline) |
 
         Δdepth = `full` − `no_depth` (cùng dataset, cùng seed, cùng tham số). Giao thức mục 4: chọn checkpoint theo
         MRR valid, test một lần, ghi rank từng bộ ba cho `scripts/compute_metrics.py`. Spatial-VG đánh giá valid trên
@@ -59,7 +60,7 @@ def _(mo):
         "Spatial-VRD": ("callmezuy/spatial-vrd", "inductive", 3),
         "Spatial-VG": ("callmezuy/spatial-vg", "inductive", 1),
     }
-    VARIANT_NAMES = ["full", "no_depth", "concat", "mean", "fixed", "constant"]
+    VARIANT_NAMES = ["full", "no_depth", "concat", "mean", "fixed", "constant", "constant_fixed"]
     dataset_ui = mo.ui.dropdown(options=list(DATASETS), value="Spatial-VRD", label="Dataset")
     dataset_ui
     return DATASETS, DATA_REVISION, RESULTS_REPO, RESUME_REPO, VARIANT_NAMES, dataset_ui
@@ -525,13 +526,15 @@ def _(DATASET, RESULTS_REPO, WORK_DIR, hf_token_ui, json, mo, os, snapshot_downl
 def _(DATASET, VARIANT_NAMES, mo):
     # P2.10 (quyết định 19/11/2026): lưới lr x dropout, tune riêng mọi biến thể (cách A), seed 42, chỉ valid.
     # Thiết kế đóng băng và ngân sách epoch = mặc định của scripts/train.py (EPOCH_BUDGET), không truyền tay.
-    # 6 biến thể ở FB15k-237-IMG và Spatial-VRD; ở 4 bộ còn lại là cách gộp được chọn + no_depth. Luật chọn cách gộp
-    # (20/11/2026) cho kết quả 22/11/2026: fixed (MRR valid trung bình VRD + FB15k 0,2976; concat 0,2967; mean 0,2959;
-    # gate 0,2895).
+    # Mọi biến thể ở FB15k-237-IMG và Spatial-VRD; ở 4 bộ còn lại là cách gộp được chọn + no_depth + constant_fixed.
+    # Luật chọn cách gộp (20/11/2026) cho kết quả 22/11/2026: fixed (MRR valid trung bình VRD + FB15k 0,2976; concat
+    # 0,2967; mean 0,2959; gate 0,2895). constant_fixed (vector hằng, giữ cách gộp fixed) bỏ ở Spatial-VG: chỉ 6 box
+    # thiếu ảnh trên 1,44 triệu thực thể, nên nó gần như trùng fixed mà mỗi lần chạy rất đắt.
     _fusion = "fixed"
     _ablation = DATASET in ("FB15k-237-IMG", "Spatial-VRD")
+    _main = [_fusion, "no_depth"] + ([] if DATASET == "Spatial-VG" else ["constant_fixed"])
     tune_variants_ui = mo.ui.multiselect(options=VARIANT_NAMES,
-                                         value=list(VARIANT_NAMES) if _ablation else [_fusion, "no_depth"],
+                                         value=list(VARIANT_NAMES) if _ablation else _main,
                                          label="Biến thể tune")
     tune_lrs_ui = mo.ui.text(value="1e-4,3e-4,1e-3", label="LR (lưới)")
     tune_dos_ui = mo.ui.text(value="0.1,0.3", label="Dropout (lưới)")
@@ -544,7 +547,9 @@ def _(DATASET, VARIANT_NAMES, mo):
               "**Mở rộng biên** (luật 20/11/2026): sau lưới gốc, `tune_summary.py` tìm các điểm một bậc ra ngoài biên cho "
               "biến thể có cấu hình chọn nằm ở biên; notebook chạy chúng rồi tính lại, lặp tới khi không còn điểm nào.\n\n"
               f"Ở 4 bộ ngoài FB15k-237-IMG và Spatial-VRD, mô hình chính là cách gộp **`{_fusion}`** (luật chọn cách "
-              "gộp, 22/11/2026), so với `no_depth`."),
+              "gộp, 22/11/2026), so với `no_depth` và `constant_fixed` (vector hằng cho thực thể thiếu ảnh như "
+              "baseline; không chạy ở Spatial-VG vì chỉ 6 box thiếu ảnh). Ở FB15k-237-IMG và Spatial-VRD, biến thể đã "
+              "có kết quả trên HF được bỏ qua, nên bấm lại chỉ chạy `constant_fixed`."),
         mo.hstack([tune_variants_ui, tune_lrs_ui, tune_dos_ui]),
         tune_mode_ui,
         tune_btn,

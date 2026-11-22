@@ -16,6 +16,8 @@ VARIANTS = {
     "mean": dict(use_depth=True, fusion_mode="mean", missing_mode="learned_mask"),
     "fixed": dict(use_depth=True, fusion_mode="fixed", missing_mode="learned_mask"),
     "constant": dict(use_depth=True, fusion_mode="gate", missing_mode="constant"),
+    # P2.10 (20/11/2026): the constant-fill ablation keeps the fusion chosen for `full` on the other datasets (fixed).
+    "constant_fixed": dict(use_depth=True, fusion_mode="fixed", missing_mode="constant"),
 }
 
 # Development options (P2.8), all off by default.
