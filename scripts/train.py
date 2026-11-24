@@ -4,8 +4,9 @@ Train and evaluate GeometryMMKG on one v0 dataset (RESEARCH_PLAN.md P2.1, P2.8, 
   python scripts/train.py --data data/Spatial-VRD --variant full --epochs 100 --seed 42
   python scripts/train.py --data data/Spatial-VRD --variant full --rel-gate --dev     # development run
 
-* Variants (section 3.1): full, no_depth, concat, mean, fixed, constant, constant_fixed
-  (core/models/end_to_end.py VARIANTS).
+* Variants (section 3.1): full, no_depth, concat, mean, fixed, constant, constant_fixed, depth_map_only,
+  depth_stats_only (core/models/end_to_end.py VARIANTS; the last two split the depth input of the scene graphs into
+  the depth map and the depth statistics, VARIANT_DEPTH_STATS).
 * Frozen design (P2.8 / P2.9, 19/11/2026) is the default: --input-norm, --depth-dropout 0.3, --text-proj and
   --depth-stats auto (the dataset's ent_depth_stats.pt on the scene graphs Spatial-VRD, Spatial-VRD-Trans and
   Spatial-VG; none on the knowledge graphs). Ablations switch them off: --no-input-norm, --depth-dropout 0,
@@ -48,7 +49,7 @@ sys.path.insert(0, CODE_DIR)
 
 from core.data_engineering.fast_dataset import (  # noqa: E402
     TripleBatches, get_all_true_triplets, load_depth_stats, load_entity_features, load_triples, read_count)
-from core.models.end_to_end import VARIANTS, GeometryMMKGModel, effective_options  # noqa: E402
+from core.models.end_to_end import VARIANT_DEPTH_STATS, VARIANTS, GeometryMMKGModel, effective_options  # noqa: E402
 from core.models.evaluation import evaluate_link_prediction, format_metrics, save_ranks  # noqa: E402
 from core.models.kg_reasoning import TripleIndex, in_batch_loss  # noqa: E402
 from core.reproducibility import set_seed  # noqa: E402
@@ -311,8 +312,11 @@ def main(argv=None):
           f"{'' if test is None else f' | test {len(test):,}'} | features stored on {feats.store}", flush=True)
 
     model_kwargs = dict(VARIANTS[args.variant])
+    if VARIANT_DEPTH_STATS.get(args.variant) and depth_stats_info is None:
+        raise SystemExit(f"variant {args.variant} needs depth statistics; {dataset} has none (or --depth-stats none)")
     options = effective_options(model_kwargs, args.rel_gate, args.input_norm, args.depth_dropout, args.text_proj,
-                                0 if depth_stats_info is None else depth_stats_info["dim"])
+                                0 if depth_stats_info is None else depth_stats_info["dim"],
+                                VARIANT_DEPTH_STATS.get(args.variant))
     model = GeometryMMKGModel(n_rel, embed_dim=feats.text.shape[1], dropout=args.dropout,
                               **model_kwargs, **options).to(device)
     n_params = sum(p.numel() for p in model.parameters())

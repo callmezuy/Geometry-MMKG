@@ -35,6 +35,8 @@ Inputs are frozen per-entity features: text t, RGB x, depth z (all [B, d]) and a
    h + r - t then contains W_s (s_h - s_t), i.e. the depth difference between head and tail (as the relative depth
    of ADVRD, Gan & He 2022). It is zero for entities without an image and for entities whose depth is dropped by
    depth_dropout (both go through the no-depth path), so h only has norm 1 when the term is zero.
+   The term also works without the depth map (use_depth=False; variant depth_stats_only), and depth_dropout then
+   drops the term alone.
 
 With rel_gate the entity representation depends on the relation of the query (like TransR's relation-specific
 projections), so training and evaluation fuse the candidates once per relation.
@@ -174,8 +176,9 @@ class GeometryGuidedFusion(nn.Module):
         else:
             self.missing_vision = None
         self.text_vision = TextVisionGate(dim, dropout, text_proj)
-        if depth_stats_dim and not use_depth:
-            raise ValueError("depth_stats needs use_depth=True")
+        # depth dropout drops every depth input of an entity together: the map (inside the vision fusion) and the
+        # statistics term; it also applies to a model with the statistics only (variant depth_stats_only)
+        self.depth_dropout = depth_dropout if (use_depth or depth_stats_dim) else 0.0
         self.depth_stats_proj = None
         if depth_stats_dim:
             self.depth_stats_proj = nn.Linear(depth_stats_dim, dim, bias=False)
@@ -184,7 +187,9 @@ class GeometryGuidedFusion(nn.Module):
     def forward(self, text, rgb, depth, mask=None, rel=None, geo=None):
         """text, rgb, depth: [B, d]; mask: bool [B] (True = has an image); rel: long [B] (rel_gate only);
         geo: [B, k] standardised depth statistics (depth_stats only)."""
-        drop = self.vision_fusion.drop_mask(len(rgb), rgb.device)
+        # same draw as VisionFusion.drop_mask (one torch.rand per batch), so runs with the depth map are unchanged
+        drop = (torch.rand(len(rgb), device=rgb.device) < self.depth_dropout
+                if self.training and self.depth_dropout > 0 else None)
         v = self.vision_fusion(rgb, depth, rel, drop)
         if self.missing_mode == "learned_mask":
             if mask is None:

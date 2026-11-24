@@ -18,21 +18,31 @@ VARIANTS = {
     "constant": dict(use_depth=True, fusion_mode="gate", missing_mode="constant"),
     # P2.10 (20/11/2026): the constant-fill ablation keeps the fusion chosen for `full` on the other datasets (fixed).
     "constant_fixed": dict(use_depth=True, fusion_mode="fixed", missing_mode="constant"),
+    # P2.10 (24/11/2026): 2 x 2 split of the depth input on the scene graphs (depth map x depth statistics);
+    # `fixed` has both, `no_depth` neither.
+    "depth_map_only": dict(use_depth=True, fusion_mode="fixed", missing_mode="learned_mask"),
+    "depth_stats_only": dict(use_depth=False, missing_mode="learned_mask"),
 }
+
+# Variants that decide the depth statistics themselves; every other variant uses them exactly when it uses the
+# depth map. (Not a model keyword: the statistics enter as the depth_stats_dim option.)
+VARIANT_DEPTH_STATS = {"depth_map_only": False, "depth_stats_only": True}
 
 # Development options (P2.8), all off by default.
 OPTIONS = ("rel_gate", "input_norm", "depth_dropout", "text_proj", "depth_stats_dim")
 
 
 def effective_options(variant_kwargs, rel_gate=False, input_norm=False, depth_dropout=0.0, text_proj=False,
-                      depth_stats_dim=0):
-    """Options that apply to a variant: rel_gate only for the gate, depth_dropout and depth_stats only with depth.
-    Lets one set of requested options be passed to every variant of a comparison."""
+                      depth_stats_dim=0, depth_stats=None):
+    """Options that apply to a variant: rel_gate only for the gate; depth_stats with the depth map unless the
+    variant says otherwise (`depth_stats`, from VARIANT_DEPTH_STATS); depth_dropout whenever some depth input
+    (map or statistics) is used. Lets one set of requested options be passed to every variant of a comparison."""
     uses_depth = variant_kwargs.get("use_depth", True)
+    uses_stats = bool(depth_stats_dim) and (uses_depth if depth_stats is None else depth_stats)
     is_gate = uses_depth and variant_kwargs.get("fusion_mode", "gate") == "gate"
     return dict(rel_gate=bool(rel_gate and is_gate), input_norm=bool(input_norm),
-                depth_dropout=float(depth_dropout) if uses_depth else 0.0, text_proj=bool(text_proj),
-                depth_stats_dim=int(depth_stats_dim) if uses_depth else 0)
+                depth_dropout=float(depth_dropout) if uses_depth or uses_stats else 0.0, text_proj=bool(text_proj),
+                depth_stats_dim=int(depth_stats_dim) if uses_stats else 0)
 
 
 class GeometryMMKGModel(nn.Module):

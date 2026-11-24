@@ -29,6 +29,11 @@ def _():
         | `fixed` | một trọng số vô hướng học được | vector học được + mặt nạ |
         | `constant` | gate | vector hằng của bảng đặc trưng, không mặt nạ (như baseline) |
         | `constant_fixed` | một trọng số vô hướng học được | vector hằng của bảng đặc trưng, không mặt nạ (như baseline) |
+        | `depth_map_only` | như `fixed`, không có số độ sâu theo vùng (`depth_stats`) | vector học được + mặt nạ |
+        | `depth_stats_only` | chỉ RGB, cộng số độ sâu theo vùng (không vector depth) | vector học được + mặt nạ |
+
+        Mọi biến thể có depth trên scene graph đều cộng `depth_stats`, trừ `depth_map_only`; `depth_stats_only` chỉ
+        chạy được trên scene graph.
 
         Δdepth = `full` − `no_depth` (cùng dataset, cùng seed, cùng tham số). Giao thức mục 4: chọn checkpoint theo
         MRR valid, test một lần, ghi rank từng bộ ba cho `scripts/compute_metrics.py`. Spatial-VG đánh giá valid trên
@@ -60,7 +65,8 @@ def _(mo):
         "Spatial-VRD": ("callmezuy/spatial-vrd", "inductive", 3),
         "Spatial-VG": ("callmezuy/spatial-vg", "inductive", 1),
     }
-    VARIANT_NAMES = ["full", "no_depth", "concat", "mean", "fixed", "constant", "constant_fixed"]
+    VARIANT_NAMES = ["full", "no_depth", "concat", "mean", "fixed", "constant", "constant_fixed", "depth_map_only",
+                     "depth_stats_only"]
     dataset_ui = mo.ui.dropdown(options=list(DATASETS), value="Spatial-VRD", label="Dataset")
     dataset_ui
     return DATASETS, DATA_REVISION, RESULTS_REPO, RESUME_REPO, VARIANT_NAMES, dataset_ui
@@ -212,12 +218,19 @@ def _(HfApi, RESULTS_REPO, RESUME_REPO, os, shutil, subprocess, sys):
             return False
 
     def remote_files(prefix, token):
-        """Đường dẫn (tương đối với prefix) các file đã có trên RESULTS_REPO/prefix (rỗng nếu repo chưa có)."""
+        """Đường dẫn (tương đối với prefix) các file đã có trên RESULTS_REPO/prefix (rỗng nếu repo chưa có).
+        Lỗi khác (mạng, token, giới hạn gọi API) thì dừng hẳn: trả về rỗng sẽ làm chạy lại các điểm đã xong."""
+        from huggingface_hub.utils import RepositoryNotFoundError
         try:
             _fs = HfApi(token=token).list_repo_files(RESULTS_REPO, repo_type="dataset")
-        except Exception:
+        except RepositoryNotFoundError:
             return set()
-        return {_p[len(prefix) + 1:] for _p in _fs if _p.startswith(prefix + "/")}
+        except Exception as _e:
+            raise RuntimeError(f"Không đọc được danh sách file của {RESULTS_REPO} ({type(_e).__name__}: {_e}). "
+                               "Dừng để không chạy lại các điểm đã có kết quả; kiểm tra token / mạng rồi bấm lại.") from _e
+        _out = {_p[len(prefix) + 1:] for _p in _fs if _p.startswith(prefix + "/")}
+        print(f"HF {RESULTS_REPO}/{prefix}: {sum(_p.endswith('.json') for _p in _out)} file metric đã có", flush=True)
+        return _out
 
     def run_resumable(cmd, cwd, out, subdir, stem, token, minutes):
         """run_streaming cho một lần train.py, chạy tiếp được khi bị ngắt:
@@ -523,18 +536,23 @@ def _(DATASET, RESULTS_REPO, WORK_DIR, hf_token_ui, json, mo, os, snapshot_downl
 
 
 @app.cell
-def _(DATASET, VARIANT_NAMES, mo):
+def _(DATASET, HAS_DEPTH_STATS, VARIANT_NAMES, mo):
     # P2.10 (quyết định 19/11/2026): lưới lr x dropout, tune riêng mọi biến thể (cách A), seed 42, chỉ valid.
     # Thiết kế đóng băng và ngân sách epoch = mặc định của scripts/train.py (EPOCH_BUDGET), không truyền tay.
     # Mọi biến thể ở FB15k-237-IMG và Spatial-VRD; ở 4 bộ còn lại là cách gộp được chọn + no_depth + constant_fixed.
     # Luật chọn cách gộp (20/11/2026) cho kết quả 22/11/2026: fixed (MRR valid trung bình VRD + FB15k 0,2976; concat
     # 0,2967; mean 0,2959; gate 0,2895). constant_fixed (vector hằng, giữ cách gộp fixed) bỏ ở Spatial-VG: chỉ 6 box
     # thiếu ảnh trên 1,44 triệu thực thể, nên nó gần như trùng fixed mà mỗi lần chạy rất đắt.
+    # Bảng 2 x 2 của depth (24/11/2026): depth_map_only và depth_stats_only chỉ ở Spatial-VRD và Spatial-VRD-Trans.
+    # Bộ KG không có depth_stats (depth_map_only trùng fixed, depth_stats_only không chạy được); VG quá đắt để tune.
     _fusion = "fixed"
+    _split = ["depth_map_only", "depth_stats_only"]
     _ablation = DATASET in ("FB15k-237-IMG", "Spatial-VRD")
     _main = [_fusion, "no_depth"] + ([] if DATASET == "Spatial-VG" else ["constant_fixed"])
-    tune_variants_ui = mo.ui.multiselect(options=VARIANT_NAMES,
-                                         value=list(VARIANT_NAMES) if _ablation else _main,
+    _main += _split if DATASET == "Spatial-VRD-Trans" else []
+    _all = [_v for _v in VARIANT_NAMES if _v not in _split or DATASET == "Spatial-VRD"]
+    tune_variants_ui = mo.ui.multiselect(options=[_v for _v in VARIANT_NAMES if _v not in _split or HAS_DEPTH_STATS],
+                                         value=_all if _ablation else _main,
                                          label="Biến thể tune")
     tune_lrs_ui = mo.ui.text(value="1e-4,3e-4,1e-3", label="LR (lưới)")
     tune_dos_ui = mo.ui.text(value="0.1,0.3", label="Dropout (lưới)")
@@ -549,7 +567,10 @@ def _(DATASET, VARIANT_NAMES, mo):
               f"Ở 4 bộ ngoài FB15k-237-IMG và Spatial-VRD, mô hình chính là cách gộp **`{_fusion}`** (luật chọn cách "
               "gộp, 22/11/2026), so với `no_depth` và `constant_fixed` (vector hằng cho thực thể thiếu ảnh như "
               "baseline; không chạy ở Spatial-VG vì chỉ 6 box thiếu ảnh). Ở FB15k-237-IMG và Spatial-VRD, biến thể đã "
-              "có kết quả trên HF được bỏ qua, nên bấm lại chỉ chạy `constant_fixed`."),
+              "có kết quả trên HF được bỏ qua.\n\n"
+              "**Bảng 2 × 2 của depth** (24/11/2026, chỉ Spatial-VRD và Spatial-VRD-Trans): `depth_map_only` (vector "
+              "depth, không số độ sâu theo vùng) và `depth_stats_only` (số độ sâu theo vùng, không vector depth), cùng "
+              "`fixed` (cả hai) và `no_depth` (không có gì)."),
         mo.hstack([tune_variants_ui, tune_lrs_ui, tune_dos_ui]),
         tune_mode_ui,
         tune_btn,

@@ -193,7 +193,7 @@ Sáu bộ, mỗi bộ một repo HF public, tag `v0`; cấu trúc file, lệnh d
 
 **Thiết kế (quyết định 18/11/2026).** Thực thể = hàm của đặc trưng đóng băng (text t, RGB x, depth z), không có embedding theo ID, nên cùng một mô hình chạy ở cả bốn ô 2×2. (1) Gộp RGB–depth thành vision v theo `fusion_mode` (P2.1). (2) Thực thể thiếu ảnh: v ← một vector học được `v_miss` (P2.6). (3) Cổng text–vision: u = W_v v, g = σ(W_tg[t; u]), h = LN(t + Dropout(g ⊙ u)) / √d (P2.3). LN không có gain/bias học được, nên mọi thực thể có chuẩn L2 bằng 1 như TransE gốc (quyết định 19/11/2026): với gain học được, mô hình tự co/giãn cả không gian, làm margin và nhiệt độ đổi ý nghĩa trong lúc train (đo trên Spatial-VRD: khoảng cách tới đáp án đúng 435 lúc khởi tạo, 88 sau 1 epoch; với chuẩn cố định: 35,9 → 32,3 sau 3 epoch). (4) Điểm TransE L1 với embedding quan hệ. Train: âm mẫu **hai phía trong batch** (mọi thực thể khác nhau của batch thay head và thay tail, như BLP); bỏ âm mẫu là đáp án đúng **theo train** (không dùng valid/test khi train); loss margin có trọng số self-adversarial (detach), trung bình hai phía. **Bỏ GCN:** ở chế độ inductive, cạnh của thực thể test chỉ nằm trong chính các bộ ba test (dùng để truyền tin là rò rỉ), còn chỉ dùng đồ thị train thì thực thể test không có hàng xóm, biểu diễn train và test khác bản chất. **Bỏ loss căn chỉnh** text/RGB/depth: nó được tính trên đặc trưng đóng băng nên không có gradient. Code: `core/fusion/geometry_guided_fusion.py`, `core/models/{end_to_end,kg_reasoning}.py`, `core/data_engineering/fast_dataset.py`.
 
-- [x] **P2.1** Cờ ablation (mục 3.1): `use_depth`, `fusion_mode` ∈ {`gate`: G = σ(W_g[x; z]), v = G⊙x + (1−G)⊙z; `concat`: Linear(2d→d); `mean`; `fixed`: một scalar học được α, v = σ(α)x + (1−σ(α))z}, `missing_mode` ∈ {`learned_mask`, `constant`}. Biến thể có tên (`VARIANTS`): `full`, `no_depth` (v = x), `concat`, `mean`, `fixed`, `constant`; thêm `constant_fixed` (22/11/2026, P2.10).
+- [x] **P2.1** Cờ ablation (mục 3.1): `use_depth`, `fusion_mode` ∈ {`gate`: G = σ(W_g[x; z]), v = G⊙x + (1−G)⊙z; `concat`: Linear(2d→d); `mean`; `fixed`: một scalar học được α, v = σ(α)x + (1−σ(α))z}, `missing_mode` ∈ {`learned_mask`, `constant`}. Biến thể có tên (`VARIANTS`): `full`, `no_depth` (v = x), `concat`, `mean`, `fixed`, `constant`; thêm `constant_fixed` (22/11/2026), `depth_map_only` và `depth_stats_only` (24/11/2026, P2.10).
   - `scripts/train.py --data --variant --epochs --seed` cùng các siêu tham số (`--lr --margin --adv-temp --batch-size --dropout --weight-decay --valid-every --valid-max`). Đánh giá valid mỗi `--valid-every` epoch và sau epoch cuối, giữ checkpoint có MRR valid cao nhất, test một lần. Spatial-VG: valid trên tập con 5.000 bộ ba cố định (seed 0, chung cho mọi biến thể và seed; mục 4.9). Ghi `ranks_geometry_<ds>_<variant>_seed<s>_test.csv`, `metrics_…json` (test, valid tốt nhất, epoch tốt nhất, lịch sử từng epoch, tham số, commit) và checkpoint.
   - Nhiệt độ self-adversarial mặc định 1 (như RotatE): chạy thử 3 epoch trên Spatial-VRD, số âm mẫu hiệu dụng (exp entropy của trọng số, ghi trong log mỗi epoch) giảm từ khoảng 1.300 xuống 250 trên khoảng 1.980 ứng viên; nhiệt độ 2 chỉ còn khoảng 9, gần với chỉ lấy âm mẫu khó nhất.
   - Khoảng cách L1 trong loss dùng backward tự viết, chia khúc (`L1CDist`): backward của `torch.cdist(p=1)` dựng tensor B×C×d (khoảng 6 GB với batch 1024).
@@ -521,6 +521,84 @@ Sáu bộ, mỗi bộ một repo HF public, tag `v0`; cấu trúc file, lệnh d
       - **Không chạy ở Spatial-VG:** chỉ 6 box thiếu ảnh trên 1,44 triệu thực thể, nên biến thể này gần như trùng `fixed`
         (giống `constant` trùng `full` trên VRD với 2 thực thể thiếu ảnh), trong khi mỗi lần chạy VG rất đắt. Ghi lý do
         này trong bài.
+  - **Kết quả tune đến 23/11/2026** (code `c924941` / `69ab9d0`; thời gian mỗi lần đều đặn ở mức GPU: VRD-Trans 8 phút
+    cho 100 epoch, MKG-Y 19 phút cho 1000 epoch). FB15K-237-ind và Spatial-VG chưa chạy.
+    - **Spatial-VRD, `constant_fixed` (8 lần, xong):** 1e-3 / 0, MRR valid 0,2649, epoch tốt nhất 20. Bằng `fixed` (0,2650),
+      đúng như dự kiến vì chỉ có 2 thực thể thiếu ảnh.
+    - **Spatial-VRD-Trans (28 lần, xong: lưới gốc, mở rộng biên, luật hội tụ):**
+
+      | Biến thể | lr / dropout | MRR valid | Epoch tốt nhất / ngân sách | Hội tụ |
+      |---|---|---|---|---|
+      | fixed | 3e-4 / 0 | **0,3611** | 200 / 200 | Chưa, sau khi đã gấp đôi ngân sách |
+      | constant_fixed | 1e-3 / 0 | 0,3565 | 90 / 100 | Có |
+      | no_depth | 1e-3 / 0 | 0,3503 | 100 / 200 | Có (lần chạy 200 epoch vẫn đạt đỉnh ở epoch 100) |
+
+      - **Dropout 0 thắng ở cả 3 biến thể,** như trên Spatial-VRD.
+      - **`fixed` chưa hội tụ sau khi đã gấp đôi.** Luật hội tụ chỉ chạy lại một lần (quyết định 23/11/2026, người dùng
+        duyệt: giữ luật, không chạy thêm). Ghi trong bài là hạn chế. Chiều của nó: train thêm chỉ có thể làm `fixed` tăng,
+        nên Δdepth đang bị tính thấp đi, không bị thổi phồng.
+      - **Δdepth:** `fixed` hơn `no_depth` +0,011. So cùng 100 epoch thì `fixed` 3e-4 / 0 đạt 0,3565, còn khoảng +0,006.
+      - **Ngân sách 100 epoch hơi ngắn cho bộ này:** nhiều cấu hình đạt đỉnh đúng ở epoch cuối.
+      - **MRR cao hơn hẳn Spatial-VRD** (0,36 so với 0,265) dù mô hình không có embedding theo ID. Giả thuyết: mỗi box có
+        một vector đặc trưng riêng, nên khi thực thể đã xuất hiện trong train, mô hình có thể nhớ luôn vector đó, và vector
+        này gần như đóng vai một ID. Cần tính đến điều này khi so VRD-Trans với VRD (P5.5).
+    - **MKG-Y (25 lần, xong 23/11: lưới gốc, mở rộng biên, luật hội tụ).** 519 / 15.000 thực thể thiếu ảnh:
+
+      | Biến thể | lr / dropout | MRR valid | Epoch tốt nhất / ngân sách | Hội tụ |
+      |---|---|---|---|---|
+      | fixed | 3e-4 / 0,3 | 0,3785 | 1100 / 2000 | Có (bản 1000 epoch: 0,3784 ở epoch 950) |
+      | constant_fixed | 3e-3 / 0,3 | 0,3777 | 800 / 1000 | Có (điểm 1e-2 / 0,3 kém hơn: 0,3696) |
+      | no_depth | 1e-3 / 0,3 | 0,3770 | 400 / 1000 | Có |
+
+      - **Ba biến thể cách nhau khoảng 0,0015, tức cỡ nhiễu.** Như vậy depth không giúp, giống FB15k-237-IMG. Mặt nạ và
+        vector học được cũng không hơn vector hằng.
+      - **Dropout 0,3 thắng ở cả 3 biến thể,** ngược với hai bộ VRD. Các điểm dropout 0,5 đều kém hơn.
+    - **FB15k-237-IMG, `constant_fixed` (8 lần, xong 23/11):** 1e-3 / 0,1, MRR valid 0,3300, epoch tốt nhất 70. Bằng
+      `fixed` (0,3302) và `no_depth` (0,3302).
+    - **FB15K-237-ind (đang chạy, 24/11):** `fixed` xong lưới gốc (6 lần), `no_depth` 4 / 6, `constant_fixed` chưa chạy.
+      Đến lúc này: `fixed` 3e-4 / 0,3 đạt 0,2551, `no_depth` 3e-4 / 0,3 đạt 0,2540. Epoch tốt nhất rất sớm (20–60 / 200)
+      và dropout 0,3 thắng, tức mô hình học thuộc nhanh khi thực thể valid chưa từng thấy. Mức tuyệt đối thấp hơn nhiều so
+      với số công bố của CMR (MRR test 0,371).
+    - **Tổng hợp đến 24/11 (MRR valid của cấu hình chọn):**
+
+      | Dataset | fixed | no_depth | constant_fixed | Δdepth (fixed − no_depth) |
+      |---|---|---|---|---|
+      | FB15k-237-IMG | 0,3302 | 0,3302 | 0,3300 | 0,000 |
+      | MKG-Y | 0,3785 | 0,3770 | 0,3777 | +0,0015 |
+      | FB15K-237-ind (dở) | 0,2551 | 0,2540 | — | +0,001 |
+      | Spatial-VRD | 0,2650 | 0,2560 | 0,2649 | +0,009 |
+      | Spatial-VRD-Trans | 0,3611 | 0,3503 | 0,3565 | +0,011 (+0,006 nếu cùng 100 epoch) |
+
+      - **Δdepth chỉ dương trên scene graph.** Trên 3 bộ MMKG nó không vượt cỡ nhiễu.
+      - **`constant_fixed` bằng `fixed` ở mọi bộ:** cơ chế mặt nạ + vector học được cho thực thể thiếu ảnh (P2.6) không
+        cho lợi ích đo được, có thể vì ảnh thiếu ít (FB15k 1,7%, MKG-Y 3,5%). Không trình bày nó như một đóng góp. Mặt tốt:
+        chênh lệch với baseline không thể quy cho cách xử lý thiếu ảnh.
+      - **Dropout tốt nhất khác theo loại dữ liệu:** 0 trên scene graph, 0,1 trên FB15k-237-IMG, 0,3 trên MKG-Y và
+        FB15K-237-ind. Đây là lý do phải tune riêng từng dataset.
+  - **Bảng 2 × 2 của depth trên scene graph (quyết định 24/11/2026, người dùng duyệt).**
+    - **Vấn đề:** trên scene graph, "có depth" gồm hai phần: vector depth (DINOv2 của ảnh depth) và các số độ sâu theo
+      vùng (`depth_stats`, P2.9). Trên MMKG chỉ có vector depth. Probe P2.9 cho thấy vector depth gần như không thêm gì,
+      nên chênh lệch MMKG / MMSG có thể chỉ phản ánh việc có `depth_stats` hay không, và cần biết nhánh vector depth (cùng
+      câu hỏi RQ2 về cách gộp RGB với depth) có còn cần khi đã có `depth_stats` hay không.
+    - **Thiết kế:** hai biến thể mới, cùng thiết kế đóng băng, tune đủ (lưới gốc + mở rộng biên + luật hội tụ) trên
+      Spatial-VRD và Spatial-VRD-Trans:
+
+      | | Không `depth_stats` | Có `depth_stats` |
+      |---|---|---|
+      | **Không vector depth** | `no_depth` | `depth_stats_only` |
+      | **Có vector depth** | `depth_map_only` | `fixed` |
+
+      - `depth_map_only` = `fixed` không có `depth_stats`. `depth_stats_only` = `no_depth` cộng số hạng W_s s. Mọi
+        biến thể có depth khác vẫn dùng `depth_stats` trên scene graph như trước (`VARIANT_DEPTH_STATS` trong
+        `core/models/end_to_end.py`).
+      - `depth_dropout` 0,3 áp dụng cho mọi đầu vào depth của một thực thể: vector và số độ sâu bị bỏ cùng lúc ở
+        `fixed`, và bỏ riêng số độ sâu ở `depth_stats_only`. Số lần gọi số ngẫu nhiên không đổi với các biến thể cũ: đã
+        kiểm tra trên Spatial-VRD, `fixed` 2 epoch cho cùng loss và MRR với code `69ab9d0`.
+      - **Không làm trên MMKG:** số hạng W_s (s_h − s_t) là hiệu độ sâu giữa đầu và đuôi, chỉ có nghĩa khi hai thực thể
+        nằm trong cùng một ảnh (cùng không gian nhìn, định nghĩa MMSG). Hai thực thể KG có ảnh khác nhau, nên hiệu này
+        không có nghĩa. Bài phải ghi rõ lý do này. **Không tune trên Spatial-VG** (quá đắt).
+      - **Đọc kết quả:** `depth_map_only` ≈ `no_depth` nghĩa là vector depth không giúp ở đâu cả. Nếu `depth_stats_only`
+        ≈ `fixed` thì nhánh vector depth là thừa, và RQ2 phải viết lại theo hướng đó.
   - **Chạy tiếp khi bị ngắt (20/11/2026):** sau mỗi lần valid, `train.py` ghi `resume_<stem>.pt`. File gồm model, optimizer,
     trạng thái RNG, checkpoint tốt nhất và lịch sử, và được ghi nguyên khối nên không bị hỏng nếu bị ngắt giữa lúc ghi. Lần chạy
     sau có cùng stem và cùng tham số huấn luyện sẽ train tiếp từ đó, với cùng batch và dropout như khi không bị ngắt. Nếu tham

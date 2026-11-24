@@ -191,12 +191,6 @@ def test_depth_stats_is_linear_in_the_depth_difference():
 def test_depth_stats_only_with_depth_and_dropped_with_depth():
     assert effective_options(VARIANTS["no_depth"], depth_stats_dim=K)["depth_stats_dim"] == 0
     assert effective_options(VARIANTS["full"], depth_stats_dim=K)["depth_stats_dim"] == K
-    try:
-        _model(use_depth=False, depth_stats_dim=K)
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("depth_stats without depth must fail")
     text, rgb, depth, mask = _inputs()
     full = _model(depth_dropout=1.0, depth_stats_dim=K)
     _randomize(full)
@@ -207,6 +201,62 @@ def test_depth_stats_only_with_depth_and_dropped_with_depth():
         a = full.forward_fusion(text, rgb, depth, mask, geo=_geo())
         b = nod.forward_fusion(text, rgb, depth, mask)
     assert torch.allclose(a, b, atol=1e-6)                       # p = 1: depth and its statistics dropped
+
+
+def test_depth_map_and_depth_stats_split_variants():
+    from core.models.end_to_end import VARIANT_DEPTH_STATS
+    opts = lambda v: effective_options(VARIANTS[v], depth_dropout=0.3, depth_stats_dim=K,  # noqa: E731
+                                       depth_stats=VARIANT_DEPTH_STATS.get(v))
+    # the 2 x 2 table of the scene graphs: (depth map, depth statistics)
+    assert VARIANTS["depth_map_only"] == VARIANTS["fixed"] and VARIANTS["depth_stats_only"] == VARIANTS["no_depth"]
+    assert (opts("fixed")["depth_stats_dim"], opts("depth_map_only")["depth_stats_dim"]) == (K, 0)
+    assert (opts("depth_stats_only")["depth_stats_dim"], opts("no_depth")["depth_stats_dim"]) == (K, 0)
+    assert opts("depth_stats_only")["depth_dropout"] == 0.3 and opts("no_depth")["depth_dropout"] == 0.0
+    assert opts("depth_map_only")["depth_dropout"] == 0.3
+    # without statistics in the data (knowledge graphs) depth_stats_only has nothing to use
+    assert effective_options(VARIANTS["depth_stats_only"], depth_stats_dim=0, depth_stats=True)["depth_stats_dim"] == 0
+
+    text, rgb, depth, mask = _inputs()
+    so = _model(use_depth=False, depth_stats_dim=K, depth_dropout=0.3)
+    _randomize(so)
+    nod = _model(use_depth=False)
+    nod.load_state_dict(so.state_dict(), strict=False)
+    with torch.no_grad():
+        a = so.forward_fusion(text, rgb, depth, mask, geo=_geo(3))
+        b = so.forward_fusion(text, rgb, depth, mask, geo=_geo(4))
+        c = so.forward_fusion(text, rgb, depth + 9.0, mask, geo=_geo(3))
+        W = so.fusion_module.depth_stats_proj.weight
+        base = nod.forward_fusion(text, rgb, depth, mask)
+    assert torch.allclose(a, c, atol=1e-6)                       # the depth map is not read
+    assert not torch.allclose(a[mask], b[mask])                  # the statistics are
+    assert torch.allclose(a[~mask], b[~mask], atol=1e-6)         # except without an image
+    assert torch.allclose((a - base)[mask], _geo(3)[mask] @ W.T, atol=1e-5)   # = no_depth + W_s s
+    so.train()                                                   # p = 1 drops the statistics term
+    so.fusion_module.depth_dropout = 1.0
+    with torch.no_grad():
+        assert torch.allclose(so.forward_fusion(text, rgb, depth, mask, geo=_geo(3)), base, atol=1e-6)
+
+
+def test_depth_dropout_draws_unchanged_for_depth_map_models():
+    # one torch.rand per batch, as before the depth_stats_only change: old runs stay reproducible
+    text, rgb, depth, mask = _inputs()
+    m = _model(depth_dropout=0.3, depth_stats_dim=K)
+    _randomize(m)
+    m.train()
+    torch.manual_seed(7)
+    with torch.no_grad():
+        out = m.forward_fusion(text, rgb, depth, mask, geo=_geo())
+    after = torch.rand(1)
+    torch.manual_seed(7)
+    drop = torch.rand(N) < 0.3
+    expected_after = torch.rand(1)
+    assert torch.equal(after, expected_after)
+    fv = m.fusion_module.vision_fusion
+    with torch.no_grad():
+        v = torch.where(mask.unsqueeze(-1), fv(rgb, depth, None, drop), m.fusion_module.missing_vision.expand(N, D))
+        h = m.fusion_module.text_vision(text, v)
+        h = h + m.fusion_module.depth_stats_proj(_geo()) * (mask & ~drop).unsqueeze(-1)
+    assert torch.allclose(out, h, atol=1e-6)
 
 
 def test_depth_stats_in_loss_and_evaluation():
