@@ -167,9 +167,9 @@ def momok(a):
     ents = read_openke(os.path.join(d, "entity2id.txt"))
     rels = read_openke(os.path.join(d, "relation2id.txt"))
     with open(os.path.join(dst, "entity2id.txt"), "w") as f:
-        f.writelines(f"e{i} {i}\n" for _, i in ents)
+        f.writelines(f"e{row[-1]} {row[-1]}\n" for row in ents)  # names may contain spaces; the id is last
     with open(os.path.join(dst, "relation2id.txt"), "w") as f:
-        f.writelines(f"r{i} {i}\n" for _, i in rels)
+        f.writelines(f"r{row[-1]} {row[-1]}\n" for row in rels)
     for split in ("train", "valid", "test"):
         rows = read_openke(os.path.join(d, f"{split}2id.txt"))  # OpenKE order: h t r
         with open(os.path.join(dst, f"{split}.txt"), "w") as f:
@@ -291,6 +291,8 @@ def native(a):
 # ---------------------------------------------------------------------------------------------- CMR GPU
 def cmr_gpu(a):
     import types
+    # The xet transfer path returned 404 for bert-base-uncased on Molab (25/11/2026); use plain HTTP.
+    os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
     import torch
     from huggingface_hub import snapshot_download
     work = os.path.abspath(a.work)
@@ -300,8 +302,13 @@ def cmr_gpu(a):
     os.makedirs(plms, exist_ok=True)
     for repo, local in (("bert-base-uncased", "bert-base-uncased"), ("google/vit-base-patch16-224",
                                                                      "vit-base-patch16-224")):
-        snapshot_download(repo_id=repo, local_dir=os.path.join(plms, local),
-                          allow_patterns=["*.json", "*.txt", "*.safetensors"])
+        try:
+            snapshot_download(repo_id=repo, local_dir=os.path.join(plms, local),
+                              allow_patterns=["*.json", "*.txt", "*.safetensors"])
+        except Exception as e:  # fall back to the PyTorch weight file
+            print(f"{repo}: safetensors download failed ({e!r:.200}); trying pytorch_model.bin")
+            snapshot_download(repo_id=repo, local_dir=os.path.join(plms, local),
+                              allow_patterns=["*.json", "*.txt", "pytorch_model.bin"])
     os.chdir(os.path.dirname(plms))  # CMR loads './PLMs/vit-base-patch16-224' relative to the working dir
     # models.py imports triplet_mask -> config (argparse) and the entity dict; neither is used by forward().
     sys.modules["triplet_mask"] = types.SimpleNamespace(construct_mask=None)
@@ -312,6 +319,8 @@ def cmr_gpu(a):
                                  additive_margin=0.0, batch_size=B, pre_batch=0, prefix=prefix, pooling="mean",
                                  use_self_negative=False, pre_batch_weight=0.5)
     model = CustomMMModel(args).cuda().train()
+    if a.freeze_vit:  # the paper's setting ("we fix the parameter of the visual encoder"); the code trains it
+        model.vit.requires_grad_(False)
     n_params = sum(p.numel() for p in model.parameters())
     opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=1e-5, weight_decay=1e-4)
     scaler = torch.amp.GradScaler("cuda")
@@ -346,11 +355,12 @@ def cmr_gpu(a):
     torch.cuda.synchronize()
     s_step = (time.time() - t) / a.steps
     steps = {"FB15K-237-ind": 215082 * 2 // B, "Spatial-VRD": 76959 * 2 // B}
-    record({"baseline": "CMR", "part": "gpu", "batch": B, "s_per_step": s_step, "n_params": n_params,
+    record({"baseline": "CMR", "part": "gpu", "batch": B, "freeze_vit": a.freeze_vit, "s_per_step": s_step,
+            "n_params": n_params,
             "peak_mem_gb": torch.cuda.max_memory_allocated() / 2**30,
             "gpu_min_per_epoch": {k: v * s_step / 60 for k, v in steps.items()},
-            "note": "synthetic tokens (len 50) and pixels; pre-batch negatives off (tiny cost); ViT trainable as "
-                    "in the released code (paper says frozen)"})
+            "note": "synthetic tokens (len 50) and pixels; pre-batch negatives off (tiny cost); without "
+                    "--freeze-vit the ViT is trainable as in the released code (paper says frozen)"})
 
 
 # ----------------------------------------------------------------------------------------- MKGformer GPU
@@ -360,7 +370,10 @@ def mkgformer_gpu(a):
     import transformers.pytorch_utils as pu
     from transformers import BertConfig, CLIPConfig
     mu.apply_chunking_to_forward = pu.apply_chunking_to_forward  # timing-only shim for transformers 5
-    sys.path.insert(0, os.path.join(ROOT, "baselines", "MKGformer", "MKG"))
+    mkg = os.path.join(ROOT, "baselines", "MKGformer", "MKG")
+    if not os.path.isdir(os.path.join(mkg, "models")):  # git submodule: empty after a plain clone
+        subprocess.run(["git", "-C", ROOT, "submodule", "update", "--init", "baselines/MKGformer"], check=True)
+    sys.path.insert(0, mkg)
     from models.model import UnimoKGC
     vcfg = CLIPConfig.from_pretrained("openai/clip-vit-base-patch32").vision_config
     tcfg = BertConfig.from_pretrained("bert-base-uncased")
@@ -472,6 +485,7 @@ def main():
     ap.add_argument("--epochs", type=int, default=4)
     ap.add_argument("--steps", type=int, default=30)
     ap.add_argument("--batch", type=int, default=0)
+    ap.add_argument("--freeze-vit", action="store_true", help="cmr-gpu: freeze the ViT as the paper describes")
     ap.add_argument("--work", default=os.path.join(ROOT, "..", "timing"))
     ap.add_argument("--images", help="zip or folder of real images (decode)")
     ap.add_argument("--n", type=int, default=2000)

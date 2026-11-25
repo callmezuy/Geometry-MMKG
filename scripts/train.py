@@ -1,5 +1,6 @@
 """
-Train and evaluate GeometryMMKG on one v0 dataset (RESEARCH_PLAN.md P2.1, P2.8, section 4).
+Train and evaluate GeometryMMKG or the Feature-TransE baseline on one v0 dataset (RESEARCH_PLAN.md P2.1, P2.8, P3.1,
+section 4).
 
   python scripts/train.py --data data/Spatial-VRD --variant full --epochs 100 --seed 42
   python scripts/train.py --data data/Spatial-VRD --variant full --rel-gate --dev     # development run
@@ -7,6 +8,11 @@ Train and evaluate GeometryMMKG on one v0 dataset (RESEARCH_PLAN.md P2.1, P2.8, 
 * Variants (section 3.1): full, no_depth, concat, mean, fixed, constant, constant_fixed, depth_map_only,
   depth_stats_only (core/models/end_to_end.py VARIANTS; the last two split the depth input of the scene graphs into
   the depth map and the depth statistics, VARIANT_DEPTH_STATS).
+* --model feature_transe (P3.1): the Feature-TransE baseline (core/models/feature_transe.py), variants no_depth
+  (text + RGB) and depth (text + RGB + depth map), same training, selection, tuning, epoch budget, resume and output
+  as GeometryMMKG. It reads the constant-filled feature tables as they are (missing images: section 3.2 rule 1;
+  checked against ent_fill.pt) and takes none of the GeometryMMKG options below (they are switched off for it).
+  Names: stem feature-transe_<dataset>_<variant>[_<config>]_seed<seed>, folders results/feature-transe{,-tune,-dev}/.
 * Frozen design (P2.8 / P2.9, 19/11/2026) is the default: --input-norm, --depth-dropout 0.3, --text-proj and
   --depth-stats auto (the dataset's ent_depth_stats.pt on the scene graphs Spatial-VRD, Spatial-VRD-Trans and
   Spatial-VG; none on the knowledge graphs). Ablations switch them off: --no-input-norm, --depth-dropout 0,
@@ -51,6 +57,7 @@ from core.data_engineering.fast_dataset import (  # noqa: E402
     TripleBatches, get_all_true_triplets, load_depth_stats, load_entity_features, load_triples, read_count)
 from core.models.end_to_end import VARIANT_DEPTH_STATS, VARIANTS, GeometryMMKGModel, effective_options  # noqa: E402
 from core.models.evaluation import evaluate_link_prediction, format_metrics, save_ranks  # noqa: E402
+from core.models.feature_transe import FeatureTransE  # noqa: E402
 from core.models.kg_reasoning import TripleIndex, in_batch_loss  # noqa: E402
 from core.reproducibility import set_seed  # noqa: E402
 
@@ -67,12 +74,19 @@ EPOCH_BUDGET = {
 DEFAULT_BUDGET = (100, 10)
 VG_VALID_MAX = 5000         # RESEARCH_PLAN.md 4.9
 GATE_SAMPLE = 4096          # entities (with an image) used for the gate statistics
+# Feature-TransE (P3.1): variant -> use_depth. Its folders / stems use this prefix instead of "geometry".
+FT_VARIANTS = {"no_depth": False, "depth": True}
+MODEL_PREFIX = {"geometry": "geometry", "feature_transe": "feature-transe"}
 
 
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--data", required=True, help="dataset folder, e.g. data/Spatial-VRD")
-    p.add_argument("--variant", default="full", choices=list(VARIANTS))
+    p.add_argument("--model", default="geometry", choices=list(MODEL_PREFIX),
+                   help="geometry = GeometryMMKG; feature_transe = the Feature-TransE baseline (P3.1)")
+    p.add_argument("--variant", default=None, choices=sorted(set(VARIANTS) | set(FT_VARIANTS)),
+                   help="GeometryMMKG: one of VARIANTS (default full); Feature-TransE: no_depth or depth "
+                        "(default no_depth)")
     p.add_argument("--epochs", type=int, default=None, help="default: EPOCH_BUDGET of the dataset (P2.10)")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--batch-size", type=int, default=1024)
@@ -105,7 +119,33 @@ def parse_args(argv=None):
     p.add_argument("--out", default=None, help="output folder (default: see above)")
     p.add_argument("--no-ckpt", action="store_true", help="do not write the best checkpoint")
     p.add_argument("--no-resume", action="store_true", help="do not read or write <out>/resume_<stem>.pt")
-    return p.parse_args(argv)
+    args = p.parse_args(argv)
+    variants = VARIANTS if args.model == "geometry" else FT_VARIANTS
+    if args.variant is None:
+        args.variant = "full" if args.model == "geometry" else "no_depth"
+    if args.variant not in variants:
+        p.error(f"--variant {args.variant} is not a {args.model} variant ({', '.join(variants)})")
+    if args.model == "feature_transe":
+        # GeometryMMKG development options do not exist in Feature-TransE: switch them off so that names,
+        # metrics and the resume key say what actually ran.
+        args.rel_gate, args.input_norm, args.depth_dropout, args.text_proj = False, False, 0.0, False
+        args.depth_stats = "none"
+    return args
+
+
+def check_constant_fill(feats, data_dir, use_depth):
+    """Feature-TransE reads the tables as they are: rows without an image must hold the constant of ent_fill.pt
+    (section 3.2 rule 1, P0.7), not values the mask would hide."""
+    path = os.path.join(data_dir, "ent_fill.pt")
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"{path} is needed to check the constant fill of the Feature-TransE inputs")
+    fill = torch.load(path, map_location="cpu", weights_only=True)
+    miss = ~feats.mask.cpu()
+    for k in ("rgb", "depth") if use_depth else ("rgb",):
+        x = getattr(feats, k)[miss.to(getattr(feats, k).device)].cpu()
+        if len(x) and not torch.allclose(x, fill[k].expand(len(x), -1), atol=1e-5, rtol=0):
+            raise ValueError(f"ent_{k}_emb.pt: rows without an image are not the ent_fill.pt constant")
+    return int(miss.sum())
 
 
 def options_tag(args):
@@ -271,17 +311,21 @@ def main(argv=None):
     args.valid_every = args.valid_every or budget_valid
     if args.tune:
         args.dev = True
+    is_geo = args.model == "geometry"
+    prefix = MODEL_PREFIX[args.model]
     tag = options_tag(args)
-    stem = (f"geometry_{dataset}_{args.variant}{'' if tag == 'base' else '_' + tag}"
+    stem = (f"{prefix}_{dataset}_{args.variant}"
+            f"{'' if tag == 'base' else '_' + tag}"
             + (f"_{config_tag(args, budget_epochs)}" if args.tune else "") + f"_seed{args.seed}")
     if args.out:
         out_dir = args.out
     elif args.tune:
-        out_dir = os.path.join(CODE_DIR, "results", "geometry-tune", dataset, args.variant, config_tag(args, budget_epochs))
+        out_dir = os.path.join(CODE_DIR, "results", f"{prefix}-tune", dataset, args.variant,
+                               config_tag(args, budget_epochs))
     elif args.dev:
-        out_dir = os.path.join(CODE_DIR, "results", "geometry-dev", dataset, tag, args.variant)
+        out_dir = os.path.join(CODE_DIR, "results", f"{prefix}-dev", dataset, tag, args.variant)
     else:
-        out_dir = os.path.join(CODE_DIR, "results", "geometry", dataset, args.variant)
+        out_dir = os.path.join(CODE_DIR, "results", prefix, dataset, args.variant)
     os.makedirs(out_dir, exist_ok=True)
     keep = {"auto": None, "yes": True, "no": False}[args.keep_on_gpu]
     valid_max = args.valid_max if args.valid_max is not None else (VG_VALID_MAX if dataset == "Spatial-VG" else 0)
@@ -311,14 +355,23 @@ def main(argv=None):
           f"valid {len(valid):,}{' (subset)' if valid_max else ''}"
           f"{'' if test is None else f' | test {len(test):,}'} | features stored on {feats.store}", flush=True)
 
-    model_kwargs = dict(VARIANTS[args.variant])
-    if VARIANT_DEPTH_STATS.get(args.variant) and depth_stats_info is None:
-        raise SystemExit(f"variant {args.variant} needs depth statistics; {dataset} has none (or --depth-stats none)")
-    options = effective_options(model_kwargs, args.rel_gate, args.input_norm, args.depth_dropout, args.text_proj,
-                                0 if depth_stats_info is None else depth_stats_info["dim"],
-                                VARIANT_DEPTH_STATS.get(args.variant))
-    model = GeometryMMKGModel(n_rel, embed_dim=feats.text.shape[1], dropout=args.dropout,
-                              **model_kwargs, **options).to(device)
+    if is_geo:
+        model_kwargs = dict(VARIANTS[args.variant])
+        if VARIANT_DEPTH_STATS.get(args.variant) and depth_stats_info is None:
+            raise SystemExit(f"variant {args.variant} needs depth statistics; {dataset} has none "
+                             "(or --depth-stats none)")
+        options = effective_options(model_kwargs, args.rel_gate, args.input_norm, args.depth_dropout,
+                                    args.text_proj, 0 if depth_stats_info is None else depth_stats_info["dim"],
+                                    VARIANT_DEPTH_STATS.get(args.variant))
+        model = GeometryMMKGModel(n_rel, embed_dim=feats.text.shape[1], dropout=args.dropout,
+                                  **model_kwargs, **options).to(device)
+    else:
+        d = feats.text.shape[1]
+        model_kwargs = dict(feature_dim=d, embed_dim=d, hidden_dim=d, use_depth=FT_VARIANTS[args.variant])
+        options = {}
+        n_filled = check_constant_fill(feats, data_dir, model_kwargs["use_depth"])
+        print(f"Feature-TransE: {n_filled:,} rows without an image hold the ent_fill.pt constant", flush=True)
+        model = FeatureTransE(n_rel, dropout=args.dropout, **model_kwargs).to(device)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"variant {args.variant} = {model_kwargs} | options {options} (tag {tag}) | {n_params:,} parameters",
           flush=True)
@@ -374,7 +427,7 @@ def main(argv=None):
         if epoch % args.valid_every == 0 or epoch == args.epochs:
             m = strip_ranks(evaluate(valid, f"valid@{epoch}"))
             row["valid"] = m
-            row["gate"] = gate_stats(model, feats, n_rel)
+            row["gate"] = gate_stats(model, feats, n_rel) if is_geo else None
             row["depth_stats_norm"] = depth_stats_norm(model, feats)
             g = row["gate"]
             gate_txt = "" if g is None else (
@@ -398,7 +451,7 @@ def main(argv=None):
             print(f"resume state saved: {resume_path} (epoch {epoch})", flush=True)
 
     metrics = {
-        "model": "GeometryMMKG", "dataset": dataset, "variant": args.variant, "model_kwargs": model_kwargs,
+        "model": "GeometryMMKG" if is_geo else "Feature-TransE", "dataset": dataset, "variant": args.variant, "model_kwargs": model_kwargs,
         "options": options, "options_tag": tag, "dev": args.dev, "depth_stats": depth_stats_info,
         "tune": args.tune, "config": {"lr": args.lr, "dropout": args.dropout} if args.tune else None,
         "epoch_budget": {"epochs": args.epochs, "valid_every": args.valid_every,
