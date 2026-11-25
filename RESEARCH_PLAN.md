@@ -555,26 +555,49 @@ Sáu bộ, mỗi bộ một repo HF public, tag `v0`; cấu trúc file, lệnh d
       - **Dropout 0,3 thắng ở cả 3 biến thể,** ngược với hai bộ VRD. Các điểm dropout 0,5 đều kém hơn.
     - **FB15k-237-IMG, `constant_fixed` (8 lần, xong 23/11):** 1e-3 / 0,1, MRR valid 0,3300, epoch tốt nhất 70. Bằng
       `fixed` (0,3302) và `no_depth` (0,3302).
-    - **FB15K-237-ind (đang chạy, 24/11):** `fixed` xong lưới gốc (6 lần), `no_depth` 4 / 6, `constant_fixed` chưa chạy.
-      Đến lúc này: `fixed` 3e-4 / 0,3 đạt 0,2551, `no_depth` 3e-4 / 0,3 đạt 0,2540. Epoch tốt nhất rất sớm (20–60 / 200)
-      và dropout 0,3 thắng, tức mô hình học thuộc nhanh khi thực thể valid chưa từng thấy. Mức tuyệt đối thấp hơn nhiều so
-      với số công bố của CMR (MRR test 0,371).
-    - **Tổng hợp đến 24/11 (MRR valid của cấu hình chọn):**
+    - **FB15K-237-ind (18 lần, xong lưới gốc 24/11; còn mở rộng biên).** 249 / 14.541 thực thể thiếu ảnh; 33 phút mỗi
+      lần:
+
+      | Biến thể | lr / dropout | MRR valid | Epoch tốt nhất / 200 | Còn phải chạy |
+      |---|---|---|---|---|
+      | no_depth | 1e-3 / 0,3 | 0,2557 | 30 | 3e-3 / 0,3; 1e-3 / 0,5 |
+      | fixed | 3e-4 / 0,3 | 0,2551 | 50 | 3e-4 / 0,5 |
+      | constant_fixed | 1e-3 / 0,3 | 0,2551 | 30 | 3e-3 / 0,3; 1e-3 / 0,5 |
+
+      - **Ba biến thể cách nhau 0,0006, tức cỡ nhiễu:** bộ MMKG thứ ba mà depth không giúp.
+      - Epoch tốt nhất rất sớm (20–130 / 200) và dropout 0,3 thắng ở cả 3 biến thể, tức mô hình học thuộc nhanh khi thực
+        thể valid chưa từng thấy.
+      - Mức tuyệt đối thấp hơn nhiều so với số công bố của CMR (MRR test 0,371).
+    - **Spatial-VG (12 lần, xong lưới gốc 24/11; còn mở rộng biên).** Valid là tập con cố định 5.000 bộ ba (mục 4.9);
+      35 phút mỗi lần với 1,44 triệu thực thể:
+
+      | Biến thể | lr / dropout | MRR valid | Epoch tốt nhất / 100 | Còn phải chạy |
+      |---|---|---|---|---|
+      | fixed | 3e-4 / 0,1 | **0,3221** | 70 | 3e-4 / 0 |
+      | no_depth | 3e-4 / 0,1 | 0,3105 | 90 | 3e-4 / 0 |
+
+      - **Δdepth = +0,012,** cùng cỡ với hai bộ VRD. `fixed` hơn `no_depth` ở cả 6 cấu hình (+0,010 đến +0,015), nên
+        chênh lệch ổn định dù tập valid nhỏ.
+      - Dropout 0,1 hơn 0,3 khoảng 0,04 ở mọi lr; luật biên thêm điểm dropout 0 (nơi hai bộ VRD đạt tốt nhất).
+    - **Tổng hợp đến 25/11 (MRR valid của cấu hình chọn; FB15K-237-ind và Spatial-VG chưa mở rộng biên):**
 
       | Dataset | fixed | no_depth | constant_fixed | Δdepth (fixed − no_depth) |
       |---|---|---|---|---|
       | FB15k-237-IMG | 0,3302 | 0,3302 | 0,3300 | 0,000 |
       | MKG-Y | 0,3785 | 0,3770 | 0,3777 | +0,0015 |
-      | FB15K-237-ind (dở) | 0,2551 | 0,2540 | — | +0,001 |
+      | FB15K-237-ind | 0,2551 | 0,2557 | 0,2551 | −0,0006 |
       | Spatial-VRD | 0,2650 | 0,2560 | 0,2649 | +0,009 |
       | Spatial-VRD-Trans | 0,3611 | 0,3503 | 0,3565 | +0,011 (+0,006 nếu cùng 100 epoch) |
+      | Spatial-VG | 0,3221 | 0,3105 | — (không chạy) | +0,012 |
 
-      - **Δdepth chỉ dương trên scene graph.** Trên 3 bộ MMKG nó không vượt cỡ nhiễu.
+      - **Δdepth chỉ dương trên scene graph,** nhất quán trên cả 6 bộ: 3 bộ MMKG không vượt cỡ nhiễu (−0,0006 đến
+        +0,0015), 3 bộ MMSG từ +0,009 đến +0,012. Bảng 2 × 2 bên dưới tách phần lợi này giữa vector depth và số độ sâu
+        theo vùng.
       - **`constant_fixed` bằng `fixed` ở mọi bộ:** cơ chế mặt nạ + vector học được cho thực thể thiếu ảnh (P2.6) không
         cho lợi ích đo được, có thể vì ảnh thiếu ít (FB15k 1,7%, MKG-Y 3,5%). Không trình bày nó như một đóng góp. Mặt tốt:
         chênh lệch với baseline không thể quy cho cách xử lý thiếu ảnh.
-      - **Dropout tốt nhất khác theo loại dữ liệu:** 0 trên scene graph, 0,1 trên FB15k-237-IMG, 0,3 trên MKG-Y và
-        FB15K-237-ind. Đây là lý do phải tune riêng từng dataset.
+      - **Dropout tốt nhất khác theo loại dữ liệu:** 0 trên hai bộ VRD (Spatial-VG: 0,1 trong lưới gốc, điểm 0 chưa chạy),
+        0,1 trên FB15k-237-IMG, 0,3 trên MKG-Y và FB15K-237-ind. Đây là lý do phải tune riêng từng dataset.
   - **Bảng 2 × 2 của depth trên scene graph (quyết định 24/11/2026, người dùng duyệt).**
     - **Vấn đề:** trên scene graph, "có depth" gồm hai phần: vector depth (DINOv2 của ảnh depth) và các số độ sâu theo
       vùng (`depth_stats`, P2.9). Trên MMKG chỉ có vector depth. Probe P2.9 cho thấy vector depth gần như không thêm gì,
@@ -599,6 +622,25 @@ Sáu bộ, mỗi bộ một repo HF public, tag `v0`; cấu trúc file, lệnh d
         không có nghĩa. Bài phải ghi rõ lý do này. **Không tune trên Spatial-VG** (quá đắt).
       - **Đọc kết quả:** `depth_map_only` ≈ `no_depth` nghĩa là vector depth không giúp ở đâu cả. Nếu `depth_stats_only`
         ≈ `fixed` thì nhánh vector depth là thừa, và RQ2 phải viết lại theo hướng đó.
+    - **Kết quả Spatial-VRD (xong 25/11/2026; mỗi biến thể mới 8 lần, lưới gốc + mở rộng biên; cả hai hội tụ, không cần
+      thêm điểm):** MRR valid của cấu hình chọn.
+
+      | | Không `depth_stats` | Có `depth_stats` | Δ do `depth_stats` |
+      |---|---|---|---|
+      | **Không vector depth** | `no_depth` 0,2560 (3e-4 / 0, ep 20) | `depth_stats_only` 0,2670 (1e-4 / 0, ep 50) | +0,011 |
+      | **Có vector depth** | `depth_map_only` 0,2566 (1e-3 / 0, ep 20) | `fixed` 0,2650 (1e-3 / 0, ep 20) | +0,008 |
+      | **Δ do vector depth** | +0,0006 | −0,002 | |
+
+      - **Toàn bộ Δdepth +0,009 của Spatial-VRD đến từ `depth_stats`:** thêm số độ sâu tăng khoảng +0,01 dù có hay không
+        có vector depth; thêm vector depth không đổi gì (+0,0006 khi không có số độ sâu, −0,002 khi có). Hai yếu tố gần
+        như không tương tác. `depth_map_only` ≈ `no_depth` khớp với probe P2.9.
+      - Không phụ thuộc riêng cấu hình được chọn: ở cả 6 cấu hình chung của lưới (lr 1e-4 / 3e-4 / 1e-3 × dropout
+        0,1 / 0,3), `depth_map_only` không cao hơn `no_depth` (−0,0007 đến −0,015), còn `depth_stats_only` không thấp
+        hơn `fixed` (0 đến +0,012).
+      - **Giới hạn:** 1 seed, MRR valid. Chênh lệch dưới khoảng 0,003 (như `depth_stats_only` − `fixed`) chưa phân biệt
+        được với nhiễu.
+      - **Chưa đổi thiết kế:** chờ Spatial-VRD-Trans. Nếu lặp lại, đóng góp của depth phải trình bày là hiệu độ sâu theo
+        vùng giữa đầu và đuôi, không phải đặc trưng ảnh depth, và RQ2 viết lại như mục "Đọc kết quả".
   - **Chạy tiếp khi bị ngắt (20/11/2026):** sau mỗi lần valid, `train.py` ghi `resume_<stem>.pt`. File gồm model, optimizer,
     trạng thái RNG, checkpoint tốt nhất và lịch sử, và được ghi nguyên khối nên không bị hỏng nếu bị ngắt giữa lúc ghi. Lần chạy
     sau có cùng stem và cùng tham số huấn luyện sẽ train tiếp từ đó, với cùng batch và dropout như khi không bị ngắt. Nếu tham
