@@ -1,5 +1,6 @@
 """HF helper for the CMR FB15K-237-ind run on Molab (scripts/cmr_molab_run.sh, RESEARCH_PLAN.md P3.7) (sessions can end at any time). Token: HF_TOKEN in the environment.
-State repo (private, only the latest version kept: history squashed after every upload):
+State repo (private, only the latest version kept: history squashed and unused stored files deleted after every
+upload):
   callmezuy/cmr-resume  FB15K-237-ind/current_run.txt, FB15K-237-ind/<run>/{resume.pt, model_best.mdl, log.txt},
                         FB15K-237-ind/<run>/FINISHED (training over)
   python cmr_hf.py restore <ckpt_root>            -> prints "<run> <none|resume|finished>", downloads the files
@@ -55,6 +56,20 @@ def upload(run_dir, names, message):
     open(tmp, "w").write(run)
     api.upload_file(path_or_fileobj=tmp, path_in_repo=f"{BASE}/current_run.txt", repo_id=REPO, repo_type="dataset")
     api.super_squash_history(repo_id=REPO, repo_type="dataset")   # keep only the latest version (3+ GB each)
+    prune()
+
+
+def prune():
+    """The squash drops the old commits but HF still stores (and bills) their large files: delete every stored file
+    that the current version does not use. Only files pushed before the latest commit are touched."""
+    try:
+        last = api.list_repo_commits(REPO, repo_type="dataset")[0].created_at
+        live = {s.lfs.sha256 for s in api.dataset_info(REPO, files_metadata=True).siblings if s.lfs}
+        old = [f for f in api.list_lfs_files(REPO, repo_type="dataset") if f.file_oid not in live and f.pushed_at < last]
+        if old:
+            api.permanently_delete_lfs_files(REPO, old, repo_type="dataset", rewrite_history=False)
+    except Exception as e:   # a failed clean-up must not stop the backups; the next upload tries again
+        print(f"prune failed: {e!r}", file=sys.stderr)
 
 
 def backup(run_dir, stop):
@@ -84,6 +99,7 @@ def finished(run_dir):
     except Exception:
         pass
     api.super_squash_history(repo_id=REPO, repo_type="dataset")
+    prune()
 
 
 if __name__ == "__main__":
