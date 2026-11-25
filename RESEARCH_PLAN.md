@@ -639,8 +639,29 @@ Sáu bộ, mỗi bộ một repo HF public, tag `v0`; cấu trúc file, lệnh d
         hơn `fixed` (0 đến +0,012).
       - **Giới hạn:** 1 seed, MRR valid. Chênh lệch dưới khoảng 0,003 (như `depth_stats_only` − `fixed`) chưa phân biệt
         được với nhiễu.
-      - **Chưa đổi thiết kế:** chờ Spatial-VRD-Trans. Nếu lặp lại, đóng góp của depth phải trình bày là hiệu độ sâu theo
-        vùng giữa đầu và đuôi, không phải đặc trưng ảnh depth, và RQ2 viết lại như mục "Đọc kết quả".
+    - **Kết quả Spatial-VRD-Trans (xong 25/11/2026; `depth_map_only` 8 lần, `depth_stats_only` 9 lần; cả hai không cần
+      thêm điểm biên):** MRR valid của cấu hình chọn.
+
+      | | Không `depth_stats` | Có `depth_stats` | Δ do `depth_stats` |
+      |---|---|---|---|
+      | **Không vector depth** | `no_depth` 0,3503 (1e-3 / 0, ep 100; nhân đôi: vẫn ep 100) | `depth_stats_only` 0,3636 (3e-4 / 0, ep 200 / 200) | +0,013 |
+      | **Có vector depth** | `depth_map_only` 0,3464 (1e-3 / 0, ep 90) | `fixed` 0,3611 (3e-4 / 0, ep 200 / 200) | +0,015 |
+      | **Δ do vector depth** | −0,004 | −0,0025 | |
+
+      - **Lặp lại đúng kết quả Spatial-VRD:** `depth_stats` cho khoảng +0,013 đến +0,015, vector depth không giúp (−0,004
+        và −0,0025).
+      - `depth_stats_only` và `fixed` vẫn có epoch tốt nhất ở cuối sau khi nhân đôi ngân sách (luật hội tụ chỉ chạy lại
+        một lần, báo như giới hạn), nên số của hai ô này là cận dưới. So cùng 100 epoch ở 3e-4 / 0: `depth_stats_only`
+        0,3590, `fixed` 0,3565, so với `no_depth` 0,3503 và `depth_map_only` 0,3464. Kết luận không đổi.
+      - Ở cả 6 cấu hình chung của lưới (bản 100 epoch), `depth_map_only` thấp hơn `no_depth` (−0,003 đến −0,017), còn
+        `depth_stats_only` cao hơn `fixed` (+0,004 đến +0,021).
+    - **Tổng hợp 2 bộ (12 cặp cấu hình chung):** thêm vector depth không lần nào làm tăng MRR (0 trên 12, chênh từ
+      −0,0007 đến −0,017). Thêm `depth_stats` vào mô hình đã có vector depth không lần nào làm giảm (0 đến +0,021). Như
+      vậy Δdepth dương trên scene graph là của số độ sâu theo vùng (hiệu độ sâu giữa đầu và đuôi trong cùng ảnh), còn nhánh
+      vector depth (DINOv2 trên ảnh depth) không có ích, thậm chí hơi có hại. Giới hạn: 1 seed, MRR valid, không làm trên
+      Spatial-VG.
+    - **Cần quyết định (chưa duyệt):** mô hình chính cho các lần chạy chính thức, và cách viết lại RQ2 cùng đóng góp về
+      depth.
   - **Chạy tiếp khi bị ngắt (20/11/2026):** sau mỗi lần valid, `train.py` ghi `resume_<stem>.pt`. File gồm model, optimizer,
     trạng thái RNG, checkpoint tốt nhất và lịch sử, và được ghi nguyên khối nên không bị hỏng nếu bị ngắt giữa lúc ghi. Lần chạy
     sau có cùng stem và cùng tham số huấn luyện sẽ train tiếp từ đó, với cùng batch và dropout như khi không bị ngắt. Nếu tham
@@ -863,6 +884,63 @@ Bảng dưới là các tiêu chí phải đạt trước khi đưa số baselin
 
 ### P6. Viết bài
 
+- [ ] **P6.0 Kế hoạch bài báo (duyệt 25/11/2026).**
+  - **Tên tạm:** *Does depth help multimodal knowledge graph completion? A controlled study across knowledge graphs and
+    scene graphs.*
+  - **Câu chuyện chính:** depth (ước lượng đơn mắt) có giúp hoàn thiện đồ thị tri thức đa phương thức không? Bài trả lời
+    bằng cách đặt MMKG (thực thể độc lập) và MMSG (các vật trong cùng một ảnh) vào cùng một giao thức, tách hai trục loại đồ
+    thị và inductive / transductive, và đo Δdepth trong cùng mô hình trên nhiều họ mô hình. Bài là bài trả lời câu hỏi đó,
+    không phải bài giới thiệu mô hình.
+  - **Khẳng định và bằng chứng:**
+
+    | # | Khẳng định | Bằng chứng | Trạng thái (25/11) |
+    |---|---|---|---|
+    | C1 | Mô hình MMKG có embedding theo ID thất bại trên MMSG inductive vì là mô hình transductive, không phải vì thiếu depth; mô hình dựa trên đặc trưng chạy được ở cả 4 ô | Baseline và mô hình đề xuất trên cả 4 ô; cặp VRD / VRD-Trans | Một phần (NativE) |
+    | C2 | Depth không giúp MMKG | Δdepth trên 3 bộ MMKG trong mức nhiễu, trên ít nhất 2 họ mô hình | 1 seed (mô hình đề xuất); 3 seed Feature-TransE trên FB15k |
+    | C3 | Trên MMSG, phần lợi của depth đến từ số độ sâu theo vùng (hiệu độ sâu đầu − đuôi), không đến từ đặc trưng ảnh depth | Bảng 2 × 2 `depth_map_only` / `depth_stats_only` (P2.10) | 1 seed, 2 bộ |
+    | C4 | Depth có thêm gì ngoài hình học box 2D không | Đối chứng bằng box (E2) | Chưa làm; kết quả quyết định cách viết C3 |
+    | C5 | MMSG khác MMKG về cấu trúc, và xếp hạng trên toàn bộ thực thể lẫn việc tìm đúng ảnh | Bảng cấu trúc đồ thị; thước đo trong cùng ảnh và đoán quan hệ (E1) | Có bảng cấu trúc; chưa có E1 |
+    | C6 | Cách gộp RGB với depth không quan trọng; gate không hơn trọng số cố định | Ablation concat / mean / fixed / gate | Có (1 seed) |
+
+  - **Cấu trúc đồ thị (25/11/2026, tính trên cả ba split):**
+
+    | | FB15k-237-IMG | Spatial-VRD |
+    |---|---|---|
+    | Bộ ba / thực thể có bộ ba | 310.116 / 14.541 | 107.016 / 83.485 (thêm khoảng 10.300 box không có bộ ba, chỉ là ứng viên) |
+    | Bậc trung bình | 42,7 | 2,6 |
+    | Thành phần liên thông | 6 (lớn nhất 14.529) | 11.375 (lớn nhất 29, trung vị 5) |
+
+    MMSG chỉ cùng định dạng và giao thức với MMKG, không cùng cấu trúc: mỗi thành phần nằm gọn trong một ảnh, không có cạnh
+    nào nối hai ảnh. Không viết "MMSG có cấu trúc tương đồng MMKG".
+  - **Đóng góp:** (1) giao thức có kiểm soát 2 × 2 (loại đồ thị × inductive / transductive), cùng đặc trưng, cùng đánh giá;
+    (2) ba bộ MMSG (Spatial-VRD, Spatial-VRD-Trans, Spatial-VG) làm bộ chẩn đoán, đã phát hành, kèm mô tả cấu trúc và thước
+    đo bổ sung; (3) kết quả phân tích C1–C6, kể cả kết quả âm. Không viết "đầu tiên" khi chưa tìm tài liệu có hệ thống; dùng
+    "theo hiểu biết của chúng tôi".
+  - **Dàn bài:**
+    1. Giới thiệu.
+    2. Tổng quan: MMKG completion transductive và inductive (CMR, BLP); scene graph completion (RLSV, Wan et al., IJCAI
+       2018: thực thể là loại vật, ứng viên trong cùng ảnh, có toạ độ box tương đối); SGG có depth (Sharifzadeh, ADVRD);
+       KG có thực thể thị giác (ImageGraph, Oñoro-Rubio et al.).
+    3. Benchmark và giao thức: ma trận 2 × 2, cách dựng MMSG, bảng cấu trúc, thước đo.
+    4. Mô hình: mô hình dựa trên đặc trưng và các biến thể, baseline, cách thêm depth ở tầng dữ liệu.
+    5. Kết quả theo C1 → C6.
+    6. Phân tích: Δdepth theo nhóm quan hệ (GEOMETRIC / POSSESSIVE / SEMANTIC / MISC) và theo từng quan hệ.
+    7. Giới hạn: depth đơn mắt; không làm 2 × 2 trên VG; luật hội tụ chỉ chạy lại một lần.
+  - **Thí nghiệm cần thêm:**
+    - **E1. Thước đo phụ trên MMSG:** xếp hạng chỉ trong cùng ảnh (id ảnh lấy từ tên thực thể, ví dụ `5073960523_0`) và
+      đoán quan hệ (h, ?, t) trên 52 quan hệ. Chỉ thêm code đánh giá, dùng lại checkpoint.
+    - **E2. Đối chứng bằng box:** `box_stats_only` và box + `depth_stats`, cùng cơ chế với `depth_stats_only` (cộng
+      W_b b, khởi tạo 0, cùng chuẩn hoá); b = hình học box chuẩn hoá theo ảnh, lấy từ `sg_*_annotations.json`. Tune đủ trên
+      Spatial-VRD và VRD-Trans. Thiết kế chi tiết duyệt riêng trước khi code.
+    - **E3. Chạy chính thức 3 seed trên test:** `fixed` và `no_depth` trên 6 bộ; bảng 2 × 2 và biến thể box trên 2 bộ VRD.
+    - **E4. Kiểm định:** bootstrap ghép cặp theo truy vấn trong từng seed, kiểm định ghép cặp giữa các seed.
+    - **E5. Baseline** theo P3 / P4, có bản +D. Còn quyết định: có cấp thêm `depth_stats` hoặc box ở tầng dữ liệu không.
+    - **E6. Phân tích theo nhóm quan hệ** (P5).
+  - **Cắt bỏ:** MoMoK trên hai bộ VRD (khoảng 52 giờ mỗi lần); 2 × 2 và đối chứng box trên Spatial-VG; gate chỉ là
+    ablation, không phải đóng góp; phần LLM và việc gộp MMKG với MMSG chỉ ở mục hướng phát triển.
+  - **Thứ tự:** E1 → E2 → chọn mô hình chính → E3 + E4 → E5 → E6 → viết bài.
+  - **Quyết định còn mở:** mô hình chính `fixed` (thiết kế đóng băng) hay `depth_stats_only`, chọn sau E1 và E2; baseline
+    có nhận `depth_stats` hoặc box ở tầng dữ liệu không.
 - [ ] **P6.1** Experimental Setup: hai chế độ (transductive / inductive), giao thức ở mục 4, thống kê split (tỉ lệ thực thể chưa thấy, bậc thực thể, số thực thể trong `entity2id` không xuất hiện trong triplet).
 - [ ] **P6.2** Implementation Details: `type_constrain=False` là **thiết lập gốc của tác giả NativE**; chunked `cdist` và offload để trong phụ lục.
 - [ ] **P6.3** Discussion: Concept (MMKG) vs Instance (MMSG); vai trò của biểu diễn dựa trên đặc trưng cho KG lai.
