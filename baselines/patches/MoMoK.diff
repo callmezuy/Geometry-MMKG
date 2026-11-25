@@ -1,0 +1,160 @@
+diff --git a/train.py b/train.py
+index 2226f47..6d7f7e3 100644
+--- a/train.py
++++ b/train.py
+@@ -1,4 +1,6 @@
+ import argparse
++import copy
++import random
+ import time
+ 
+ import numpy as np
+@@ -51,7 +53,12 @@ def parse_args():
+         'n_exp': 3,
+         'mu': 0.0001,
+         'img_dim': 256,
+-        'txt_dim': 256
++        'txt_dim': 256,
++        # [Geometry-MMKG] 'valid' (default): every eval_freq epochs and after the last one, evaluate on VALID with
++        # strict filtered ranks, keep the best weights, test them once at the end. 'original': the upstream
++        # behaviour (evaluate on test every eval_freq epochs, report the best value of each metric).
++        'select_on': 'valid',
++        'rank_file': ''
+     }
+ 
+     parser = argparse.ArgumentParser()
+@@ -64,6 +71,7 @@ args = parse_args()
+ print(args)
+ np.random.seed(args.seed)
+ torch.manual_seed(args.seed)
++random.seed(args.seed)  # [Geometry-MMKG] MIEstimator samples experts with random.sample
+ args.device = 'cuda:' + str(args.cuda) if int(args.cuda) >= 0 else 'cpu'
+ print(f'Using: {args.device}')
+ torch.cuda.set_device(args.cuda)
+@@ -109,6 +117,7 @@ def train_decoder(args):
+     counter = 0
+     best_val_metrics = model.init_metric_dict()
+     best_test_metrics = model.init_metric_dict()
++    best_state, best_epoch = None, 0  # [Geometry-MMKG] select_on='valid'
+     corpus.batch_size = args.batch_size
+     corpus.neg_num = args.neg_num
+     training_range = tqdm(range(args.epochs))
+@@ -144,12 +153,24 @@ def train_decoder(args):
+         training_range.set_postfix(loss="main: {:.5} mi: {:.5}".format(sum(epoch_loss), sum(epoch_mi_loss)))
+         lr_scheduler.step()
+ 
+-        if (epoch + 1) % args.eval_freq == 0:
++        if args.select_on == 'valid' and ((epoch + 1) % args.eval_freq == 0 or epoch + 1 == args.epochs):
++            # [Geometry-MMKG] select on validation, never on test (RESEARCH_PLAN.md P3.6)
++            print("Epoch {:04d} , average loss {:.4f} , epoch_time {:.4f}\n".format(
++                epoch + 1, sum(epoch_loss) / len(epoch_loss), time.time() - t))
++            model.eval()
++            val_metrics = corpus.get_strict_metrics(model, 'val')
++            if val_metrics['MRR'] > best_val_metrics['MRR']:
++                best_val_metrics, best_epoch = val_metrics, epoch + 1
++                best_state = copy.deepcopy({k: v.detach().cpu() for k, v in model.state_dict().items()})
++            print('\n'.join(['Epoch: {:04d}'.format(epoch + 1), model.format_metrics(val_metrics, 'val'),
++                             'best valid MRR {:.4f} at epoch {}'.format(best_val_metrics['MRR'], best_epoch)]))
++            print("\n\n")
++        elif args.select_on == 'original' and (epoch + 1) % args.eval_freq == 0:
+             print("Epoch {:04d} , average loss {:.4f} , epoch_time {:.4f}\n".format(
+                 epoch + 1, sum(epoch_loss) / len(epoch_loss), time.time() - t))
+             model.eval()
+             with torch.no_grad():
+-                val_metrics = corpus.get_validation_pred(model, 'test')
++                val_metrics, _ = corpus.get_validation_pred(model, 'test')  # [Geometry-MMKG] returns (metrics, attention)
+             if val_metrics['MRR'] > best_test_metrics['MRR']:
+                 best_test_metrics['MRR'] = val_metrics['MRR']
+             if val_metrics['MR'] < best_test_metrics['MR']:
+@@ -167,6 +188,12 @@ def train_decoder(args):
+ 
+ 
+     print('Total time elapsed: {:.4f}s'.format(time.time() - t_total))
++    if args.select_on == 'valid':
++        # [Geometry-MMKG] restore the best-validation weights and evaluate on test once
++        model.load_state_dict(best_state)
++        model.eval()
++        best_test_metrics = corpus.get_strict_metrics(model, 'test', rank_file=args.rank_file or None)
++        print('Best valid epoch {}'.format(best_epoch))
+     if not best_test_metrics:
+         model.eval()
+         estimator.eval()
+diff --git a/utils/data_loader.py b/utils/data_loader.py
+index cfdc44b..35ba588 100644
+--- a/utils/data_loader.py
++++ b/utils/data_loader.py
+@@ -93,6 +93,24 @@ class ConvECorpus(Corpus):
+         np.random.shuffle(self.train_indices)
+ 
+     def get_batch(self, batch_num):
++        # [Geometry-MMKG] Same batch as the original code (kept below as get_batch_numpy), but the KvsAll label matrix
++        # is built on the GPU: the numpy version took 72% (FB15k-237) / 86% (93,809 entities) of a training step.
++        # The tensor is bit-identical (tests/test_momok_patch.py compares the two).
++        if (batch_num + 1) * self.batch_size <= len(self.train_indices):
++            batch = self.train_indices[batch_num * self.batch_size: (batch_num+1) * self.batch_size]
++        else:
++            batch = self.train_indices[batch_num * self.batch_size:]
++        batch_indices = torch.LongTensor([indice['triple'] for indice in batch])
++        n = len(self.entity2id)
++        rows = np.concatenate([np.full(len(indice['label']), i, dtype=np.int64) for i, indice in enumerate(batch)])
++        cols = np.concatenate([np.asarray(indice['label'], dtype=np.int64) for indice in batch])
++        y = torch.zeros((len(batch), n), dtype=torch.float32, device=self.device)
++        y[torch.from_numpy(rows).to(self.device), torch.from_numpy(cols).to(self.device)] = 1.0
++        batch_values = 0.9 * y + (1.0 / n)
++        return batch_indices, batch_values
++
++    def get_batch_numpy(self, batch_num):
++        # [Geometry-MMKG] The original get_batch, unchanged (CPU numpy label matrix).
+         if (batch_num + 1) * self.batch_size <= len(self.train_indices):
+             batch = self.train_indices[batch_num * self.batch_size: (batch_num+1) * self.batch_size]
+         else:
+@@ -122,6 +140,49 @@ class ConvECorpus(Corpus):
+ 
+         return batch_indices, batch_values#, index
+ 
++    @torch.no_grad()
++    def get_strict_metrics(self, model, split='test', rank_file=None):
++        """[Geometry-MMKG] Filtered link prediction with the strict tie rule of the thesis protocol: rank = 1 + number of
++        candidates scoring strictly higher than the answer, the other true answers (train + valid + test, the
++        same sets as get_validation_pred) excluded; every entity is a candidate; head and tail. The score is the
++        model's own (mean of the four predictions, as get_validation_pred). rank_file: CSV
++        h_id,r_id,t_id,rank_head,rank_tail in the order of the split file."""
++        if split == 'val':
++            sides = {'head': self.val_head_indices, 'tail': self.val_tail_indices}
++            triples = self.val_triples
++        else:
++            sides = {'head': self.test_head_indices, 'tail': self.test_tail_indices}
++            triples = self.test_triples
++        ranks = {}
++        for side, indices in sides.items():
++            out = []
++            for start in range(0, len(indices), self.batch_size):
++                batch = indices[start:start + self.batch_size]
++                q = torch.LongTensor([indice['triple'] for indice in batch]).to(self.device)
++                pred, _ = model.forward(q)
++                score = (pred[0] + pred[1] + pred[2] + pred[3]) / 4.0
++                b = torch.arange(len(batch), device=self.device)
++                target = q[:, 2]
++                rows = np.concatenate([np.full(len(indice['label']), i, dtype=np.int64)
++                                       for i, indice in enumerate(batch)])
++                cols = np.concatenate([np.asarray(indice['label'], dtype=np.int64) for indice in batch])
++                known = torch.zeros_like(score, dtype=torch.bool)
++                known[torch.from_numpy(rows).to(self.device), torch.from_numpy(cols).to(self.device)] = True
++                known[b, target] = False
++                better = (score > score[b, target].unsqueeze(1)) & ~known
++                out.append((better.sum(dim=1) + 1).cpu())
++            ranks[side] = torch.cat(out).numpy()
++        r = np.concatenate([ranks['head'], ranks['tail']]).astype(np.float64)
++        metrics = {"Hits@100": float(np.mean(r <= 100)), "Hits@10": float(np.mean(r <= 10)),
++                   "Hits@3": float(np.mean(r <= 3)), "Hits@1": float(np.mean(r <= 1)),
++                   "MR": float(r.mean()), "MRR": float(np.mean(1.0 / r))}
++        if rank_file:
++            with open(rank_file, 'w') as f:
++                f.write('h_id,r_id,t_id,rank_head,rank_tail\n')
++                for (h, rel, t), rh, rt in zip(triples, ranks['head'], ranks['tail']):
++                    f.write(f'{h},{rel},{t},{int(rh)},{int(rt)}\n')
++        return metrics
++
+     def get_validation_pred(self, model, split='test'):
+         ranks_head, ranks_tail = [], []
+         reciprocal_ranks_head, reciprocal_ranks_tail = [], []

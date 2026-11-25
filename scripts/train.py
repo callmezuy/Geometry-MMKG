@@ -9,9 +9,10 @@ section 4).
   depth_stats_only (core/models/end_to_end.py VARIANTS; the last two split the depth input of the scene graphs into
   the depth map and the depth statistics, VARIANT_DEPTH_STATS).
 * --model feature_transe (P3.1): the Feature-TransE baseline (core/models/feature_transe.py), variants no_depth
-  (text + RGB) and depth (text + RGB + depth map), same training, selection, tuning, epoch budget, resume and output
+  (text + RGB) and depth (text + RGB + depth map, plus the depth statistics concatenated to the input on the scene
+  graphs under --depth-stats auto, as GeometryMMKG), same training, selection, tuning, epoch budget, resume and output
   as GeometryMMKG. It reads the constant-filled feature tables as they are (missing images: section 3.2 rule 1;
-  checked against ent_fill.pt) and takes none of the GeometryMMKG options below (they are switched off for it).
+  checked against ent_fill.pt) and takes none of the other GeometryMMKG options below (they are switched off for it).
   Names: stem feature-transe_<dataset>_<variant>[_<config>]_seed<seed>, folders results/feature-transe{,-tune,-dev}/.
 * Frozen design (P2.8 / P2.9, 19/11/2026) is the default: --input-norm, --depth-dropout 0.3, --text-proj and
   --depth-stats auto (the dataset's ent_depth_stats.pt on the scene graphs Spatial-VRD, Spatial-VRD-Trans and
@@ -127,9 +128,11 @@ def parse_args(argv=None):
         p.error(f"--variant {args.variant} is not a {args.model} variant ({', '.join(variants)})")
     if args.model == "feature_transe":
         # GeometryMMKG development options do not exist in Feature-TransE: switch them off so that names,
-        # metrics and the resume key say what actually ran.
+        # metrics and the resume key say what actually ran. Depth statistics are depth information, so only the
+        # depth variant reads them (--depth-stats auto: on the scene graphs, decided 25/11/2026).
         args.rel_gate, args.input_norm, args.depth_dropout, args.text_proj = False, False, 0.0, False
-        args.depth_stats = "none"
+        if args.variant == "no_depth":
+            args.depth_stats = "none"
     return args
 
 
@@ -367,7 +370,8 @@ def main(argv=None):
                                   **model_kwargs, **options).to(device)
     else:
         d = feats.text.shape[1]
-        model_kwargs = dict(feature_dim=d, embed_dim=d, hidden_dim=d, use_depth=FT_VARIANTS[args.variant])
+        model_kwargs = dict(feature_dim=d, embed_dim=d, hidden_dim=d, use_depth=FT_VARIANTS[args.variant],
+                            depth_stats_dim=0 if depth_stats_info is None else depth_stats_info["dim"])
         options = {}
         n_filled = check_constant_fill(feats, data_dir, model_kwargs["use_depth"])
         print(f"Feature-TransE: {n_filled:,} rows without an image hold the ent_fill.pt constant", flush=True)
@@ -428,7 +432,7 @@ def main(argv=None):
             m = strip_ranks(evaluate(valid, f"valid@{epoch}"))
             row["valid"] = m
             row["gate"] = gate_stats(model, feats, n_rel) if is_geo else None
-            row["depth_stats_norm"] = depth_stats_norm(model, feats)
+            row["depth_stats_norm"] = depth_stats_norm(model, feats) if is_geo else None
             g = row["gate"]
             gate_txt = "" if g is None else (
                 f" | depth weight {g['mean']:.3f}"

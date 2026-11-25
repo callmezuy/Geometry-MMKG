@@ -1,0 +1,258 @@
+diff --git a/config.py b/config.py
+index 442e66f..445de89 100644
+--- a/config.py
++++ b/config.py
+@@ -8,7 +8,7 @@ import torch.backends.cudnn as cudnn
+ 
+ import datetime
+ 
+-tasks = ['FB15k237_ind', 'WN18RR_ind', 'WN9_ind']
++tasks = ['FB15k237_ind', 'WN18RR_ind', 'WN9_ind', 'SpatialVRD_ind']  # [Geometry-MMKG] + Spatial-VRD (inductive)
+ parser = argparse.ArgumentParser(description='SimKGC arguments')
+ parser.add_argument('--pretrained-model', default='./PLMs/bert-base-uncased', type=str, metavar='N',
+                     help='path to pretrained model')
+@@ -89,6 +89,20 @@ parser.add_argument('--knn_topk', default=0, type=int,
+ parser.add_argument('--knn_lambda', default=0.2, type=float,
+                     help='p_knn ratio in kNN.')
+ 
++# [Geometry-MMKG] arguments read by the released code but never declared (trainer.py: args.mem; knowledge_store.py and
++# predict.py: args.adapter_model), and the thesis additions (RESEARCH_PLAN.md P3.7).
++parser.add_argument('--mem', action='store_true',
++                    help='[Geometry-MMKG] declared for trainer.py; off = loss in both directions (the released default path)')
++parser.add_argument('--adapter-model', action='store_true', help='[Geometry-MMKG] declared for knowledge_store.py / predict.py')
++parser.add_argument('--freeze-vit', action='store_true',
++                    help='[Geometry-MMKG] freeze the ViT as the paper (sec. 5.1.3) describes; the released code never does')
++parser.add_argument('--rank-file', default='', type=str,
++                    help='[Geometry-MMKG] evaluate.py: write strict filtered ranks (head_id, relation, tail_id, rank_head, rank_tail)')
++parser.add_argument('--rank-tensor', default='mm', choices=['mm', 'img'],
++                    help='[Geometry-MMKG] entity table for --rank-file: mm (text + visual prefix) or img')
++parser.add_argument('--rank-lambda', default=0.95, type=float,
++                    help='[Geometry-MMKG] with --knn_topk > 0: the kNN weight whose ranks go to --rank-file (choose it on valid)')
++
+ args = parser.parse_args()
+ 
+ if args.mm:
+@@ -97,7 +111,8 @@ if args.mm:
+ 
+ # assert not args.train_path or os.path.exists(args.train_path)
+ assert args.pooling in ['cls', 'mean', 'max']
+-assert args.task.lower() in ['wn18rr', 'wn18rr_ind', 'wn9_ind', 'wn18', 'wn9', 'fb15k237', 'fb15k237_ind']
++assert args.task.lower() in ['wn18rr', 'wn18rr_ind', 'wn9_ind', 'wn18', 'wn9', 'fb15k237', 'fb15k237_ind',
++                             'spatialvrd_ind']
+ assert args.lr_scheduler in ['linear', 'cosine']
+ 
+ if not args.train_path and not args.valid_path:
+@@ -120,7 +135,7 @@ if args.eval_model_path:
+     args.model_dir = os.path.dirname(args.eval_model_path)
+     args.log_path = args.model_dir + '/eval_log.txt'
+ 
+-args.seed = 202303
++# [Geometry-MMKG] the released code overwrote --seed with 202303 here (its default); now --seed is honoured.
+ random.seed(args.seed)
+ torch.manual_seed(args.seed)
+ cudnn.deterministic = True
+diff --git a/evaluate.py b/evaluate.py
+index dd72b51..7f43f8b 100644
+--- a/evaluate.py
++++ b/evaluate.py
+@@ -17,7 +17,7 @@ import pickle
+ from knowledge_store import BertKnowledgeStore
+ import random
+ 
+-args.seed = 202303
++# [Geometry-MMKG] the released code overwrote --seed with 202303 here; now --seed (default 202303) is honoured.
+ random.seed(args.seed)
+ torch.manual_seed(args.seed)
+ 
+@@ -30,6 +30,9 @@ entity_dict = _setup_entity_dict()
+ all_triplet_dict = get_all_triplet_dict()
+ 
+ knn_lambda_list = [i * 0.025 for i in range(int(1.026 / 0.025))]
++# [Geometry-MMKG] strict filtered ranks (1 + candidates scoring strictly higher than the answer; filtered true answers
++# excluded) of the running eval_single_direction call, and of every call by (entity table, direction).
++GM_STRICT, GM_STRICT_LAMBDA, GM_RANKS = [], {}, {}
+ logger.info("lambda_list {}".format(knn_lambda_list))
+ 
+ 
+@@ -69,6 +72,7 @@ def compute_metrics(hr_tensor: torch.tensor,
+         batch_target = target[start:end]
+ 
+         # filter known triplets
++        _gm_known = torch.zeros_like(batch_score, dtype=torch.bool)  # [Geometry-MMKG]
+         for idx in range(batch_score.size(0)):
+             mask_indices = []
+             cur_ex = examples[start + idx]
+@@ -81,10 +85,13 @@ def compute_metrics(hr_tensor: torch.tensor,
+                 mask_indices.append(entity_dict.entity_to_idx(e_id))
+             mask_indices = torch.LongTensor(mask_indices).to(batch_score.device)
+             batch_score[idx].index_fill_(0, mask_indices, -1)
++            _gm_known[idx, mask_indices] = True  # [Geometry-MMKG]
+ 
+         batch_sorted_score, batch_sorted_indices = torch.sort(batch_score, dim=-1, descending=True)
+         target_rank = torch.nonzero(batch_sorted_indices.eq(batch_target).long(), as_tuple=False)
+         assert target_rank.size(0) == batch_score.size(0)
++        _gm_t = batch_score.gather(1, batch_target)  # [Geometry-MMKG] strict rank
++        GM_STRICT.extend((((batch_score > _gm_t) & ~_gm_known).sum(dim=1) + 1).tolist())
+         for idx in range(batch_score.size(0)):
+             idx_rank = target_rank[idx].tolist()
+             assert idx_rank[0] == idx
+@@ -146,6 +153,7 @@ def compute_metrics_search_knn_lamda(hr_tensor: torch.tensor,
+ 
+         for i in range(len(batch_score_list)):
+             batch_score = batch_score_list[i]
++            _gm_known = torch.zeros_like(batch_score, dtype=torch.bool)  # [Geometry-MMKG]
+             for idx in range(batch_score.size(0)):
+                 mask_indices = []
+                 cur_ex = examples[start + idx]
+@@ -159,10 +167,13 @@ def compute_metrics_search_knn_lamda(hr_tensor: torch.tensor,
+                     mask_indices.append(entity_dict.entity_to_idx(e_id))
+                 mask_indices = torch.LongTensor(mask_indices).to(batch_score.device)
+                 batch_score[idx].index_fill_(0, mask_indices, -1)
++                _gm_known[idx, mask_indices] = True  # [Geometry-MMKG]
+ 
+             batch_sorted_score, batch_sorted_indices = torch.sort(batch_score, dim=-1, descending=True)
+             target_rank = torch.nonzero(batch_sorted_indices.eq(batch_target).long(), as_tuple=False)
+             assert target_rank.size(0) == batch_score.size(0)
++            _gm_t = batch_score.gather(1, batch_target)  # [Geometry-MMKG] strict rank for this lambda
++            GM_STRICT_LAMBDA.setdefault(i, []).extend((((batch_score > _gm_t) & ~_gm_known).sum(dim=1) + 1).tolist())
+             for idx in range(batch_score.size(0)):
+                 idx_rank = target_rank[idx].tolist()
+                 assert idx_rank[0] == idx
+@@ -199,20 +210,20 @@ def predict_by_mm_and_img():
+         entity_dict.entity_exs)  # obtain entity embeddings
+ 
+     forward_metrics_mm = eval_single_direction(predictor,
+-                                               entity_tensor=entity_tensor_mm,
++                                               entity_tensor=entity_tensor_mm, kind='mm',
+                                                eval_forward=True)
+     backward_metrics_mm = eval_single_direction(predictor,
+-                                                entity_tensor=entity_tensor_mm,
++                                                entity_tensor=entity_tensor_mm, kind='mm',
+                                                 eval_forward=False)
+     metrics_mm = {k: round((forward_metrics_mm[k] + backward_metrics_mm[k]) / 2, 4)
+                   for k in forward_metrics_mm}
+     logger.info('Averaged metrics text-mm: {}'.format(metrics_mm))
+ 
+     forward_metrics = eval_single_direction(predictor,
+-                                            entity_tensor=entity_tensor,
++                                            entity_tensor=entity_tensor, kind='img',
+                                             eval_forward=True)
+     backward_metrics = eval_single_direction(predictor,
+-                                             entity_tensor=entity_tensor,
++                                             entity_tensor=entity_tensor, kind='img',
+                                              eval_forward=False)
+     metrics = {k: round((forward_metrics[k] + backward_metrics[k]) / 2, 4) for k in forward_metrics}
+     logger.info('Averaged metrics text-img: {}'.format(metrics))
+@@ -231,8 +242,10 @@ def predict_by_mm_and_img():
+ def eval_single_direction(predictor: BertPredictor,
+                           entity_tensor: torch.tensor,
+                           eval_forward=True,
+-                          batch_size=256) -> dict:
++                          batch_size=256, kind='mm') -> dict:
+     start_time = time()
++    GM_STRICT.clear()  # [Geometry-MMKG]
++    GM_STRICT_LAMBDA.clear()
+     examples = load_data(args.valid_path, add_forward_triplet=eval_forward, add_backward_triplet=not eval_forward)
+     hr_tensor, _ = predictor.predict_by_examples(examples)  # hr_vector in forward()
+     hr_tensor = hr_tensor.to(entity_tensor.device)
+@@ -251,6 +264,8 @@ def eval_single_direction(predictor: BertPredictor,
+                                                                     batch_size=batch_size, predictor=predictor)
+     eval_dir = 'forward' if eval_forward else 'backward'
+     logger.info('{} metrics: {}'.format(eval_dir, json.dumps(metrics)))
++    GM_RANKS[(kind, eval_dir)] = (list(GM_STRICT), {k: list(v) for k, v in GM_STRICT_LAMBDA.items()},  # [Geometry-MMKG]
++                                  [(ex.head_id, ex.relation, ex.tail_id) for ex in examples])
+ 
+     pred_infos = []
+     for idx, ex in enumerate(examples):
+@@ -292,10 +307,10 @@ def predict_with_knowledge_store():
+ 
+     if entity_tensor_mm is not None:
+         forward_metrics_mm = eval_single_direction(predictor,
+-                                                   entity_tensor=entity_tensor_mm,
++                                                   entity_tensor=entity_tensor_mm, kind='mm',
+                                                    eval_forward=True)
+     backward_metrics_mm = eval_single_direction(predictor,
+-                                                entity_tensor=entity_tensor_mm,
++                                                entity_tensor=entity_tensor_mm, kind='mm',
+                                                 eval_forward=False)
+ 
+     logger.info('knn k: {}'.format(args.knn_topk))
+@@ -306,10 +321,10 @@ def predict_with_knowledge_store():
+         logger.info('Averaged metrics text-mm: {}'.format(metrics_mm))
+ 
+     forward_metrics = eval_single_direction(predictor,
+-                                            entity_tensor=entity_tensor,
++                                            entity_tensor=entity_tensor, kind='img',
+                                             eval_forward=True)
+     backward_metrics = eval_single_direction(predictor,
+-                                             entity_tensor=entity_tensor,
++                                             entity_tensor=entity_tensor, kind='img',
+                                              eval_forward=False)
+     logger.info('knn k: {}'.format(args.knn_topk))
+     for i in range(len(knn_lambda_list)):
+@@ -329,8 +344,29 @@ def predict_with_knowledge_store():
+         writer.write('average metrics text-mm: {}\n'.format(json.dumps(metrics_mm)))
+ 
+ 
++def gm_write_ranks():
++    """[Geometry-MMKG] --rank-file: one row per line of the evaluated split (file order); rank_tail from the forward
++    pass, rank_head from the backward (inverse relation) pass. Tab-separated: relations contain spaces."""
++    if not args.rank_file:
++        return
++    fwd, bwd = GM_RANKS[(args.rank_tensor, 'forward')], GM_RANKS[(args.rank_tensor, 'backward')]
++    if args.knn_topk > 0:
++        i = min(range(len(knn_lambda_list)), key=lambda j: abs(knn_lambda_list[j] - args.rank_lambda))
++        r_tail, r_head, lam = fwd[1][i], bwd[1][i], knn_lambda_list[i]
++    else:
++        r_tail, r_head, lam = fwd[0], bwd[0], None
++    assert len(r_tail) == len(r_head) == len(fwd[2]), (len(r_tail), len(r_head), len(fwd[2]))
++    with open(args.rank_file, 'w', encoding='utf-8') as f:
++        f.write('head_id\trelation\ttail_id\trank_head\trank_tail\n')
++        for (h, r, t), rh, rt in zip(fwd[2], r_head, r_tail):
++            f.write('{}\t{}\t{}\t{}\t{}\n'.format(h, r, t, rh, rt))
++    logger.info('[Geometry-MMKG] wrote {} strict ranks ({} table, lambda {}) to {}'.format(
++        len(r_tail), args.rank_tensor, lam, args.rank_file))
++
++
+ if __name__ == '__main__':
+     if args.knn_topk > 0:
+         predict_with_knowledge_store()
+     else:
+         predict_by_mm_and_img()
++    gm_write_ranks()
+diff --git a/models.py b/models.py
+index d5c042f..6334aeb 100644
+--- a/models.py
++++ b/models.py
+@@ -61,6 +61,8 @@ class CustomMMModel(nn.Module, ABC):
+         self.hr_bert = AutoModel.from_pretrained(args.pretrained_model)
+         self.bert = deepcopy(self.hr_bert)
+         self.vit = AutoModel.from_pretrained('./PLMs/vit-base-patch16-224')
++        if getattr(args, 'freeze_vit', False):
++            self._freeze_module(self.vit)  # [Geometry-MMKG] paper sec. 5.1.3: "we fix the parameter of the visual encoder"
+         self.prefix = self.args.prefix
+         assert self.prefix > 0, "Set args.prefix > 0 to add visual prefix."
+         self.vision_mapping = nn.Sequential(
+diff --git a/trainer.py b/trainer.py
+index a75f384..c4b6c63 100644
+--- a/trainer.py
++++ b/trainer.py
+@@ -11,7 +11,7 @@ from collections import OrderedDict
+ 
+ from typing import Dict
+ from transformers import get_linear_schedule_with_warmup, get_cosine_schedule_with_warmup
+-from transformers import AdamW
++from torch.optim import AdamW  # [Geometry-MMKG] transformers.AdamW is gone in transformers 5
+ 
+ from doc import Dataset, collate, Example
+ from utils import AverageMeter, ProgressMeter
+@@ -55,7 +55,8 @@ class Trainer:
+ 
+         self.optimizer = AdamW([p for p in self.model.parameters() if p.requires_grad],
+                                lr=args.lr,
+-                               weight_decay=args.weight_decay)
++                               weight_decay=args.weight_decay,
++                               eps=1e-6)  # [Geometry-MMKG] the default eps of the transformers AdamW the code was written for
+         report_num_trainable_parameters(self.model)
+ 
+         train_dataset = Dataset(path=args.train_path, task=args.task)

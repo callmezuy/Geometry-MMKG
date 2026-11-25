@@ -34,6 +34,29 @@ def test_forward_fusion_ignores_geo_and_mask_and_is_unit_norm():
     assert torch.equal(nd.forward_fusion(t, x, z), nd.forward_fusion(t, x, torch.randn(4, 8)))  # depth unused
 
 
+def test_depth_statistics_only_in_the_depth_variant():
+    torch.manual_seed(0)
+    m = FeatureTransE(3, feature_dim=8, embed_dim=6, hidden_dim=5, use_depth=True, depth_stats_dim=9).eval()
+    assert m.uses_depth_stats and not FeatureTransE(3, feature_dim=8, use_depth=True).uses_depth_stats
+    t, x, z, g = torch.randn(4, 8), torch.randn(4, 8), torch.randn(4, 8), torch.randn(4, 9)
+    assert not torch.equal(m.forward_fusion(t, x, z, geo=g), m.forward_fusion(t, x, z, geo=torch.zeros(4, 9)))
+    for bad in (None, torch.randn(4, 5)):
+        try:
+            m.forward_fusion(t, x, z, geo=bad)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("a model with depth statistics must refuse missing / wrong-size geo")
+    try:
+        FeatureTransE(3, use_depth=False, depth_stats_dim=9)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("no_depth must not take depth statistics")
+    a = train.parse_args(["--data", "x", "--model", "feature_transe", "--variant", "depth"])
+    assert a.depth_stats == "auto" and a.input_norm is False and a.depth_dropout == 0.0
+
+
 def test_cli_variants_and_options():
     a = train.parse_args(["--data", "x", "--model", "feature_transe"])
     assert a.variant == "no_depth"
@@ -89,6 +112,23 @@ def test_end_to_end_run_writes_metrics_and_ranks():
         assert m["model"] == "Feature-TransE" and m["options"] == {} and m["options_tag"] == "base"
         assert m["model_kwargs"]["use_depth"] is True and "test" in m and m["best_gate"] is None
         assert os.path.exists(os.path.join(out, f"ranks_{stem}_test.csv"))
+
+
+def test_scene_graph_depth_variant_reads_depth_statistics():
+    with tempfile.TemporaryDirectory() as root:
+        data = os.path.join(root, "Spatial-VRD")          # a scene-graph name: --depth-stats auto -> the table
+        os.makedirs(data)
+        _tiny_dataset(data)
+        torch.save(torch.randn(12, 9, generator=torch.Generator().manual_seed(1)),
+                   os.path.join(data, "ent_depth_stats.pt"))
+        out = os.path.join(root, "out")
+        for variant, dstat in (("depth", 9), ("no_depth", 0)):
+            train.main(["--data", data, "--model", "feature_transe", "--variant", variant, "--epochs", "1",
+                        "--valid-every", "1", "--batch-size", "8", "--out", out, "--dev"])
+            stem = f"feature-transe_Spatial-VRD_{variant}{'_dstat' if dstat else ''}_seed42"
+            m = json.load(open(os.path.join(out, f"metrics_{stem}.json")))
+            assert m["model_kwargs"]["depth_stats_dim"] == dstat
+            assert (m["depth_stats"] is None) == (dstat == 0)
 
 
 def test_rows_without_image_must_be_the_constant_fill():

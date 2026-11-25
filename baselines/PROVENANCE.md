@@ -78,3 +78,43 @@ these keys only when the dataset name contains "MKG", and it then fills the list
 
 For names without "MKG" (FB15k-237-IMG, VRD), run with `-use_pool 0`. This is an upstream flag: `use_pool=1` would
 apply the hard-coded VGG-4096 pooling.
+
+## MoMoK and CMR: not kept in this repository (decided 25/11/2026)
+
+Neither repository publishes a licence (GitHub API, 25/11/2026: `zjukg/MoMoK` and `OreOZhao/CMR` have none), so this
+public repository does not redistribute their code. It keeps only our diff; `scripts/setup_baseline.py <name> --dest
+DIR` clones the authors' repository at the pinned commit and applies it (`--no-patch` gives the code as released).
+Every change below is outside the architecture (P3 rule) and carries a `[Geometry-MMKG]` comment in the patched code.
+
+### MoMoK (`baselines/patches/MoMoK.diff`)
+
+- Source: GitHub `zjukg/MoMoK`, commit `99c2df114d48c79708ea0608644b685183d81bd9` (2025-06-12).
+- Data at the data level only: `scripts/prepare_momok_data.py`. MoMoK selects its feature reshape by a substring of the
+  dataset name (`models/RelMoE.py`); our 768-d image + 768-d text tables fit only the authors' `FB15K-237` branch, so
+  the dataset names contain `FB15K-237` and not `MKG`. +D concat (1536-d) fits no branch and is not run.
+
+| File | Change | Category |
+|---|---|---|
+| `utils/data_loader.py` `get_batch` | KvsAll label matrix built with torch on the GPU instead of numpy on the CPU (72% / 86% of a step on FB15k-237 / Spatial-VRD). Bit-identical tensor; the original is kept as `get_batch_numpy` and compared in `tests/test_momok_patch.py` | data loading |
+| `utils/data_loader.py` `get_strict_metrics` (new) | filtered head + tail ranks with the strict tie rule on the model's own score (mean of the four predictions), optional rank CSV | evaluation |
+| `train.py` | `--select_on valid` (default): validation every `eval_freq` epochs and after the last, best weights kept, test once; `--select_on original`: the upstream behaviour (test every `eval_freq` epochs, best value of each metric) | checkpoint selection |
+| `train.py` | `get_validation_pred` returns `(metrics, attention)`; the released `train.py` indexed it as a dict and failed at its first evaluation | bug fix outside the architecture |
+| `train.py` | `random.seed(args.seed)` (MIEstimator draws experts with `random.sample`) | seed |
+| `train.py` | `--rank_file` | evaluation |
+
+### CMR (`baselines/patches/CMR.diff`)
+
+- Source: GitHub `OreOZhao/CMR`, commit `bcd23a66fb5787f5968b7615a836c8b48361b5ec` (2025-02-20).
+
+| File | Change | Category |
+|---|---|---|
+| `config.py` | declare `--mem` and `--adapter-model`, read by `trainer.py` / `knowledge_store.py` / `predict.py` but never declared (the released code fails at the first training step) | bug fix outside the architecture |
+| `config.py`, `evaluate.py` | `--seed` is honoured (the code overwrote it with its default 202303) | seed |
+| `config.py` | task `SpatialVRD_ind` added to the allowed names | data paths |
+| `config.py`, `models.py` | `--freeze-vit`: calls the code's own `_freeze_module` on the ViT, as the paper describes (sec. 5.1.3, "we fix the parameter of the visual encoder"); the released code never calls it. Measured 25/11/2026: with a trainable ViT, batch 768 does not fit 96 GB; frozen it takes 48.1 GB, the authors' A6000. Our runs pass it (decided 25/11/2026) | training setting of the paper |
+| `trainer.py` | `torch.optim.AdamW(eps=1e-6)` instead of `transformers.AdamW` (removed in transformers 5; 1e-6 is its default eps) | library compatibility |
+| `evaluate.py` | strict filtered ranks next to the original ones; `--rank-file`, `--rank-tensor {mm,img}`, `--rank-lambda` (the kNN weight, chosen on valid). The original metrics and their logs are unchanged | evaluation |
+
+- Not changed, reported as is: at test time on a `*_ind` task `knowledge_store.py` also puts the test triples into the
+  kNN memory (only neighbours with the query's head and relation are skipped). We report CMR without kNN
+  (`--knn_topk 0`) and with kNN as released.
