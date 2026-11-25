@@ -694,7 +694,12 @@ Bảng dưới là các tiêu chí phải đạt trước khi đưa số baselin
     - Phụ thuộc: torch 2.0, numpy, scikit-learn, tqdm. `torch.where` với điều kiện uint8 chỉ cảnh báo trên torch 2.5; cần kiểm trên torch 2.11.
     - **Thời gian:** mỗi batch dựng ma trận nhãn B × N trên CPU (Spatial-VRD: 1024 × 93.809, khoảng 384 MB mỗi batch). **Đo trên Molab (25/11/2026):** 21,8 giây/epoch trên FB15k-237-IMG và 92,5 giây/epoch trên Spatial-VRD (bộ nhớ GPU đỉnh chỉ 0,8 / 3,2 GB), tức khoảng 12,3 và 52 giờ cho 2000 epoch, đều vượt 12 giờ (P4.0). Đo tách từng phần: 72% / 86% thời gian là `get_batch` dựng ma trận nhãn trên CPU; dựng cùng tensor trên GPU (giống hệt từng phần tử) đưa về 6,4 / 13,6 giây/epoch. **Đã quyết (25/11/2026): dựng nhãn trên GPU** (P4.0).
 - [ ] **P3.7** CMR (mức 1): clone repo `OreOZhao/CMR`; chạy nguyên bản trên FB15K-237-ind, đối chiếu số paper (MRR 0,371), đây là kiểm tra tái lập cho ô inductive. Thêm ghi rank theo P1. Chạy trên Spatial-VRD (text = tên lớp vật thể, ảnh = vùng cắt theo box). Code CMR đọc đúng một ảnh mỗi thực thể và không chạy được nếu thực thể thiếu ảnh (P0.2). Cách cấp ảnh cho thực thể thiếu ảnh ở tầng dữ liệu, không sửa code: **đã quyết 25/11/2026, một ảnh nhiễu dùng chung** (bên dưới). Ảnh dùng cho CMR: ảnh `ok` đầu tiên trong `image_index.tsv`, hoặc ảnh CMR chọn nếu lấy được `fb15k_best_img.pickle`.
-  - **Đưa vào (25/11/2026), không chép code:** `baselines/patches/CMR.diff` qua `scripts/setup_baseline.py cmr`. Thay đổi: khai báo `--mem`, `--adapter-model` (code gốc lỗi ngay bước train đầu vì thiếu); `--seed` được dùng (code ghi đè 202303); task `SpatialVRD_ind`; `--freeze-vit` (gọi `_freeze_module` có sẵn); `torch.optim.AdamW(eps=1e-6)`; rank chặt cạnh rank gốc, `--rank-file`, `--rank-tensor`, `--rank-lambda`. Chưa có: script chuẩn bị dữ liệu (`entities.json` có đường dẫn ảnh, ảnh vùng cắt cho Spatial-VRD); chưa chạy thử (cần BERT / ViT trên GPU).
+  - **Đưa vào (25/11/2026), không chép code:** `baselines/patches/CMR.diff` qua `scripts/setup_baseline.py cmr`. Thay đổi: khai báo `--mem`, `--adapter-model` (code gốc lỗi ngay bước train đầu vì thiếu); `--seed` được dùng (code ghi đè 202303); task `SpatialVRD_ind`; `--freeze-vit` (gọi `_freeze_module` có sẵn); `torch.optim.AdamW(eps=1e-6)`; rank chặt cạnh rank gốc, `--rank-file`, `--rank-tensor`, `--rank-lambda`. Chưa chạy thử train (cần BERT / ViT trên GPU).
+    - **Dữ liệu (25/11/2026): `scripts/prepare_cmr_data.py`** ghi `data/<Task>/{train,valid,test}.txt.json`, `relations.json`, `img_entities.json` (file `triplet.EntityDict` đọc; `preprocess.py` phát hành chỉ ghi `entities.json` không có đường dẫn ảnh) và `img_data/<Task>/`. Ứng viên = toàn bộ `entity2id` (mục 4.2).
+      - FB15K-237-ind (`FB15k237_ind`): giữ nguyên file bộ ba của tác giả sau khi kiểm trùng đúng split của mình (cùng bộ ba, cùng thứ tự, chuỗi quan hệ khớp `relations.json`); tên và mô tả theo đúng `preprocess.py` (mô tả cắt 50 từ; 14.515 / 14.541 thực thể có mô tả); ảnh = ảnh `ok` đầu tiên trong `image_index.tsv`.
+      - Spatial-VRD (`SpatialVRD_ind`): bộ ba từ file v0; text = `entity2text.txt` (cùng text mọi mô hình nhận), không có mô tả; ảnh = vùng cắt theo box, cùng luật box với `extract_features.py`.
+      - Thực thể thiếu ảnh: một ảnh nhiễu chung (seed 0, 384 px, PNG, sha256 `1fd6a78e…`); script kiểm tập này trùng đúng `ent_img_mask.pt` (FB15K-237-ind 249, Spatial-VRD 2).
+      - Chạy trên máy: cả hai bộ qua mọi phép kiểm; `doc.py` của CMR nạp được 430.164 / 153.918 ví dụ ở chế độ `--mm --prefix 4`.
     - **Thực thể thiếu ảnh (quyết định 25/11/2026): một ảnh nhiễu dùng chung** cho mọi thực thể thiếu ảnh (249 ở FB15K-237-ind; 2 box ở Spatial-VRD), sinh một lần với seed cố định và lưu kèm mã hash. Lý do: gần nhất với câu "padded with random values" của bài báo, và vẫn là một hằng số như quy tắc chung cho baseline (mục 3.2), nên không thành một tín hiệu định danh riêng cho từng thực thể. Không dùng bộ ảnh BaiduNetDisk của tác giả cho lần chạy chính: README nói tác giả crawl bù ảnh từ Wikidata và Google / Bing, bộ ảnh được upload ngày 20/02/2025 (sau bài báo), không có hash; cho riêng CMR thêm ảnh thì không còn cùng kho ảnh với các mô hình khác. Chỉ dùng nếu tải được, và chỉ cho lần kiểm tái lập (ghi rõ khác biệt về ảnh khi so với MRR 0,371).
   - **Đọc code (22/11/2026, commit `bcd23a6` ngày 20/02/2025, trong scratchpad):**
     - Kiến trúc: bi-encoder theo SimKGC. Một BERT-base mã hoá truy vấn (h, r), một BERT-base khác mã hoá thực thể. ViT-B/16 (`vit-base-patch16-224`) mã hoá đúng một ảnh mỗi thực thể, ánh xạ thành 4 token tiền tố cho BERT thực thể. Loss InfoNCE trong batch theo cả hai chiều, cộng pre-batch. Lúc suy luận cộng thêm điểm kNN từ bộ nhớ FAISS các vector truy vấn. **Không có embedding ID**, nên chạy được inductive. 307,3 triệu tham số, như nhau ở mọi dataset. Code để ViT train được (hàm đóng băng có nhưng không được gọi), trong khi bài báo nói ViT đóng băng.
@@ -728,7 +733,31 @@ Bảng dưới là các tiêu chí phải đạt trước khi đưa số baselin
     - **MoMoK theo config gốc (2000 epoch) không chạy xong trong một phiên 12 giờ ở bộ nào trừ MKG-Y và FB15K-237-ind:** FB15k-237-IMG khoảng 12,3 giờ, Spatial-VRD khoảng 52 giờ, VRD-Trans khoảng 55 giờ. Kể cả 400 epoch, VRD vẫn khoảng 10,5 giờ.
     - **CMR không chạy được đúng như code phát hành:** batch 768 với ViT train được không vừa 96 GB. Chỉ có hai cách: ViT đóng băng như bài báo (một thay đổi so với code, cần quyết định), hoặc giảm batch (đổi config gốc, ảnh hưởng số mẫu âm trong batch).
     - SNAG dừng sớm theo valid. Nếu chạy đủ 8000 epoch thì FB15k-237-IMG mất khoảng 17 giờ, nên phải dựa vào dừng sớm (MKG-Y: dừng ở epoch 1899).
-  - Thời gian mỗi lần chạy, config gốc (giờ; **đo** = chạy trọn trên Molab, *suy* = suy từ giây/epoch đo được, còn lại là ước lượng):
+  - **Bảng tài nguyên hiện hành (25/11/2026, theo các quyết định đã chốt; thay hai bảng thời gian / tổng giờ phía dưới, được giữ làm lịch sử).** Molab RTX PRO 6000 96 GB, một lần chạy phải xong trong 12 giờ. **đo** = chạy trọn trên Molab; *suy* = suy từ giây/epoch đo được; còn lại là ước lượng.
+
+    | Baseline (config chạy) | Tham số FB15k / VRD | FB15k-237-IMG | MKG-Y | VRD-Trans | FB15K-237-ind | Spatial-VRD | Spatial-VG | Ghi chú |
+    |---|---|---|---|---|---|---|---|---|
+    | NativE (1000 epoch) | 31,2 / 192,5 triệu | **7,7–8,2 đo** | 0,6 *suy* | ≈ 3,3 | 5,5–7 | **3,3 đo** (đã xong) | không chạy | 27,6 s/epoch FB15k; chạy song song không nhanh hơn |
+    | SNAG (dừng sớm theo valid; 2000–8000 epoch) | 27,1 / 169 triệu (train được 4,8 / 25) | 4,2–16,8 *suy* | **0,33 đo** | 2,3–9,4 *suy* | 3,8–15,4 *suy* | 2,3–9,4 *suy* | không chạy | 7,0 / 2,3 s/epoch; mỗi lần valid 59 s (FB15k) / 186 s (VRD-Trans) |
+    | MoMoK (nhãn dựng trên GPU, 2000 epoch) | 97,7 / 161,8 triệu | 3,7 *suy* | ≈ 0,7 *suy* | ≈ 8,5 *suy* | ≈ 3,3 *suy* | ≈ 8,1 *suy* | không chạy | 6,4 / 13,6 s/epoch; chỉ Control và +D mean |
+    | MKGformer (15 + 12 epoch, fp32) | 237,3 / 298,1 triệu | 5,3–7 *suy* | — | 1,5–3 | — | — | — | GPU 26 phút/epoch FB15k, 17 GB; CPU nạp ảnh nhanh hơn GPU |
+    | CMR (ViT đóng băng, ≤ 50 epoch, dừng sớm 3) | 307,3 triệu | — | — | — | 2–6,5 *suy* | 0,6–2 *suy* | — | GPU 6,5 phút/epoch FB15K-237-ind, 48 GB |
+    | Feature-TransE (như GeometryMMKG) | 1,95 / 2,54 triệu (FB15k, không / có depth) | ≈ 0,7 | ≈ 0,3 | ≈ 0,13 | ≈ 0,5 | ≈ 0,13 | ≈ 0,6 | 7,5 s/epoch FB15k ở batch 512 (lần chạy của cộng tác viên) |
+
+    **Kế hoạch chạy theo phương án đã chọn** ((a) + (c1) + (c2); ngân sách epoch đoán trước: NativE 400, SNAG trần 2000, MoMoK 1000, chốt lại sau một lần chạy config gốc cho mỗi (baseline, dataset); không tính lợi của (f)):
+
+    | Baseline | Tune | Chính thức (thêm seed 43, 44) | Ô inductive (1 seed, config gốc) | Giờ GPU (giữa) |
+    |---|---|---|---|---|
+    | NativE | 72 (24 × FB15k, MKG-Y, VRD-Trans) | 12 | 3 (FB15K-237-ind; VRD đã xong) | khoảng 160 |
+    | SNAG | 72 | 12 | 6 | khoảng 235 |
+    | MoMoK | 48 (16 × 3 bộ; 2 kịch bản) | 8 | 4 | khoảng 155 |
+    | MKGformer | 0 (config gốc) | 0 | — | khoảng 8 (FB15k-237-IMG, VRD-Trans) |
+    | CMR | 0 (config gốc) | 0 | 2 lần (FB15K-237-ind, Spatial-VRD) | khoảng 5 |
+    | Feature-TransE | 96 (16 × 6 bộ) | 16 | — (không có ID: tune ở mọi ô) | khoảng 45 |
+    | **Tổng** | | | | **khoảng 610 giờ** (500–1.050), khoảng 55 phiên Molab |
+
+    SNAG chiếm nhiều nhất vì chưa biết nó dừng sớm ở epoch nào trên FB15k-237-IMG. Lần chạy config gốc sẽ cho biết, và đánh giá valid theo lô (f) giảm phần 59–186 giây mỗi lần valid.
+  - *(Lịch sử, 25/11/2026 trước khi dựng nhãn MoMoK trên GPU; đã thay bằng bảng trên.)* Thời gian mỗi lần chạy, config gốc (giờ; **đo** = chạy trọn trên Molab, *suy* = suy từ giây/epoch đo được, còn lại là ước lượng):
 
     | Baseline | FB15k-237-IMG | MKG-Y | VRD-Trans | FB15K-237-ind | Spatial-VRD |
     |---|---|---|---|---|---|

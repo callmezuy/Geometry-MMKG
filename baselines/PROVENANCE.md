@@ -115,6 +115,10 @@ Every change below is outside the architecture (P3 rule) and carries a `[Geometr
 | `trainer.py` | `torch.optim.AdamW(eps=1e-6)` instead of `transformers.AdamW` (removed in transformers 5; 1e-6 is its default eps) | library compatibility |
 | `evaluate.py` | strict filtered ranks next to the original ones; `--rank-file`, `--rank-tensor {mm,img}`, `--rank-lambda` (the kNN weight, chosen on valid). The original metrics and their logs are unchanged | evaluation |
 
+- Data at the data level only: `scripts/prepare_cmr_data.py` writes the split json files, `relations.json`,
+  `img_entities.json` (the file `triplet.EntityDict` reads; the released `preprocess.py` writes `entities.json` without
+  image paths) and one image per entity; entities without an image share one noise picture (seed 0, sha256 recorded).
+  On FB15K-237-ind the authors' own split json files are used after checking they are exactly our split.
 - Not changed, reported as is: at test time on a `*_ind` task `knowledge_store.py` also puts the test triples into the
   kNN memory (only neighbours with the query's head and relation are skipped). We report CMR without kNN
   (`--knn_topk 0`) and with kNN as released.
