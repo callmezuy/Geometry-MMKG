@@ -101,6 +101,7 @@ Every change below is outside the architecture (P3 rule) and carries a `[Geometr
 | `train.py` | `get_validation_pred` returns `(metrics, attention)`; the released `train.py` indexed it as a dict and failed at its first evaluation | bug fix outside the architecture |
 | `train.py` | `random.seed(args.seed)` (MIEstimator draws experts with `random.sample`) | seed |
 | `train.py` | `--rank_file` | evaluation |
+| `train.py` | `--resume FILE`: the full training state (model, estimator, both optimizers, lr scheduler, the current order of `corpus.train_indices`, best-so-far, RNG states) is written after every evaluation and restored at start; a resumed run gives the same results as an uninterrupted one (exact resume is allowed for baselines, decided 25/11/2026) | training state (resume) |
 
 ### CMR (`baselines/patches/CMR.diff`)
 
@@ -113,6 +114,8 @@ Every change below is outside the architecture (P3 rule) and carries a `[Geometr
 | `config.py` | task `SpatialVRD_ind` added to the allowed names | data paths |
 | `config.py`, `models.py` | `--freeze-vit`: calls the code's own `_freeze_module` on the ViT, as the paper describes (sec. 5.1.3, "we fix the parameter of the visual encoder"); the released code never calls it. Measured 25/11/2026: with a trainable ViT, batch 768 does not fit 96 GB; frozen it takes 48.1 GB, the authors' A6000. Our runs pass it (decided 25/11/2026) | training setting of the paper |
 | `trainer.py` | `torch.optim.AdamW(eps=1e-6)` instead of `transformers.AdamW` (removed in transformers 5; 1e-6 is its default eps) | library compatibility |
+| `config.py`, `trainer.py` | `--resume <model_dir>`: after every finished epoch the full training state (model, optimizer, lr scheduler, GradScaler, pre-batch negative buffer, best-so-far, RNG states) goes to `<model_dir>/resume.pt`; a resumed run gives the same results as an uninterrupted one (exact resume is allowed for baselines, decided 25/11/2026) | training state (resume) |
+| `predict.py`, `knowledge_store.py` | evaluation-time `DataLoader`s use `--workers` instead of 1-2 processes (every train / valid / test example is re-encoded with two images; about 4 h per evaluation on FB15K-237-ind with one worker). Same examples, same order (`shuffle=False`) | data loading |
 | `evaluate.py` | strict filtered ranks next to the original ones; `--rank-file`, `--rank-tensor {mm,img}`, `--rank-lambda` (the kNN weight, chosen on valid). The original metrics and their logs are unchanged | evaluation |
 
 - Data at the data level only: `scripts/prepare_cmr_data.py` writes the split json files, `relations.json`,

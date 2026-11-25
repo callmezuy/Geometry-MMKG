@@ -1,5 +1,5 @@
 diff --git a/config.py b/config.py
-index 442e66f..445de89 100644
+index 442e66f..9e18953 100644
 --- a/config.py
 +++ b/config.py
 @@ -8,7 +8,7 @@ import torch.backends.cudnn as cudnn
@@ -11,7 +11,7 @@ index 442e66f..445de89 100644
  parser = argparse.ArgumentParser(description='SimKGC arguments')
  parser.add_argument('--pretrained-model', default='./PLMs/bert-base-uncased', type=str, metavar='N',
                      help='path to pretrained model')
-@@ -89,6 +89,20 @@ parser.add_argument('--knn_topk', default=0, type=int,
+@@ -89,6 +89,22 @@ parser.add_argument('--knn_topk', default=0, type=int,
  parser.add_argument('--knn_lambda', default=0.2, type=float,
                      help='p_knn ratio in kNN.')
  
@@ -22,6 +22,8 @@ index 442e66f..445de89 100644
 +parser.add_argument('--adapter-model', action='store_true', help='[Geometry-MMKG] declared for knowledge_store.py / predict.py')
 +parser.add_argument('--freeze-vit', action='store_true',
 +                    help='[Geometry-MMKG] freeze the ViT as the paper (sec. 5.1.3) describes; the released code never does')
++parser.add_argument('--resume', default='', type=str,
++                    help='[Geometry-MMKG] model dir of an interrupted run: continue from its resume.pt (same arguments)')
 +parser.add_argument('--rank-file', default='', type=str,
 +                    help='[Geometry-MMKG] evaluate.py: write strict filtered ranks (head_id, relation, tail_id, rank_head, rank_tail)')
 +parser.add_argument('--rank-tensor', default='mm', choices=['mm', 'img'],
@@ -32,7 +34,7 @@ index 442e66f..445de89 100644
  args = parser.parse_args()
  
  if args.mm:
-@@ -97,7 +111,8 @@ if args.mm:
+@@ -97,7 +113,8 @@ if args.mm:
  
  # assert not args.train_path or os.path.exists(args.train_path)
  assert args.pooling in ['cls', 'mean', 'max']
@@ -42,7 +44,16 @@ index 442e66f..445de89 100644
  assert args.lr_scheduler in ['linear', 'cosine']
  
  if not args.train_path and not args.valid_path:
-@@ -120,7 +135,7 @@ if args.eval_model_path:
+@@ -111,6 +128,8 @@ time_str = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+ 
+ args.model_dir = args.model_dir + args.task.lower() + '-' + time_str + '/'
+ 
++if args.resume:  # [Geometry-MMKG] continue in the interrupted run's folder (log.txt is appended to)
++    args.model_dir = args.resume.rstrip('/') + '/'
+ args.log_path = args.model_dir + 'log.txt'
+ 
+ if args.model_dir:
+@@ -120,7 +139,7 @@ if args.eval_model_path:
      args.model_dir = os.path.dirname(args.eval_model_path)
      args.log_path = args.model_dir + '/eval_log.txt'
  
@@ -220,6 +231,28 @@ index dd72b51..7f43f8b 100644
      else:
          predict_by_mm_and_img()
 +    gm_write_ranks()
+diff --git a/knowledge_store.py b/knowledge_store.py
+index aa8ff90..d6702f5 100644
+--- a/knowledge_store.py
++++ b/knowledge_store.py
+@@ -91,7 +91,7 @@ class BertKnowledgeStore(BertPredictor):
+ 
+         data_loader = torch.utils.data.DataLoader(
+             Dataset(path='', examples=examples, task=args.task),
+-            num_workers=1,
++            num_workers=args.workers,  # [Geometry-MMKG] was 1; data loading only (shuffle=False)
+             batch_size=bsz,
+             collate_fn=collate,
+             shuffle=False)
+@@ -180,7 +180,7 @@ class BertKnowledgeStore(BertPredictor):
+                                     tail_id=entity_ex.entity_id))
+         data_loader = torch.utils.data.DataLoader(
+             Dataset(path='', examples=examples, task=args.task),
+-            num_workers=2,
++            num_workers=args.workers,  # [Geometry-MMKG] was 2; data loading only (shuffle=False)
+             batch_size=max(args.batch_size, 1024),
+             collate_fn=collate,
+             shuffle=False)
 diff --git a/models.py b/models.py
 index d5c042f..6334aeb 100644
 --- a/models.py
@@ -233,11 +266,41 @@ index d5c042f..6334aeb 100644
          self.prefix = self.args.prefix
          assert self.prefix > 0, "Set args.prefix > 0 to add visual prefix."
          self.vision_mapping = nn.Sequential(
+diff --git a/predict.py b/predict.py
+index e26b298..c4a7e41 100644
+--- a/predict.py
++++ b/predict.py
+@@ -77,7 +77,7 @@ class BertPredictor:
+     def predict_by_examples(self, examples: List[Example]):
+         data_loader = torch.utils.data.DataLoader(
+             Dataset(path='', examples=examples, task=args.task),
+-            num_workers=1,
++            num_workers=args.workers,  # [Geometry-MMKG] was 1; data loading only (shuffle=False)
+             batch_size=max(args.batch_size, 512),
+             collate_fn=collate,
+             shuffle=False)
+@@ -102,7 +102,7 @@ class BertPredictor:
+                                     tail_id=entity_ex.entity_id))
+         data_loader = torch.utils.data.DataLoader(
+             Dataset(path='', examples=examples, task=args.task),
+-            num_workers=2,
++            num_workers=args.workers,  # [Geometry-MMKG] was 2; data loading only (shuffle=False)
+             batch_size=max(args.batch_size, 1024),
+             collate_fn=collate,
+             shuffle=False)
 diff --git a/trainer.py b/trainer.py
-index a75f384..c4b6c63 100644
+index a75f384..3bb65fe 100644
 --- a/trainer.py
 +++ b/trainer.py
-@@ -11,7 +11,7 @@ from collections import OrderedDict
+@@ -1,5 +1,7 @@
+ import glob
+ import json
++import random  # [Geometry-MMKG] resume
++import numpy as np  # [Geometry-MMKG] resume
+ import torch
+ import torch.nn.functional as F
+ import shutil
+@@ -11,7 +13,7 @@ from collections import OrderedDict
  
  from typing import Dict
  from transformers import get_linear_schedule_with_warmup, get_cosine_schedule_with_warmup
@@ -246,7 +309,7 @@ index a75f384..c4b6c63 100644
  
  from doc import Dataset, collate, Example
  from utils import AverageMeter, ProgressMeter
-@@ -55,7 +55,8 @@ class Trainer:
+@@ -55,7 +57,8 @@ class Trainer:
  
          self.optimizer = AdamW([p for p in self.model.parameters() if p.requires_grad],
                                 lr=args.lr,
@@ -256,3 +319,70 @@ index a75f384..c4b6c63 100644
          report_num_trainable_parameters(self.model)
  
          train_dataset = Dataset(path=args.train_path, task=args.task)
+@@ -83,11 +86,57 @@ class Trainer:
+         self.scheduler = self._create_lr_scheduler(num_training_steps)
+         self.best_metric = None
+ 
++    def _save_resume(self, path, epoch, last_best_acc_epoch):
++        # [Geometry-MMKG] the whole training state after a finished epoch (atomic write)
++        m = get_model_obj(self.model)
++        state = {'epoch': epoch, 'last_best_acc_epoch': last_best_acc_epoch, 'best_metric': self.best_metric,
++                 'model': m.state_dict(), 'optimizer': self.optimizer.state_dict(),
++                 'scheduler': self.scheduler.state_dict(),
++                 'scaler': self.scaler.state_dict() if self.args.use_amp else None,
++                 'pre_batch': (m.pre_batch_vectors.detach().cpu().clone(),
++                               [None if e is None else {'head_id': e.head_id, 'relation': e.relation,
++                                                         'tail_id': e.tail_id} for e in m.pre_batch_exs], m.offset),
++                 'rng': {'python': random.getstate(), 'numpy': np.random.get_state(), 'torch': torch.get_rng_state(),
++                         'cuda': torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None},
++                 'args': self.args.__dict__}
++        torch.save(state, path + '.tmp')
++        os.replace(path + '.tmp', path)
++        logger.info('[Geometry-MMKG] resume state saved after epoch {}: {}'.format(epoch, path))
++
++    def _load_resume(self, path):
++        # [Geometry-MMKG] restore what _save_resume wrote; returns (next epoch, last_best_acc_epoch)
++        s = torch.load(path, map_location='cpu', weights_only=False)
++        keep = ('resume', 'model_dir', 'log_path', 'workers', 'print_freq')
++        diff = [k for k, v in s['args'].items() if k not in keep and self.args.__dict__.get(k) != v]
++        assert not diff, 'resume.pt was written with other arguments: {}'.format(diff)
++        m = get_model_obj(self.model)
++        m.load_state_dict(s['model'])
++        self.optimizer.load_state_dict(s['optimizer'])
++        self.scheduler.load_state_dict(s['scheduler'])
++        if self.args.use_amp:
++            self.scaler.load_state_dict(s['scaler'])
++        vec, exs, offset = s['pre_batch']
++        m.pre_batch_vectors.copy_(vec.to(m.pre_batch_vectors.device))
++        m.pre_batch_exs, m.offset = [None if d is None else Example(**d) for d in exs], offset
++        self.best_metric = s['best_metric']
++        random.setstate(s['rng']['python'])
++        np.random.set_state(s['rng']['numpy'])
++        torch.set_rng_state(s['rng']['torch'])
++        if s['rng']['cuda'] is not None and torch.cuda.is_available():
++            torch.cuda.set_rng_state_all(s['rng']['cuda'])
++        logger.info('[Geometry-MMKG] resumed from {} after epoch {}'.format(path, s['epoch']))
++        return s['epoch'] + 1, s['last_best_acc_epoch']
++
+     def train_loop(self):
+         if self.args.use_amp:
+             self.scaler = torch.cuda.amp.GradScaler()
+         last_best_acc_epoch = 0
+-        for epoch in range(self.args.epochs):
++        start_epoch = 0  # [Geometry-MMKG]
++        resume_path = os.path.join(self.args.model_dir, 'resume.pt')
++        if self.args.resume:
++            assert os.path.exists(resume_path), resume_path
++            start_epoch, last_best_acc_epoch = self._load_resume(resume_path)
++        for epoch in range(start_epoch, self.args.epochs):
+             # train for one epoch
+             self.train_epoch(epoch)
+             is_best = self._run_eval(epoch=epoch)
+@@ -98,6 +147,7 @@ class Trainer:
+                 logger.info("Early stopping after no increase in Acc@1 for "
+                             + str(self.args.early_stopping) + ' epochs')
+                 break
++            self._save_resume(resume_path, epoch, last_best_acc_epoch)  # [Geometry-MMKG]
+ 
+     @torch.no_grad()
+     def _run_eval(self, epoch, step=0):

@@ -1,15 +1,16 @@
 diff --git a/train.py b/train.py
-index 2226f47..6d7f7e3 100644
+index 2226f47..4bde39f 100644
 --- a/train.py
 +++ b/train.py
-@@ -1,4 +1,6 @@
+@@ -1,4 +1,7 @@
  import argparse
 +import copy
++import os  # [Geometry-MMKG] resume
 +import random
  import time
  
  import numpy as np
-@@ -51,7 +53,12 @@ def parse_args():
+@@ -51,7 +54,14 @@ def parse_args():
          'n_exp': 3,
          'mu': 0.0001,
          'img_dim': 256,
@@ -19,11 +20,13 @@ index 2226f47..6d7f7e3 100644
 +        # strict filtered ranks, keep the best weights, test them once at the end. 'original': the upstream
 +        # behaviour (evaluate on test every eval_freq epochs, report the best value of each metric).
 +        'select_on': 'valid',
-+        'rank_file': ''
++        'rank_file': '',
++        # [Geometry-MMKG] resume file: written after every evaluation, restored at start if it exists
++        'resume': ''
      }
  
      parser = argparse.ArgumentParser()
-@@ -64,6 +71,7 @@ args = parse_args()
+@@ -64,6 +74,7 @@ args = parse_args()
  print(args)
  np.random.seed(args.seed)
  torch.manual_seed(args.seed)
@@ -31,15 +34,43 @@ index 2226f47..6d7f7e3 100644
  args.device = 'cuda:' + str(args.cuda) if int(args.cuda) >= 0 else 'cpu'
  print(f'Using: {args.device}')
  torch.cuda.set_device(args.cuda)
-@@ -109,6 +117,7 @@ def train_decoder(args):
+@@ -109,9 +120,34 @@ def train_decoder(args):
      counter = 0
      best_val_metrics = model.init_metric_dict()
      best_test_metrics = model.init_metric_dict()
 +    best_state, best_epoch = None, 0  # [Geometry-MMKG] select_on='valid'
      corpus.batch_size = args.batch_size
      corpus.neg_num = args.neg_num
-     training_range = tqdm(range(args.epochs))
-@@ -144,12 +153,24 @@ def train_decoder(args):
+-    training_range = tqdm(range(args.epochs))
++    start_epoch = 0
++    if args.resume and os.path.exists(args.resume):
++        # [Geometry-MMKG] restore the state written below; the batch order also needs the current order of
++        # corpus.train_indices, which shuffle() permutes in place every epoch
++        s = torch.load(args.resume, map_location='cpu', weights_only=False)
++        keep = ('resume', 'cuda', 'device', 'rank_file', 'save', 'img', 'desp', 'entity2id', 'relation2id')
++        diff = [k for k, v in s['args'].items() if k not in keep and vars(args).get(k) != v]
++        assert not diff, 'resume file was written with other arguments: {}'.format(diff)
++        model.load_state_dict(s['model'])
++        estimator.load_state_dict(s['estimator'])
++        optimizer.load_state_dict(s['optimizer'])
++        optimizer_mi.load_state_dict(s['optimizer_mi'])
++        lr_scheduler.load_state_dict(s['lr_scheduler'])
++        by_key = {tuple(x['triple']): x for x in corpus.train_indices}
++        corpus.train_indices = [by_key[k] for k in s['train_order']]
++        best_val_metrics, best_test_metrics = s['best_val_metrics'], s['best_test_metrics']
++        best_state, best_epoch = s['best_state'], s['best_epoch']
++        random.setstate(s['rng']['python'])
++        np.random.set_state(s['rng']['numpy'])
++        torch.set_rng_state(s['rng']['torch'])
++        if s['rng']['cuda'] is not None and torch.cuda.is_available():
++            torch.cuda.set_rng_state_all(s['rng']['cuda'])
++        start_epoch = s['epoch'] + 1
++        print('resumed from {} after epoch {}'.format(args.resume, start_epoch))
++    training_range = tqdm(range(start_epoch, args.epochs))
+     for epoch in training_range:
+         model.train()
+         epoch_loss = []
+@@ -144,12 +180,24 @@ def train_decoder(args):
          training_range.set_postfix(loss="main: {:.5} mi: {:.5}".format(sum(epoch_loss), sum(epoch_mi_loss)))
          lr_scheduler.step()
  
@@ -66,7 +97,25 @@ index 2226f47..6d7f7e3 100644
              if val_metrics['MRR'] > best_test_metrics['MRR']:
                  best_test_metrics['MRR'] = val_metrics['MRR']
              if val_metrics['MR'] < best_test_metrics['MR']:
-@@ -167,6 +188,12 @@ def train_decoder(args):
+@@ -164,9 +212,30 @@ def train_decoder(args):
+                 best_test_metrics['Hits@100'] = val_metrics['Hits@100']
+             print('\n'.join(['Epoch: {:04d}'.format(epoch + 1), model.format_metrics(val_metrics, 'test')]))
+             print("\n\n")
++        if args.resume and (epoch + 1) % args.eval_freq == 0 and epoch + 1 < args.epochs:
++            # [Geometry-MMKG] the whole training state after this evaluation (atomic write)
++            state = {'epoch': epoch, 'model': model.state_dict(), 'estimator': estimator.state_dict(),
++                     'optimizer': optimizer.state_dict(), 'optimizer_mi': optimizer_mi.state_dict(),
++                     'lr_scheduler': lr_scheduler.state_dict(),
++                     'train_order': [tuple(x['triple']) for x in corpus.train_indices],
++                     'best_val_metrics': best_val_metrics, 'best_test_metrics': best_test_metrics,
++                     'best_state': best_state, 'best_epoch': best_epoch,
++                     'rng': {'python': random.getstate(), 'numpy': np.random.get_state(),
++                             'torch': torch.get_rng_state(),
++                             'cuda': torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None},
++                     'args': {k: v for k, v in vars(args).items()
++                              if k not in ('img', 'desp', 'entity2id', 'relation2id')}}
++            torch.save(state, args.resume + '.tmp')
++            os.replace(args.resume + '.tmp', args.resume)
  
  
      print('Total time elapsed: {:.4f}s'.format(time.time() - t_total))
