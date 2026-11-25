@@ -18,11 +18,18 @@ fail() { echo "ALLDONE failed at $1 $(date +%T)" >> $LOG/progress.txt; exit 1; }
 
 step setup
 cd /marimo
+# CMR without a GPU would silently train on the CPU (about 25 h per epoch): stop instead
+if ! $PY -c "import torch, sys; sys.exit(0 if torch.cuda.is_available() else 1)"; then
+  echo "NO GPU in this sandbox: choose a GPU machine on Molab, then run the notebook again" >> $LOG/progress.txt
+  fail no_gpu
+fi
 ($PY -m pip install -q gdown faiss-cpu || uv pip install --python $PY gdown faiss-cpu) > $LOG/pip.log 2>&1
 done_ setup $?
 
 step cmr_setup
 {
+  # Molab keeps only .py / .md files between sessions: a CMR folder without .git is a leftover, clone it again
+  { [ -d $C/.git ] || rm -rf /marimo/baselines/CMR; } &&
   { [ ! -d $C/.git ] || git -C $C -c core.autocrlf=false checkout -q -- .; } &&
   $PY $R/scripts/setup_baseline.py cmr --dest $C &&
   $PY -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='callmezuy/fb15k237-ind', repo_type='dataset', revision='v0', local_dir='/marimo/data/FB15K-237-ind', allow_patterns=['*.txt','*.tsv','ent_img_mask.pt'])" &&
