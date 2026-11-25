@@ -26,6 +26,9 @@ section 4).
 * Model selection: filtered MRR (head + tail) on valid every --valid-every epochs and after the last epoch;
   the best checkpoint is evaluated on test once. Spatial-VG validates on a fixed 5,000-triple subset (4.9),
   the same subset for every variant and seed. Each validation also logs the gate's weight on depth.
+* E1 auxiliary metrics (Spatial-VRD, Spatial-VRD-Trans): every evaluation also reports in-image ranking and
+  relation prediction (core/models/evaluation.py), stored next to the main metrics as "in_image" / "relation";
+  reported only, never used for model selection. Off for the MMKG datasets and relation-conditioned models.
 * --dev: model development (P2.8). Valid only: test is never evaluated, no ranks, no checkpoint.
 * --tune: one point of the P2.10 grid (implies --dev); the stem and folder carry the configuration
   (lr<lr>-do<dropout>), default folder results/geometry-tune/<dataset>/<variant>/<config>/.
@@ -36,8 +39,9 @@ section 4).
   the same training arguments continues from it (same batches and dropout masks as an uninterrupted run), and the
   epochs where a run was resumed are recorded in the metrics (resumed_at). The file is removed once the run has
   finished. --no-resume neither reads nor writes it.
-* Output: metrics_<stem>.json, plus ranks_<stem>_test.csv (for scripts/compute_metrics.py) and ckpt_<stem>.pt
-  outside --dev; stem = geometry_<dataset>_<variant>[_<options tag>]_seed<seed>.
+* Output: metrics_<stem>.json, plus ranks_<stem>_test.csv (for scripts/compute_metrics.py), on the scene graphs
+  ranks_<stem>_test_aux.csv (E1), and ckpt_<stem>.pt outside --dev;
+  stem = geometry_<dataset>_<variant>[_<options tag>]_seed<seed>.
   Default folder: results/geometry/<dataset>/<variant>/, or results/geometry-dev/<dataset>/<tag>/<variant>/.
 """
 import argparse
@@ -55,9 +59,11 @@ CODE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, CODE_DIR)
 
 from core.data_engineering.fast_dataset import (  # noqa: E402
-    TripleBatches, get_all_true_triplets, load_depth_stats, load_entity_features, load_triples, read_count)
+    TripleBatches, entity_image_ids, get_all_true_triplets, load_depth_stats, load_entity_features, load_triples,
+    read_count)
 from core.models.end_to_end import VARIANT_DEPTH_STATS, VARIANTS, GeometryMMKGModel, effective_options  # noqa: E402
-from core.models.evaluation import evaluate_link_prediction, format_metrics, save_ranks  # noqa: E402
+from core.models.evaluation import (  # noqa: E402
+    evaluate_link_prediction, format_aux_metrics, format_metrics, save_aux_ranks, save_ranks)
 from core.models.feature_transe import FeatureTransE  # noqa: E402
 from core.models.kg_reasoning import TripleIndex, in_batch_loss  # noqa: E402
 from core.reproducibility import set_seed  # noqa: E402
@@ -273,6 +279,14 @@ def depth_stats_norm(model, feats):
     return float(g.norm(dim=1).mean())
 
 
+def aux_entity_image(data_dir, model):
+    """Image id of every entity for the E1 auxiliary metrics (scene graphs only), or None: the MMKG datasets, and
+    relation-conditioned models (not supported by the auxiliary metrics)."""
+    if getattr(model, "relation_conditioned", False):
+        return None
+    return entity_image_ids(data_dir)
+
+
 def strip_ranks(m):
     return {k: v for k, v in m.items() if k != "ranks"}
 
@@ -380,6 +394,11 @@ def main(argv=None):
     print(f"variant {args.variant} = {model_kwargs} | options {options} (tag {tag}) | {n_params:,} parameters",
           flush=True)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    entity_image = aux_entity_image(data_dir, model)
+    print("E1 auxiliary metrics (in-image ranking, relation prediction): " + (
+        f"on, {int(entity_image.max()) + 1:,} images" if entity_image is not None else
+        "off (relation-conditioned model)" if getattr(model, "relation_conditioned", False) else
+        "off (no shared image)"), flush=True)
 
     def evaluate(triples, desc, return_ranks=False):
         if device.type == "cuda":
@@ -387,7 +406,7 @@ def main(argv=None):
         return evaluate_link_prediction(
             model, feats.text, feats.rgb, feats.depth, TripleBatches(triples, args.eval_batch_size), all_true,
             device, keep_on_gpu=keep, return_ranks=return_ranks, desc=desc, all_mask=feats.mask,
-            all_geo=feats.geo if model.uses_depth_stats else None)
+            all_geo=feats.geo if model.uses_depth_stats else None, entity_image=entity_image)
 
     history, best = [], {"mrr": -1.0, "epoch": 0, "state": None, "valid": None, "gate": None}
     resume_path = os.path.join(out_dir, f"resume_{stem}.pt")
@@ -441,6 +460,8 @@ def main(argv=None):
                 + (")" if "std_entities" in g else "")) + (
                 "" if row["depth_stats_norm"] is None else f" | |W_s s| {row['depth_stats_norm']:.3f}")
             print(f"valid @ epoch {epoch}: {format_metrics(m)}{gate_txt}", flush=True)
+            if format_aux_metrics(m):
+                print(f"  {format_aux_metrics(m)}", flush=True)
             if m["mrr"] > best["mrr"]:
                 best = {"mrr": m["mrr"], "epoch": epoch, "valid": m, "gate": g,
                         "state": {k: v.detach().to("cpu", copy=True) for k, v in model.state_dict().items()}}
@@ -473,7 +494,11 @@ def main(argv=None):
         print(f"Best epoch {best['epoch']} (valid MRR {best['mrr']:.4f}); evaluating on test once.", flush=True)
         test_m = evaluate(test, "test", return_ranks=True)
         print(f"test: {format_metrics(test_m)}", flush=True)
+        if format_aux_metrics(test_m):
+            print(f"  {format_aux_metrics(test_m)}", flush=True)
         save_ranks(test_m["ranks"], os.path.join(out_dir, f"ranks_{stem}_test.csv"))
+        if entity_image is not None:
+            save_aux_ranks(test_m["ranks"], os.path.join(out_dir, f"ranks_{stem}_test_aux.csv"))
         metrics["test"] = strip_ranks(test_m)
         if not args.no_ckpt:
             torch.save({"state_dict": best["state"], "variant": args.variant, "model_kwargs": model_kwargs,

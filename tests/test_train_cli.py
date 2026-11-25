@@ -135,6 +135,37 @@ def test_resume_state_must_match_the_training_arguments():
         assert train.load_resume(path, a) is None
 
 
+def test_aux_entity_image():
+    class _Model:
+        relation_conditioned = False
+
+    class _RelModel:
+        relation_conditioned = True
+
+    with tempfile.TemporaryDirectory() as root:
+        dirs = {}
+        for name in ("Spatial-VRD", "FB15k-237-IMG"):
+            dirs[name] = os.path.join(root, name)
+            os.makedirs(dirs[name])
+            with open(os.path.join(dirs[name], "entity2id.txt"), "w", encoding="utf-8") as f:
+                f.write("3\n11_0\t0\n11_1\t1\n12_0\t2\n")
+        assert train.aux_entity_image(dirs["Spatial-VRD"], _Model()).tolist() == [0, 0, 1]
+        assert train.aux_entity_image(dirs["Spatial-VRD"], _RelModel()) is None
+        assert train.aux_entity_image(dirs["FB15k-237-IMG"], _Model()) is None
+
+
+def test_format_aux_metrics():
+    from core.models.evaluation import format_aux_metrics
+    m = {"in_image": {"mrr": 2 / 3, "hits@1": 0.375, "hits@3": 1.0, "image_first": 0.625, "n_cand": 3.5,
+                      "n_cand_filtered": 3.375, "mrr_random": 0.5773, "known_beats_truth": 0.5,
+                      "excl_known": {"mrr": 0.875, "hits@1": 0.75}},
+         "relation": {"mrr": 0.875, "hits@1": 0.75, "hits@5": 1.0}}
+    s = format_aux_metrics(m)
+    assert "in-image MRR 0.6667" in s and "relation MRR 0.8750" in s and "image-first 0.625" in s, s
+    assert "without the known entity: MRR 0.8750" in s and "beats the truth in 0.500" in s, s
+    assert format_aux_metrics({}) == ""
+
+
 if __name__ == "__main__":
     for _name, _fn in list(globals().items()):
         if _name.startswith("test_") and callable(_fn):

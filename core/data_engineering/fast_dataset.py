@@ -16,6 +16,37 @@ def read_count(path):
         return int(f.readline().strip())
 
 
+# Scene graphs whose entity names are '<image id>_<box index>' (E1, RESEARCH_PLAN P6.0).
+IMAGE_ID_FROM_NAME = frozenset({"Spatial-VRD", "Spatial-VRD-Trans"})
+
+
+def entity_image_ids(data_dir):
+    """Image id of every entity, LongTensor [N] numbered 0.. in order of first appearance in entity2id.txt, or None
+    when the dataset has no shared image (the MMKG datasets).
+
+    Only the datasets of IMAGE_ID_FROM_NAME are recognised, by folder name: their names are '<image>_<box>' and the
+    image is the part before the last '_' (5073960523_0 -> 5073960523). The rule is not guessed from the names,
+    since KG entity names may contain '_' too. Spatial-VG is not supported yet (its names are box indices; the image
+    comes from VG-SGG.h5 img_to_first_box / img_to_last_box) and returns None. Boxes without any triple keep their
+    image id: they are candidates like every other entity."""
+    dataset = os.path.basename(os.path.normpath(data_dir))
+    if dataset not in IMAGE_ID_FROM_NAME:
+        return None
+    ids, index = [], {}
+    with open(os.path.join(data_dir, "entity2id.txt"), encoding="utf-8") as f:
+        n = int(f.readline().strip())
+        for line in f:
+            if not line.strip():
+                continue
+            name = line.split("\t")[0].strip()
+            if "_" not in name:
+                raise ValueError(f"{dataset}: entity name {name!r} is not '<image>_<box>'")
+            ids.append(index.setdefault(name.rsplit("_", 1)[0], len(index)))
+    if len(ids) != n:
+        raise ValueError(f"{dataset}/entity2id.txt: header says {n} entities, read {len(ids)}")
+    return torch.tensor(ids, dtype=torch.long)
+
+
 def load_triples(data_dir, split):
     """(h, r, t) LongTensor [M, 3] from `{split}2id.txt`."""
     rows = []

@@ -45,6 +45,10 @@ def _():
         nên session tắt giữa chừng thì chỉ cần bấm lại. Lần chạy dở dang cũng không mất: `train.py` lưu trạng thái
         huấn luyện sau mỗi lần valid, notebook đẩy nó (kèm log) lên repo private `geometry-mmkg-resume` và bấm lại
         thì chạy tiếp từ epoch đã lưu (xong thì file đó bị xoá).
+
+        **E1** (P6.0, chỉ Spatial-VRD và Spatial-VRD-Trans): ô cuối chạy lại 8 cấu hình 2 × 2 đã chọn ở P2.10
+        (chỉ valid, seed 42), lần này có thêm xếp hạng trong cùng ảnh và đoán quan hệ; kết quả ở
+        `geometry-e1/<dataset>/<biến thể>/<cấu hình>/`, không ghi đè kết quả tune.
         """
     )
     return HfApi, json, mo, os, shutil, snapshot_download, subprocess, sys, torch
@@ -687,6 +691,97 @@ def _(DATASET, REPO_ROOT, RESULTS_REPO, WORK_DIR, hf_token_ui, mo, os, snapshot_
                            "--out", _out], text=True, capture_output=True)
     mo.md(open(_out + ".md", encoding="utf-8").read() if _res.returncode == 0
           else f"tune_summary lỗi (exit {_res.returncode}):\n\n```\n{_res.stderr[-2000:]}\n```")
+    return
+
+
+@app.cell
+def _(DATASET, mo):
+    # E1 (RESEARCH_PLAN P6.0, duyệt 25/11/2026, cách A): chạy lại 8 cấu hình 2 x 2 đã chọn ở P2.10 bằng --tune
+    # (chỉ valid), để có thước đo phụ trên scene graph. Danh sách cấu hình nằm ở scripts/e1_summary.py (E1_CONFIGS).
+    e1_btn = mo.ui.run_button(label="▶ Chạy E1")
+    mo.vstack([
+        mo.md(f"### E1 `{DATASET}`: thước đo phụ trên scene graph\n\n"
+              "Chạy lại 4 ô của bảng 2 × 2 (`no_depth`, `depth_map_only`, `depth_stats_only`, `fixed`) với đúng cấu "
+              "hình đã chọn ở P2.10: `train.py --tune`, seed 42, **chỉ valid, không bao giờ chạy test** (số này dùng "
+              "để chọn mô hình chính). Mỗi lần valid ghi thêm xếp hạng trong cùng ảnh và đoán quan hệ. Kết quả: "
+              "`geometry-e1/<dataset>/<biến thể>/<cấu hình>/`; cấu hình đã có metric thì bỏ qua. Chỉ có cho "
+              "Spatial-VRD và Spatial-VRD-Trans."),
+        e1_btn,
+    ])
+    return (e1_btn,)
+
+
+@app.cell
+def _(
+    CODE_COMMIT,
+    DATASET,
+    DATA_DIR,
+    REPO_ROOT,
+    WORK_DIR,
+    e1_btn,
+    hf_token_ui,
+    mo,
+    os,
+    push_results,
+    remote_files,
+    resume_min_ui,
+    run_resumable,
+    sys,
+):
+    mo.stop(not e1_btn.value, mo.md("⏸ Bấm **▶ Chạy E1** để bắt đầu."))
+    _token = hf_token_ui.value.strip()
+    mo.stop(not _token, mo.md("⚠ Chưa nhập HF token ở ô phía trên."))
+    sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
+    import e1_summary as _e1
+
+    mo.stop(DATASET not in _e1.E1_CONFIGS, mo.md("E1 chỉ có cho Spatial-VRD và Spatial-VRD-Trans."))
+    # same tag as scripts/train.py options_tag() for the frozen design on a scene graph
+    _tag = "inorm-ddrop0.3-tproj-dstat"
+    _prefix = f"geometry-e1/{DATASET}"
+    _done = remote_files(_prefix, _token)
+    e1_status = {}
+    for _v, _lr, _do, _ep in _e1.E1_CONFIGS[DATASET]:
+        _cfg = _e1.config_dir(_lr, _do, _ep)
+        _stem = f"geometry_{DATASET}_{_v}_{_tag}_{_cfg}_seed42"
+        _out = os.path.join(WORK_DIR, "results", "geometry-e1", DATASET, _v, _cfg)
+        os.makedirs(_out, exist_ok=True)
+        _metrics = f"metrics_{_stem}.json"
+        if f"{_v}/{_cfg}/{_metrics}" in _done or os.path.exists(os.path.join(_out, _metrics)):
+            e1_status[f"{_v} {_cfg}"] = "đã có"
+            continue
+        print(f"=== E1 {_v} {_cfg}, code {CODE_COMMIT} ===", flush=True)
+        _rc = run_resumable(
+            ["python", os.path.join(REPO_ROOT, "scripts", "train.py"), "--data", DATA_DIR, "--variant", _v,
+             "--seed", "42", "--tune", "--lr", str(_lr), "--dropout", str(_do), "--out", _out,
+             *(["--epochs", str(_ep)] if _ep else [])],
+            REPO_ROOT, _out, f"{_prefix}/{_v}/{_cfg}", _stem, _token, int(resume_min_ui.value))
+        e1_status[f"{_v} {_cfg}"] = "xong" if _rc == 0 else f"lỗi (exit {_rc})"
+        push_results(_out, f"{_prefix}/{_v}/{_cfg}", _token)
+    mo.md("### E1\n\n" + "\n".join(f"- `{_k}`: {_s}" for _k, _s in e1_status.items()))
+    return (e1_status,)
+
+
+@app.cell
+def _(DATASET, REPO_ROOT, RESULTS_REPO, WORK_DIR, e1_status, hf_token_ui, mo, os, snapshot_download, sys):
+    # Bảng E1 (scripts/e1_summary.py): MRR valid chính và độ lệch so với P2.10, thước đo trong cùng ảnh, đoán quan hệ.
+    _ = e1_status
+    _token = hf_token_ui.value.strip()
+    mo.stop(not _token, mo.md("Nhập HF token để xem bảng E1."))
+    sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
+    import e1_summary as _e1s
+
+    mo.stop(DATASET not in _e1s.E1_CONFIGS, mo.md("E1 chỉ có cho Spatial-VRD và Spatial-VRD-Trans."))
+    _local = os.path.join(WORK_DIR, "hf_results")
+    try:
+        snapshot_download(RESULTS_REPO, repo_type="dataset", token=_token, local_dir=_local,
+                          allow_patterns=[f"geometry-e1/{DATASET}/*/*/metrics_*.json",
+                                          f"geometry-tune/{DATASET}/*/*/metrics_*.json"])
+    except Exception as _e:
+        print(f"Không tải được metric từ HF: {_e}")
+    _hf_root = os.path.join(_local, "geometry-e1", DATASET)
+    # fall back to this session's runs when nothing reached HF yet
+    _root = _hf_root if os.path.isdir(_hf_root) else os.path.join(WORK_DIR, "results", "geometry-e1", DATASET)
+    mo.md(_e1s.summarize(DATASET, _root, os.path.join(_local, "geometry-tune", DATASET)))
     return
 
 

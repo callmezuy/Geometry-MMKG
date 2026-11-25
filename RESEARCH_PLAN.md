@@ -103,6 +103,12 @@ Kết quả kỳ vọng: Δdepth ≈ 0 ở hàng MMKG và Δdepth > 0 ở hàng 
 3. Filter set = train ∪ valid ∪ test (toàn bộ triplet đúng).
 4. Bằng điểm: rank = 1 + số ứng viên có điểm *tốt hơn hẳn* (giống OpenKE), cho mọi mô hình.
 5. Metric: MRR, MR, Hits@1/3/10.
+   - **Thước đo phụ trên MMSG (E1, P6.0)**, chỉ để báo, không dùng chọn checkpoint: xếp hạng trong cùng ảnh (ứng viên
+     là các thực thể cùng ảnh với thực thể đã biết; cùng filter và quy tắc bằng điểm; MRR, H@1, H@3, số ứng viên) và
+     đoán quan hệ (h, ?, t) trên mọi quan hệ (filtered; MRR, H@1, H@5). Baseline chỉ có file rank toàn cục nên chỉ có
+     cận dưới của thước đo trong ảnh (hạng trong ảnh ≤ hạng toàn cục) và không có đoán quan hệ. Thực thể đã biết (h
+     khi đoán đuôi, t khi đoán đầu) vẫn là ứng viên như ở thước đo chính; báo thêm tỉ lệ nó vượt đáp án và bản bỏ nó
+     khỏi ứng viên.
 6. **Mọi mô hình dump rank theo từng triplet** ra `ranks_<model>_<dataset>.csv` (`h, r, t, rank_head, rank_tail`). **Một script chung duy nhất** (`scripts/compute_metrics.py`) tính metric và phân tích theo nhóm quan hệ.
 7. Chọn checkpoint theo MRR trên valid, đánh giá trên test một lần.
 8. Seed cố định (42), chạy **3 seed (42, 43, 44)** cho các cấu hình chính và báo mean ± std.
@@ -933,7 +939,11 @@ Bảng dưới là các tiêu chí phải đạt trước khi đưa số baselin
     7. Giới hạn: depth đơn mắt; không làm 2 × 2 trên VG; luật hội tụ chỉ chạy lại một lần.
   - **Thí nghiệm cần thêm:**
     - **E1. Thước đo phụ trên MMSG:** xếp hạng chỉ trong cùng ảnh (id ảnh lấy từ tên thực thể, ví dụ `5073960523_0`) và
-      đoán quan hệ (h, ?, t) trên 52 quan hệ. Chỉ thêm code đánh giá, dùng lại checkpoint.
+      đoán quan hệ (h, ?, t) trên 52 quan hệ. Thiết kế (duyệt 25/11/2026):
+      `docs/superpowers/specs/2026-11-25-e1-mmsg-aux-metrics-design.md`. Không có checkpoint để dùng lại (lần `--tune`
+      không lưu), nên **chạy lại 8 cấu hình 2 × 2 đã chọn bằng `--tune`, chỉ valid** (cách A: việc chọn mô hình chính
+      không nhìn test). Code: `evaluate_link_prediction(entity_image=...)`, `train.py` tự bật trên hai bộ VRD; ô
+      notebook "E1" (`geometry-e1/<dataset>/...`); bảng `scripts/e1_summary.py` (kèm độ lệch MRR so với P2.10).
     - **E2. Đối chứng bằng box:** `box_stats_only` và box + `depth_stats`, cùng cơ chế với `depth_stats_only` (cộng
       W_b b, khởi tạo 0, cùng chuẩn hoá); b = hình học box chuẩn hoá theo ảnh, lấy từ `sg_*_annotations.json`. Tune đủ trên
       Spatial-VRD và VRD-Trans. Thiết kế chi tiết duyệt riêng trước khi code.

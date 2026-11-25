@@ -74,10 +74,12 @@ def test_cli_variants_and_options():
             raise AssertionError(f"{argv} must be refused")
 
 
-def _tiny_dataset(d, n=12, r=2, dim=8, missing=(3, 7), bad_fill=False):
+def _tiny_dataset(d, n=12, r=2, dim=8, missing=(3, 7), bad_fill=False, scene_graph=False):
+    """scene_graph: name the entities '<image>_<box>' like Spatial-VRD, all in one image (the triples below join
+    every entity, and a scene-graph triple never crosses two images)."""
     g = torch.Generator().manual_seed(0)
     with open(os.path.join(d, "entity2id.txt"), "w") as f:
-        f.write(f"{n}\n" + "".join(f"e{i}\t{i}\n" for i in range(n)))
+        f.write(f"{n}\n" + "".join(f"{'1_' if scene_graph else 'e'}{i}\t{i}\n" for i in range(n)))
     with open(os.path.join(d, "relation2id.txt"), "w") as f:
         f.write(f"{r}\n" + "".join(f"r{i}\t{i}\n" for i in range(r)))
     trip = [(h, (h + 1 + k) % n, k % r) for h in range(n) for k in range(3)]   # (h, t, r), OpenKE order
@@ -118,7 +120,7 @@ def test_scene_graph_depth_variant_reads_depth_statistics():
     with tempfile.TemporaryDirectory() as root:
         data = os.path.join(root, "Spatial-VRD")          # a scene-graph name: --depth-stats auto -> the table
         os.makedirs(data)
-        _tiny_dataset(data)
+        _tiny_dataset(data, scene_graph=True)
         torch.save(torch.randn(12, 9, generator=torch.Generator().manual_seed(1)),
                    os.path.join(data, "ent_depth_stats.pt"))
         out = os.path.join(root, "out")
@@ -129,6 +131,24 @@ def test_scene_graph_depth_variant_reads_depth_statistics():
             m = json.load(open(os.path.join(out, f"metrics_{stem}.json")))
             assert m["model_kwargs"]["depth_stats_dim"] == dstat
             assert (m["depth_stats"] is None) == (dstat == 0)
+            # E1 auxiliary metrics on a scene graph, in every validation
+            assert m["best_valid"]["in_image"]["n"] == 12 and m["best_valid"]["relation"]["n"] == 6
+            assert all("in_image" in row["valid"] for row in m["history"] if "valid" in row)
+
+
+def test_scene_graph_official_run_writes_aux_ranks():
+    with tempfile.TemporaryDirectory() as root:
+        data = os.path.join(root, "Spatial-VRD")
+        os.makedirs(data)
+        _tiny_dataset(data, scene_graph=True)
+        out = os.path.join(root, "out")
+        train.main(["--data", data, "--model", "feature_transe", "--variant", "no_depth", "--epochs", "1",
+                    "--valid-every", "1", "--batch-size", "8", "--out", out, "--no-ckpt"])
+        stem = "feature-transe_Spatial-VRD_no_depth_seed42"
+        m = json.load(open(os.path.join(out, f"metrics_{stem}.json")))
+        assert m["test"]["in_image"]["n"] == m["test"]["n"] and m["test"]["relation"]["n"] == m["test"]["n"] // 2
+        with open(os.path.join(out, f"ranks_{stem}_test_aux.csv")) as f:
+            assert f.readline().strip() == "h_id,r_id,t_id,rank_head_img,rank_tail_img,rank_rel"
 
 
 def test_rows_without_image_must_be_the_constant_fill():
