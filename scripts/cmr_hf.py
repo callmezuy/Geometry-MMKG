@@ -1,8 +1,11 @@
-"""HF helper for the CMR FB15K-237-ind run on Molab (scripts/cmr_molab_run.sh, RESEARCH_PLAN.md P3.7) (sessions can end at any time). Token: HF_TOKEN in the environment.
+"""HF helper for the CMR runs on Molab (scripts/cmr_molab_run.sh, RESEARCH_PLAN.md P3.7) (sessions can end at any
+time). Token: HF_TOKEN in the environment; CMR_RESUME_REPO / CMR_BASE / CMR_LOG choose the dataset (defaults:
+FB15K-237-ind). One state repo per dataset, so two runs never squash or clean the same repo.
 State repo (private, only the latest version kept: history squashed and unused stored files deleted after every
 upload):
-  callmezuy/cmr-resume  FB15K-237-ind/current_run.txt, FB15K-237-ind/<run>/{resume.pt, model_best.mdl, log.txt},
-                        FB15K-237-ind/<run>/FINISHED (training over)
+  <repo>  <base>/current_run.txt, <base>/<run>/{resume.pt, model_best.mdl, log.txt},
+          <base>/<run>/FINISHED (training over)
+  e.g. callmezuy/cmr-resume with base FB15K-237-ind; callmezuy/cmr-resume-spatial-vrd with base Spatial-VRD
   python cmr_hf.py restore <ckpt_root>            -> prints "<run> <none|resume|finished>", downloads the files
   python cmr_hf.py backup <run_dir> <stop_file>   -> loop: upload after every new resume.pt / model_best.mdl
   python cmr_hf.py finished <run_dir>             -> final upload + FINISHED marker
@@ -13,7 +16,9 @@ import time
 
 from huggingface_hub import HfApi, hf_hub_download
 
-REPO, BASE = "callmezuy/cmr-resume", "FB15K-237-ind"
+REPO = os.environ.get("CMR_RESUME_REPO", "callmezuy/cmr-resume")
+BASE = os.environ.get("CMR_BASE", "FB15K-237-ind")
+LOG = os.environ.get("CMR_LOG", "/marimo/runs/logs")
 api = HfApi(token=os.environ["HF_TOKEN"])
 
 
@@ -74,14 +79,14 @@ def prune():
 
 def backup(run_dir, stop):
     seen = {}
-    log = open("/marimo/runs/logs/backup.log", "a", buffering=1)
+    log = open(os.path.join(LOG, "backup.log"), "a", buffering=1)
     while not os.path.exists(stop):
         res = os.path.join(run_dir, "resume.pt")
         try:
             if os.path.exists(res) and not os.path.exists(res + ".tmp") and time.time() - os.path.getmtime(res) > 30:
                 m = os.path.getmtime(res)
                 if seen.get("resume") != m:
-                    upload(run_dir, ["resume.pt", "model_best.mdl", "log.txt"], "CMR FB15K-237-ind: resume state")
+                    upload(run_dir, ["resume.pt", "model_best.mdl", "log.txt"], f"CMR {BASE}: resume state")
                     seen["resume"] = m
                     log.write(f"{time.strftime('%H:%M:%S')} uploaded resume state (mtime {m})\n")
         except Exception as e:
@@ -90,7 +95,7 @@ def backup(run_dir, stop):
 
 
 def finished(run_dir):
-    upload(run_dir, ["model_best.mdl", "log.txt"], "CMR FB15K-237-ind: training finished")
+    upload(run_dir, ["model_best.mdl", "log.txt"], f"CMR {BASE}: training finished")
     run = os.path.basename(os.path.normpath(run_dir))
     api.upload_file(path_or_fileobj=b"done\n", path_in_repo=f"{BASE}/{run}/FINISHED", repo_id=REPO,
                     repo_type="dataset")

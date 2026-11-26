@@ -92,6 +92,10 @@ Every change below is outside the architecture (P3 rule) and carries a `[Geometr
 - Data at the data level only: `scripts/prepare_momok_data.py`. MoMoK selects its feature reshape by a substring of the
   dataset name (`models/RelMoE.py`); our 768-d image + 768-d text tables fit only the authors' `FB15K-237` branch, so
   the dataset names contain `FB15K-237` and not `MKG`. +D concat (1536-d) fits no branch and is not run.
+- Reproduction check (criterion 1) on MKG-Y with the authors' features: `embeddings/MKG-Y/{img,text}_features.pth`
+  from the README's Google Drive archive (sha256 `215df99c…`), put in the released `datasets/MKG-Y/` (its triples
+  and ids are exactly our MKG-Y v0, checked 26/11/2026). Runs on Molab: `scripts/momok_molab_run.sh` (notebook
+  `notebooks/momok.py`).
 
 | File | Change | Category |
 |---|---|---|
@@ -122,6 +126,8 @@ Every change below is outside the architecture (P3 rule) and carries a `[Geometr
   `img_entities.json` (the file `triplet.EntityDict` reads; the released `preprocess.py` writes `entities.json` without
   image paths) and one image per entity; entities without an image share one noise picture (seed 0, sha256 recorded).
   On FB15K-237-ind the authors' own split json files are used after checking they are exactly our split.
+  Spatial-VRD crops come from the Kaggle VRD photo zip (sha256 `b858225e…`; private mirror `callmezuy/vrd-images-raw`
+  for Molab). Runs on Molab: `scripts/cmr_molab_run.sh` (`CMR_TASK`; notebook `notebooks/cmr.py`).
 - Not changed, reported as is: at test time on a `*_ind` task `knowledge_store.py` also puts the test triples into the
   kNN memory (only neighbours with the query's head and relation are skipped). We report CMR without kNN
   (`--knn_topk 0`) and with kNN as released.
