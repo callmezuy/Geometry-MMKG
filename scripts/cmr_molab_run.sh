@@ -84,6 +84,9 @@ if [ "$STATE" != "finished" ]; then
     [ -n "$RUN_DIR" ] && break
     RUN_DIR=$(ls -td $C/ckpt/fb15k237/fb15k237_ind-*/ 2>/dev/null | head -1); RUN_DIR=${RUN_DIR%/}; sleep 5
   done
+  [ -n "$RUN_DIR" ] || fail no_run_dir
+  RUN=$(basename "$RUN_DIR")   # a fresh run gets its name here (restore printed "none")
+  echo "run: $RUN" >> $LOG/progress.txt
   rm -f $RUNS/stop_backup
   $PY $R/scripts/cmr_hf.py backup $RUN_DIR $RUNS/stop_backup >> $LOG/backup.out 2>&1 &
   BPID=$!
