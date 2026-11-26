@@ -992,6 +992,16 @@ Bảng dưới là các tiêu chí phải đạt trước khi đưa số baselin
     - **E2. Đối chứng bằng box:** `box_stats_only` và box + `depth_stats`, cùng cơ chế với `depth_stats_only` (cộng
       W_b b, khởi tạo 0, cùng chuẩn hoá); b = hình học box chuẩn hoá theo ảnh, lấy từ `sg_*_annotations.json`. Tune đủ trên
       Spatial-VRD và VRD-Trans. Thiết kế chi tiết duyệt riêng trước khi code.
+      - **Thiết kế (duyệt 26/11/2026):** `docs/superpowers/specs/2026-11-26-e2-box-control-design.md`. Tầng dữ liệu: biến
+        thể `depth_stats_only` có sẵn nhận `--depth-stats <bảng>:box` hoặc `:box_grid9`, mô hình không đổi (cùng lớp
+        tuyến tính khởi tạo 0, chuẩn hoá, mặt nạ, depth dropout 0,3). `box` = 9 số mỗi thực thể (x1, y1, x2, y2, w, h, tâm
+        x, tâm y, log diện tích, chia kích thước ảnh, cắt box như `extract_features.py`); `box_grid9` = box ghép grid9 của
+        dữ liệu (18 số). Bảng dựng bằng `scripts/box_geometry.py` từ annotation Spatial-VRD (VRD-Trans cùng tên thực thể);
+        ảnh `9210906893` ghi sai kích thước trong annotation (500 × 374, file thật 683 × 1024), sửa theo file ảnh. Bản dựng
+        ở máy: 93.807 / 93.809 thực thể có box (2 box nằm ngoài ảnh), tổng cột ghi trong `EXPECTED` của script; bản dựng
+        trên Molab phải khớp. Ô notebook "E2" tune đủ như P2.10 vào `geometry-e2/<dataset>/<nhánh>/depth_stats_only/`;
+        bảng `scripts/e2_summary.py` (so với `no_depth` và `depth_stats_only` của E1). Cách đọc kết quả đặt trước ở mục 6
+        của thiết kế.
     - **E3. Chạy chính thức 3 seed trên test:** `fixed` và `no_depth` trên 6 bộ; bảng 2 × 2 và biến thể box trên 2 bộ VRD.
     - **E4. Kiểm định:** bootstrap ghép cặp theo truy vấn trong từng seed, kiểm định ghép cặp giữa các seed.
     - **E5. Baseline** theo P3 / P4, có bản +D. Còn quyết định: có cấp thêm `depth_stats` hoặc box ở tầng dữ liệu không.
