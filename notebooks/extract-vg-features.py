@@ -88,8 +88,8 @@ def _(WORK_DIR, os, snapshot_download):
 def _(mo):
     hf_token_ui = mo.ui.text(kind="password", label="HF token", full_width=True)
     mo.vstack([
-        mo.md("Dán HF token: cần quyền **read** repo private `callmezuy/vg-images-raw` (ảnh VG, tải nhanh) và quyền "
-              "**write** để mở pull request lên `callmezuy/spatial-vg`. Token chỉ nằm trong bộ nhớ kernel, "
+        mo.md("Dán HF token: cần quyền **write** để mở pull request lên `callmezuy/spatial-vg` (ảnh VG tải từ bản sao "
+              "public `callmezuy/vg-images-raw`, tải nhanh). Token chỉ nằm trong bộ nhớ kernel, "
               "không được ghi vào file notebook. Để trống thì ảnh tải từ Stanford (rất chậm, khoảng 1 MB/s)."),
         hf_token_ui,
     ])
@@ -98,8 +98,8 @@ def _(mo):
 
 @app.cell
 def _(WORK_DIR, hf_token_ui, mo, os, snapshot_download, subprocess):
-    # 3. Ảnh VG gốc, kiểm tra đúng kích thước gốc. VG_SOURCE = "hf": bản sao private callmezuy/vg-images-raw
-    # (chép nguyên file từ máy 18/11/2026, tải vài phút, cần token ở ô trên); "stanford": Stanford / UW (khoảng 1 MB/s,
+    # 3. Ảnh VG gốc, kiểm tra đúng kích thước gốc. VG_SOURCE = "hf": bản sao public callmezuy/vg-images-raw
+    # (chép nguyên file từ máy 18/11/2026, tải vài phút; chờ token ở ô trên rồi mới tải); "stanford": Stanford / UW (khoảng 1 MB/s,
     # curl -C - tải tiếp nếu bị ngắt)
     VG_SOURCE = "hf"
     RAW_DIR = os.path.join(WORK_DIR, "data", "raw", "vg")

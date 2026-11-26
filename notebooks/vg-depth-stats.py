@@ -78,8 +78,8 @@ def _(WORK_DIR, os, snapshot_download):
 def _(mo):
     hf_token_ui = mo.ui.text(kind="password", label="HF token", full_width=True)
     mo.vstack([
-        mo.md("Dán HF token: cần quyền **read** repo private `callmezuy/vg-images-raw` và quyền **write** để mở "
-              "pull request lên `callmezuy/spatial-vg`. Token chỉ nằm trong bộ nhớ kernel."),
+        mo.md("Dán HF token: cần quyền **write** để mở pull request lên `callmezuy/spatial-vg` (ảnh VG tải từ bản sao "
+              "public `callmezuy/vg-images-raw`). Token chỉ nằm trong bộ nhớ kernel."),
         hf_token_ui,
     ])
     return (hf_token_ui,)
@@ -87,7 +87,7 @@ def _(mo):
 
 @app.cell
 def _(WORK_DIR, hf_token_ui, mo, os, snapshot_download):
-    # 3. Ảnh VG gốc từ bản sao private, kiểm tra đúng kích thước gốc
+    # 3. Ảnh VG gốc từ bản sao public, kiểm tra đúng kích thước gốc (chờ token ở ô trên rồi mới tải)
     RAW_DIR = os.path.join(WORK_DIR, "data", "raw", "vg")
     os.makedirs(RAW_DIR, exist_ok=True)
     _token = hf_token_ui.value.strip() or None
