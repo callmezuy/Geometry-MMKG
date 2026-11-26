@@ -919,13 +919,13 @@ Bảng dưới là các tiêu chí phải đạt trước khi đưa số baselin
     không phải bài giới thiệu mô hình.
   - **Khẳng định và bằng chứng:**
 
-    | # | Khẳng định | Bằng chứng | Trạng thái (25/11) |
+    | # | Khẳng định | Bằng chứng | Trạng thái (26/11) |
     |---|---|---|---|
     | C1 | Mô hình MMKG có embedding theo ID thất bại trên MMSG inductive vì là mô hình transductive, không phải vì thiếu depth; mô hình dựa trên đặc trưng chạy được ở cả 4 ô | Baseline và mô hình đề xuất trên cả 4 ô; cặp VRD / VRD-Trans | Một phần (NativE) |
     | C2 | Depth không giúp MMKG | Δdepth trên 3 bộ MMKG trong mức nhiễu, trên ít nhất 2 họ mô hình | 1 seed (mô hình đề xuất); 3 seed Feature-TransE trên FB15k |
-    | C3 | Trên MMSG, phần lợi của depth đến từ số độ sâu theo vùng (hiệu độ sâu đầu − đuôi), không đến từ đặc trưng ảnh depth | Bảng 2 × 2 `depth_map_only` / `depth_stats_only` (P2.10) | 1 seed, 2 bộ |
+    | C3 | Trên MMSG, phần lợi của depth đến từ số độ sâu theo vùng (hiệu độ sâu đầu − đuôi), không đến từ đặc trưng ảnh depth | Bảng 2 × 2 `depth_map_only` / `depth_stats_only` (P2.10), thước đo phụ (E1) | 1 seed, 2 bộ. MRR chính: đúng. Trong ảnh (E1): `depth_stats` +0,007 đến +0,009 trên cả 2 bộ; vector depth +0,010 / +0,012 trên VRD nhưng ≈ 0 trên VRD-Trans, nên viết "không giúp ở MRR chính, trong ảnh chưa nhất quán" cho đến khi có 3 seed |
     | C4 | Depth có thêm gì ngoài hình học box 2D không | Đối chứng bằng box (E2) | Chưa làm; kết quả quyết định cách viết C3 |
-    | C5 | MMSG khác MMKG về cấu trúc, và xếp hạng trên toàn bộ thực thể lẫn việc tìm đúng ảnh | Bảng cấu trúc đồ thị; thước đo trong cùng ảnh và đoán quan hệ (E1) | Có bảng cấu trúc; chưa có E1 |
+    | C5 | MMSG khác MMKG về cấu trúc, và xếp hạng trên toàn bộ thực thể lẫn việc tìm đúng ảnh | Bảng cấu trúc đồ thị; thước đo trong cùng ảnh và đoán quan hệ (E1) | Có bảng cấu trúc và E1 (1 seed, valid): chỉ 26 % (VRD) / 39 % (VRD-Trans) truy vấn có đáp án đứng trên mọi thực thể ảnh khác; MRR trong ảnh 0,45–0,50 so với MRR chính 0,26–0,36 |
     | C6 | Cách gộp RGB với depth không quan trọng; gate không hơn trọng số cố định | Ablation concat / mean / fixed / gate | Có (1 seed) |
 
   - **Cấu trúc đồ thị (25/11/2026, tính trên cả ba split):**
@@ -959,6 +959,36 @@ Bảng dưới là các tiêu chí phải đạt trước khi đưa số baselin
       không lưu), nên **chạy lại 8 cấu hình 2 × 2 đã chọn bằng `--tune`, chỉ valid** (cách A: việc chọn mô hình chính
       không nhìn test). Code: `evaluate_link_prediction(entity_image=...)`, `train.py` tự bật trên hai bộ VRD; ô
       notebook "E1" (`geometry-e1/<dataset>/...`); bảng `scripts/e1_summary.py` (kèm độ lệch MRR so với P2.10).
+      - **Kết quả (xong 26/11/2026; valid, seed 42, epoch tốt nhất theo MRR chính).** Cả 8 lần chạy lặp lại đúng MRR valid
+        và epoch tốt nhất của P2.10 (lệch 0,0000); `n_negative_gap` = 0 ở mọi lần.
+
+        | | `no_depth` | `depth_map_only` | `depth_stats_only` | `fixed` |
+        |---|---|---|---|---|
+        | **Spatial-VRD** MRR chính | 0,2560 | 0,2566 | 0,2670 | 0,2650 |
+        | MRR trong ảnh / H@1 | 0,4484 / 0,242 | 0,4581 / 0,255 | 0,4555 / 0,251 | 0,4670 / 0,265 |
+        | `image_first` | 0,261 | 0,258 | 0,270 | 0,263 |
+        | Đoán quan hệ MRR / H@1 | 0,5082 / 0,368 | 0,4735 / 0,340 | 0,5140 / 0,381 | 0,4816 / 0,355 |
+        | **VRD-Trans** MRR chính | 0,3503 | 0,3464 | 0,3636 | 0,3611 |
+        | MRR trong ảnh / H@1 | 0,4924 / 0,287 | 0,4922 / 0,286 | 0,5003 / 0,295 | 0,5009 / 0,296 |
+        | `image_first` | 0,386 | 0,380 | 0,406 | 0,398 |
+        | Đoán quan hệ MRR / H@1 | 0,4648 / 0,299 | 0,4609 / 0,308 | 0,4606 / 0,295 | 0,4448 / 0,290 |
+
+        Trung bình 19,0 (VRD) / 17,8 (VRD-Trans) ứng viên mỗi truy vấn trong ảnh; MRR ngẫu nhiên 0,204 / 0,214.
+      - **Đọc kết quả:**
+        - Xếp hạng toàn cục chủ yếu đo việc tìm đúng ảnh: chỉ 26 % / 39 % truy vấn không có thực thể ảnh khác nào vượt
+          đáp án; MRR trong ảnh gấp 1,7 (VRD) / 1,4 (VRD-Trans) lần MRR chính (C5).
+        - `depth_stats` giúp ở cả hai cách đo: trong ảnh +0,007 / +0,009 (VRD), +0,008 / +0,009 (VRD-Trans), nhỏ hơn ở
+          MRR chính (+0,008 đến +0,015). Phần chênh đến từ việc tìm đúng ảnh: `image_first` tăng +0,005 đến +0,020.
+        - Vector depth: trong ảnh +0,010 / +0,012 trên VRD nhưng làm `image_first` giảm nhẹ (−0,003 / −0,007), nên ở MRR
+          chính hai phần triệt tiêu; trên VRD-Trans ≈ 0 trong ảnh. Chưa nhất quán giữa hai bộ, 1 seed: chờ E3.
+        - Đoán quan hệ: vector depth làm giảm (−0,035 / −0,032 trên VRD, −0,004 / −0,016 trên VRD-Trans); `depth_stats`
+          +0,006 / +0,008 trên VRD, −0,004 / −0,016 trên VRD-Trans. Mô hình được huấn luyện và chọn theo xếp hạng thực
+          thể, không theo đoán quan hệ, nên đây chỉ là số phụ.
+        - Thực thể đã biết vượt đáp án ở 56–63 % truy vấn (mọi biến thể): f(h) + r nằm quá gần f(h), điểm yếu của hàm
+          điểm kiểu TransE khi mỗi box là một thực thể. Bỏ nó khỏi ứng viên, MRR trong ảnh tăng khoảng 0,09. Đưa vào phần
+          thảo luận; giao thức không đổi.
+        - Chọn mô hình chính: E1 chưa tách được `fixed` và `depth_stats_only` (`fixed` hơn trong ảnh trên VRD;
+          `depth_stats_only` hơn ở MRR chính và đoán quan hệ, và đơn giản hơn). Chờ E2.
     - **E2. Đối chứng bằng box:** `box_stats_only` và box + `depth_stats`, cùng cơ chế với `depth_stats_only` (cộng
       W_b b, khởi tạo 0, cùng chuẩn hoá); b = hình học box chuẩn hoá theo ảnh, lấy từ `sg_*_annotations.json`. Tune đủ trên
       Spatial-VRD và VRD-Trans. Thiết kế chi tiết duyệt riêng trước khi code.
