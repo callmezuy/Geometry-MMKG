@@ -929,7 +929,7 @@ Bảng dưới là các tiêu chí phải đạt trước khi đưa số baselin
     | # | Khẳng định | Bằng chứng | Trạng thái (26/11) |
     |---|---|---|---|
     | C1 | Mô hình MMKG có embedding theo ID thất bại trên MMSG inductive vì là mô hình transductive, không phải vì thiếu depth; mô hình dựa trên đặc trưng chạy được ở cả 4 ô | Baseline và mô hình đề xuất trên cả 4 ô; cặp VRD / VRD-Trans | Một phần (NativE) |
-    | C2 | Depth không giúp MMKG | Δdepth trên 3 bộ MMKG trong mức nhiễu, trên ít nhất 2 họ mô hình | 1 seed (mô hình đề xuất); 3 seed Feature-TransE trên FB15k |
+    | C2 | Depth không giúp MMKG | Δdepth trên 3 bộ MMKG trong mức nhiễu, trên ít nhất 2 họ mô hình | 1 seed (mô hình đề xuất); 3 seed Feature-TransE trên FB15k. Chỉ đo qua vector depth, vốn vô dụng cả trên MMSG; E2b kiểm tra luận điểm "depth chỉ giúp khi có thang chung trong cảnh" |
     | C3 | Trên MMSG, phần lợi của depth đến từ số độ sâu theo vùng (hiệu độ sâu đầu − đuôi), không đến từ đặc trưng ảnh depth | Bảng 2 × 2 `depth_map_only` / `depth_stats_only` (P2.10), thước đo phụ (E1) | 1 seed, 2 bộ. MRR chính: đúng. Trong ảnh (E1): `depth_stats` +0,007 đến +0,009 trên cả 2 bộ; vector depth +0,010 / +0,012 trên VRD nhưng ≈ 0 trên VRD-Trans, nên viết "không giúp ở MRR chính, trong ảnh chưa nhất quán" cho đến khi có 3 seed. E2: hình học box 2D (gán tay) là tín hiệu mạnh hơn hẳn (box một mình +0,029 trên cả 2 bộ so với `no_depth`, gấp 2,7 / 2,2 lần `depth_stats`), nên viết "`depth_stats` là đường depth duy nhất có ích, nhưng nhỏ hơn hình học 2D" |
     | C4 | Depth có thêm gì ngoài hình học box 2D không | Đối chứng bằng box (E2) | E2 (1 seed, valid): **có theo luật đặt trước, nhưng nhỏ**: `box_grid9` − `box` +0,005 (VRD, sát ngưỡng nhiễu 0,003) / +0,010 (VRD-Trans). Gần như toàn bộ qua `image_first` (+0,006 / +0,022); trong ảnh ≈ 0 (+0,003 / −0,003); đoán quan hệ giảm (−0,017 / −0,025). Tức depth giúp nhận ra vật thuộc ảnh nào hơn là hiểu quan hệ không gian trong ảnh. Chờ E3 và E6 |
     | C5 | MMSG khác MMKG về cấu trúc, và xếp hạng trên toàn bộ thực thể lẫn việc tìm đúng ảnh | Bảng cấu trúc đồ thị; thước đo trong cùng ảnh và đoán quan hệ (E1) | Có bảng cấu trúc và E1 (1 seed, valid): chỉ 26 % (VRD) / 39 % (VRD-Trans) truy vấn có đáp án đứng trên mọi thực thể ảnh khác; MRR trong ảnh 0,45–0,50 so với MRR chính 0,26–0,36 |
@@ -1044,6 +1044,22 @@ Bảng dưới là các tiêu chí phải đạt trước khi đưa số baselin
         - **Mô hình chính trên MMSG: `depth_stats_only`** (MRR chính cao hơn `fixed` trên cả hai bộ ở P2.10 / E1, đoán quan
           hệ tốt hơn, đơn giản hơn; E2 cho thấy phần depth có ích nằm ở grid9). Trên MMKG không có `depth_stats` (P2.9),
           nên biến thể có depth ở đó vẫn là `fixed` (vector depth).
+    - **E2b. Lợi ích của `depth_stats` có cần thang độ sâu chung không** (cho C2 / C3). Trên MMKG chỉ thử được vector
+      depth, mà vector depth vô dụng ngay trên MMSG, nên C2 rỗng có thể chỉ do cách biểu diễn. E2b giữ grid9, chỉ đổi khung
+      chuẩn hoá depth từ ảnh sang **từng box** (mỗi vật một thang riêng, như thực thể MMKG), chạy `depth_stats_only` như E2
+      trên hai bộ VRD, chỉ valid.
+      - **Thiết kế (duyệt 26/11/2026):** `docs/superpowers/specs/2026-11-26-e2b-shared-scale-design.md`; cách đọc kết quả
+        đặt trước ở mục 6 (ngưỡng 0,003; `boxnorm` − `no_depth` ≤ 0,003 → cần thang chung; `depth_stats_only` − `boxnorm`
+        ≤ 0,003 → không cần, C2 phải viết lại).
+      - **Bảng (dựng ở máy 26/11/2026, `scripts/depth_stats_boxnorm.py`):** cùng lượt ZipDepth tính lại grid9 theo ảnh,
+        khớp `ent_depth_stats.pt` của dữ liệu tuyệt đối (sai lệch 0) ở cả hai bộ. 93.807 box, 9 box có depth hằng (9 số 0),
+        2 box ngoài ảnh. sha256 `depth_stats_boxnorm.pt`: VRD `894bc531…5c990`, VRD-Trans `94caf01b…564bc` (đủ trong
+        hằng `E2B_SHA256` của notebook). Kiểm tra nhanh trên bộ ba train: tỉ lệ vật đầu gần hơn vật đuôi (trung bình 9
+        số) với "in front of" 0,710 theo ảnh → 0,512 theo box, "behind" 0,292 → 0,439, "under" 0,827 → 0,543: thông tin
+        gần / xa giữa hai vật gần như mất, đúng như thiết kế.
+      - Ô notebook "E2b" tải bảng từ `geometry-e2b/<dataset>/`, kiểm sha256, tune vào
+        `geometry-e2b/<dataset>/boxnorm/depth_stats_only/`; bảng `scripts/e2_summary.py --e2b` (thêm dòng `boxnorm`, hai
+        dòng hiệu và phần lợi giữ lại).
     - **E3. Chạy chính thức 3 seed trên test:** `no_depth` và `fixed` trên 3 bộ MMKG; trên MMSG `no_depth` và
       `depth_stats_only` (mô hình chính, quyết định ở E2); bảng 2 × 2 (`depth_map_only`, `fixed`) và hai nhánh box
       (`box`, `box_grid9`, cấu hình chọn ở E2) trên 2 bộ VRD.

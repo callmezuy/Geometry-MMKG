@@ -53,6 +53,10 @@ def _():
         **E2** (P6.0, chỉ Spatial-VRD và Spatial-VRD-Trans): đối chứng bằng box. `depth_stats_only` nhận bảng hình học
         box (`box`, hoặc `box_grid9` = box ghép grid9) thay cho grid9, tune đủ như P2.10, chỉ valid; kết quả ở
         `geometry-e2/<dataset>/<nhánh>/depth_stats_only/<cấu hình>/`.
+
+        **E2b** (P6.0, chỉ Spatial-VRD và Spatial-VRD-Trans): grid9 chuẩn hoá theo từng box thay vì theo ảnh (mỗi vật
+        một thang riêng, như thực thể MMKG), cùng `depth_stats_only`, tune như E2, chỉ valid; bảng dựng ở máy và tải
+        từ repo kết quả; kết quả ở `geometry-e2b/<dataset>/boxnorm/depth_stats_only/<cấu hình>/`.
         """
     )
     return HfApi, json, mo, os, shutil, snapshot_download, subprocess, sys, torch
@@ -790,6 +794,77 @@ def _(DATASET, REPO_ROOT, RESULTS_REPO, WORK_DIR, e1_status, hf_token_ui, mo, os
 
 
 @app.cell
+def _(
+    CODE_COMMIT,
+    DATASET,
+    DATA_DIR,
+    REPO_ROOT,
+    RESULTS_REPO,
+    WORK_DIR,
+    os,
+    push_results,
+    remote_files,
+    resume_min_ui,
+    run_resumable,
+    snapshot_download,
+    sys,
+):
+    def tune_depth_stats_arm(exp, arm, table_spec, tag, status, token):
+        """Tune depth_stats_only fed one table (E2, E2b) like P2.10: the base grid, then up to 6 rounds of the edge /
+        convergence rules of scripts/tune_summary.py recomputed from every finished point; points already on HF are
+        skipped. Results: <exp>/<DATASET>/<arm>/depth_stats_only/<config>/. tag = options_tag() of scripts/train.py
+        for --depth-stats table_spec (it names the files). status[f"{arm} {config}"] gets each point's state."""
+        sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
+        import tune_summary as _ts
+
+        prefix = f"{exp}/{DATASET}/{arm}/depth_stats_only"
+
+        def run_point(lr, do, done, epochs=None):
+            cfg = f"lr{lr:g}-do{do:g}" + (f"-ep{epochs}" if epochs else "")
+            stem = f"geometry_{DATASET}_depth_stats_only_{tag}_{cfg}_seed42"
+            sub = f"{prefix}/{cfg}"
+            out = os.path.join(WORK_DIR, "results", *sub.split("/"))
+            os.makedirs(out, exist_ok=True)
+            metrics = f"metrics_{stem}.json"
+            if f"{cfg}/{metrics}" in done or os.path.exists(os.path.join(out, metrics)):
+                status[f"{arm} {cfg}"] = "đã có"
+                return
+            print(f"=== {exp} {arm} {cfg}, code {CODE_COMMIT} ===", flush=True)
+            code = run_resumable(
+                ["python", os.path.join(REPO_ROOT, "scripts", "train.py"), "--data", DATA_DIR, "--variant",
+                 "depth_stats_only", "--depth-stats", table_spec, "--seed", "42", "--tune", "--lr", str(lr),
+                 "--dropout", str(do), "--out", out, *(["--epochs", str(epochs)] if epochs else [])],
+                REPO_ROOT, out, sub, stem, token, int(resume_min_ui.value))
+            status[f"{arm} {cfg}"] = "xong" if code == 0 else f"lỗi (exit {code})"
+            push_results(out, sub, token)
+
+        done = remote_files(prefix, token)
+        for lr in _ts.BASE_GRID["lr"]:
+            for do in _ts.BASE_GRID["dropout"]:
+                run_point(lr, do, done)
+        for rnd in range(1, 7):
+            hf = os.path.join(WORK_DIR, "hf_results")
+            snapshot_download(RESULTS_REPO, repo_type="dataset", token=token, local_dir=hf,
+                              allow_patterns=[f"{prefix}/*/metrics_*.json"])
+            runs = {}
+            for root in (os.path.join(hf, exp, DATASET, arm), os.path.join(WORK_DIR, "results", exp, DATASET, arm)):
+                for r in _ts.load_runs(root) if os.path.isdir(root) else []:
+                    runs[(r["config"]["lr"], r["config"]["dropout"], r["epochs"])] = r
+            c = _ts.choose(list(runs.values())).get("depth_stats_only", {})
+            todo = [(p["lr"], p["dropout"], None) for p in c.get("edge_points", [])]
+            if c.get("rerun"):
+                todo.append((c["rerun"]["lr"], c["rerun"]["dropout"], c["rerun"]["epochs"]))
+            print(f"--- {exp} {arm}, edge / convergence rules, round {rnd}: {len(todo)} point(s) {todo}", flush=True)
+            if not todo:
+                break
+            done = remote_files(prefix, token)
+            for lr, do, ep in todo:
+                run_point(lr, do, done, ep)
+
+    return (tune_depth_stats_arm,)
+
+
+@app.cell
 def _(DATASET, mo):
     # E2 (RESEARCH_PLAN P6.0, duyệt 26/11/2026, cách A): đối chứng bằng box. depth_stats_only nhận bảng box
     # (scripts/box_geometry.py) thay cho grid9, tune đủ như P2.10, chỉ valid.
@@ -810,32 +885,26 @@ def _(DATASET, mo):
 
 @app.cell
 def _(
-    CODE_COMMIT,
     DATASET,
     DATA_DIR,
     DATA_REVISION,
     REPO_ROOT,
-    RESULTS_REPO,
     WORK_DIR,
     e2_arms_ui,
     e2_btn,
     hf_token_ui,
     mo,
     os,
-    push_results,
-    remote_files,
-    resume_min_ui,
-    run_resumable,
     snapshot_download,
     subprocess,
     sys,
+    tune_depth_stats_arm,
 ):
     mo.stop(not e2_btn.value, mo.md("⏸ Bấm **▶ Chạy E2** để bắt đầu."))
     _token = hf_token_ui.value.strip()
     mo.stop(not _token, mo.md("⚠ Chưa nhập HF token ở ô phía trên."))
     sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
     import box_geometry as _bg
-    import tune_summary as _ts2
 
     mo.stop(DATASET not in _bg.EXPECTED, mo.md("E2 chỉ có cho Spatial-VRD và Spatial-VRD-Trans."))
     # box table: Spatial-VRD annotations (VRD-Trans shares the entity names), checked against the local build
@@ -849,55 +918,9 @@ def _(
     mo.stop(_rc.returncode != 0, mo.md(f"⚠ Bảng box không khớp bản dựng ở máy:\n\n```\n{_rc.stdout[-1500:]}\n```"))
 
     e2_status = {}
-
-    def _run_point(_arm, _lr, _do, _done, _epochs=None):
-        # same stem as scripts/train.py: options_tag() of the frozen design with --depth-stats <table>:<arm>
-        _tag = f"inorm-ddrop0.3-tproj-dstat_box_geometry_{_arm}"
-        _cfg = f"lr{_lr:g}-do{_do:g}" + (f"-ep{_epochs}" if _epochs else "")
-        _stem = f"geometry_{DATASET}_depth_stats_only_{_tag}_{_cfg}_seed42"
-        _sub = f"geometry-e2/{DATASET}/{_arm}/depth_stats_only/{_cfg}"
-        _out = os.path.join(WORK_DIR, "results", *_sub.split("/"))
-        os.makedirs(_out, exist_ok=True)
-        _metrics = f"metrics_{_stem}.json"
-        if f"{_cfg}/{_metrics}" in _done or os.path.exists(os.path.join(_out, _metrics)):
-            e2_status[f"{_arm} {_cfg}"] = "đã có"
-            return
-        print(f"=== E2 {_arm} {_cfg}, code {CODE_COMMIT} ===", flush=True)
-        _code = run_resumable(
-            ["python", os.path.join(REPO_ROOT, "scripts", "train.py"), "--data", DATA_DIR, "--variant",
-             "depth_stats_only", "--depth-stats", f"{_table}:{_arm}", "--seed", "42", "--tune", "--lr", str(_lr),
-             "--dropout", str(_do), "--out", _out, *(["--epochs", str(_epochs)] if _epochs else [])],
-            REPO_ROOT, _out, _sub, _stem, _token, int(resume_min_ui.value))
-        e2_status[f"{_arm} {_cfg}"] = "xong" if _code == 0 else f"lỗi (exit {_code})"
-        push_results(_out, _sub, _token)
-
     for _arm in e2_arms_ui.value:
-        _prefix = f"geometry-e2/{DATASET}/{_arm}/depth_stats_only"
-        _done = remote_files(_prefix, _token)
-        for _lr in _ts2.BASE_GRID["lr"]:
-            for _do in _ts2.BASE_GRID["dropout"]:
-                _run_point(_arm, _lr, _do, _done)
-        # edge / convergence rules (scripts/tune_summary.py), recomputed from every finished point, as the tune cell
-        for _round in range(1, 7):
-            _hf = os.path.join(WORK_DIR, "hf_results")
-            snapshot_download(RESULTS_REPO, repo_type="dataset", token=_token, local_dir=_hf,
-                              allow_patterns=[f"{_prefix}/*/metrics_*.json"])
-            _runs = {}
-            for _root in (os.path.join(_hf, f"geometry-e2/{DATASET}/{_arm}"),
-                          os.path.join(WORK_DIR, "results", "geometry-e2", DATASET, _arm)):
-                for _r in _ts2.load_runs(_root) if os.path.isdir(_root) else []:
-                    _runs[(_r["config"]["lr"], _r["config"]["dropout"], _r["epochs"])] = _r
-            _c = _ts2.choose(list(_runs.values())).get("depth_stats_only", {})
-            _todo = [(_p["lr"], _p["dropout"], None) for _p in _c.get("edge_points", [])]
-            if _c.get("rerun"):
-                _todo.append((_c["rerun"]["lr"], _c["rerun"]["dropout"], _c["rerun"]["epochs"]))
-            print(f"--- E2 {_arm}, edge / convergence rules, round {_round}: {len(_todo)} point(s) {_todo}",
-                  flush=True)
-            if not _todo:
-                break
-            _done = remote_files(_prefix, _token)
-            for _lr, _do, _ep in _todo:
-                _run_point(_arm, _lr, _do, _done, _ep)
+        tune_depth_stats_arm("geometry-e2", _arm, f"{_table}:{_arm}",
+                             f"inorm-ddrop0.3-tproj-dstat_box_geometry_{_arm}", e2_status, _token)
     mo.md("### E2\n\n" + ("\n".join(f"- `{_k}`: {_s}" for _k, _s in e2_status.items())
                            or "Không còn điểm nào cần chạy."))
     return (e2_status,)
@@ -924,6 +947,87 @@ def _(DATASET, REPO_ROOT, RESULTS_REPO, WORK_DIR, e2_status, hf_token_ui, mo, os
                          os.path.join(_local, "geometry-e2", DATASET)))
     return
 
+
+@app.cell
+def _(DATASET, mo):
+    # E2b (RESEARCH_PLAN P6.0, duyệt 26/11/2026): grid9 chuẩn hoá min-max theo từng box (scripts/depth_stats_boxnorm.py),
+    # cùng depth_stats_only, tune như E2, chỉ valid. Bảng dựng ở máy, tải từ repo kết quả, kiểm sha256.
+    E2B_SHA256 = {
+        "Spatial-VRD": "894bc531eab150a8ebd5a696ba80d28f7c00dd89b1d2e4a4162c0b0b26f5c990",
+        "Spatial-VRD-Trans": "94caf01b7bba34dc2bc7337040be121b4ca7d106348125faa0f1056197c564bc",
+    }
+    e2b_btn = mo.ui.run_button(label="▶ Chạy E2b")
+    mo.vstack([
+        mo.md(f"### E2b `{DATASET}`: thang độ sâu chung\n\n"
+              "`depth_stats_only` nhận grid9 tính trên depth map chuẩn hoá theo **từng box** thay vì theo ảnh: mỗi "
+              "vật một thang riêng, như thực thể MMKG. Bảng dựng ở máy, tải từ repo kết quả "
+              "(`geometry-e2b/<dataset>/depth_stats_boxnorm.pt`) và kiểm sha256. Tune như P2.10: lưới gốc rồi luật "
+              "biên / hội tụ, seed 42, **chỉ valid**. Kết quả: `geometry-e2b/<dataset>/boxnorm/depth_stats_only/"
+              "<cấu hình>/`; điểm đã có thì bỏ qua. Chỉ có cho Spatial-VRD và Spatial-VRD-Trans."),
+        e2b_btn,
+    ])
+    return E2B_SHA256, e2b_btn
+
+
+@app.cell
+def _(
+    DATASET,
+    E2B_SHA256,
+    RESULTS_REPO,
+    WORK_DIR,
+    e2b_btn,
+    hf_token_ui,
+    mo,
+    os,
+    snapshot_download,
+    tune_depth_stats_arm,
+):
+    mo.stop(not e2b_btn.value, mo.md("⏸ Bấm **▶ Chạy E2b** để bắt đầu."))
+    _token = hf_token_ui.value.strip()
+    mo.stop(not _token, mo.md("⚠ Chưa nhập HF token ở ô phía trên."))
+    mo.stop(DATASET not in E2B_SHA256, mo.md("E2b chỉ có cho Spatial-VRD và Spatial-VRD-Trans."))
+    import hashlib as _hashlib
+
+    _dir = os.path.join(WORK_DIR, "e2b_tables")
+    snapshot_download(RESULTS_REPO, repo_type="dataset", token=_token, local_dir=_dir,
+                      allow_patterns=[f"geometry-e2b/{DATASET}/depth_stats_boxnorm.*"])
+    _table = os.path.join(_dir, "geometry-e2b", DATASET, "depth_stats_boxnorm.pt")
+    mo.stop(not os.path.exists(_table), mo.md(f"⚠ Chưa có bảng `geometry-e2b/{DATASET}/depth_stats_boxnorm.pt` "
+                                              "trên repo kết quả."))
+    with open(_table, "rb") as _f:
+        _sha = _hashlib.sha256(_f.read()).hexdigest()
+    print(f"{_table}: sha256 {_sha}", flush=True)
+    mo.stop(_sha != E2B_SHA256[DATASET], mo.md(f"⚠ sha256 của bảng không khớp bản dựng ở máy: `{_sha}`"))
+
+    e2b_status = {}
+    tune_depth_stats_arm("geometry-e2b", "boxnorm", f"{_table}:grid9", "inorm-ddrop0.3-tproj-dstat_boxnorm_grid9",
+                         e2b_status, _token)
+    mo.md("### E2b\n\n" + ("\n".join(f"- `{_k}`: {_s}" for _k, _s in e2b_status.items())
+                            or "Không còn điểm nào cần chạy."))
+    return (e2b_status,)
+
+
+@app.cell
+def _(DATASET, REPO_ROOT, RESULTS_REPO, WORK_DIR, e2b_status, hf_token_ui, mo, os, snapshot_download, sys):
+    # Bảng E2 + E2b (scripts/e2_summary.py --e2b): no_depth, depth_stats_only (E1), box, box_grid9 (E2), boxnorm (E2b).
+    _ = e2b_status
+    _token = hf_token_ui.value.strip()
+    mo.stop(not _token, mo.md("Nhập HF token để xem bảng E2b."))
+    sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
+    import e2_summary as _e2s
+
+    mo.stop(DATASET not in _e2s.E1_CONFIGS, mo.md("E2b chỉ có cho Spatial-VRD và Spatial-VRD-Trans."))
+    _local = os.path.join(WORK_DIR, "hf_results")
+    try:
+        snapshot_download(RESULTS_REPO, repo_type="dataset", token=_token, local_dir=_local,
+                          allow_patterns=[f"geometry-e1/{DATASET}/*/*/metrics_*.json",
+                                          f"geometry-e2/{DATASET}/*/*/*/metrics_*.json",
+                                          f"geometry-e2b/{DATASET}/*/*/*/metrics_*.json"])
+    except Exception as _e:
+        print(f"Không tải được metric từ HF: {_e}")
+    mo.md(_e2s.summarize(DATASET, os.path.join(_local, "geometry-e1", DATASET),
+                         os.path.join(_local, "geometry-e2", DATASET), os.path.join(_local, "geometry-e2b", DATASET)))
+    return
 
 if __name__ == "__main__":
     app.run()

@@ -63,6 +63,26 @@ def test_missing_arm():
     assert all(x.count("|") == t.splitlines()[2].count("|") for x in t.splitlines() if x.startswith("|"))
 
 
+def test_e2b_rows():
+    with tempfile.TemporaryDirectory() as root:
+        ds, e1, e2r = _tree(root)
+        old = e2.summarize(ds, e1, e2r)
+        assert e2.summarize(ds, e1, e2r, None) == old                   # without --e2b: the E2 table unchanged
+        e2b = os.path.join(root, "e2b")
+        # no_depth (E1) = 0.25, depth_stats_only (E1) = 0.27 -> boxnorm 0.255 keeps (0.255 − 0.25) / 0.02 = 0.25
+        _metrics(os.path.join(e2b, "boxnorm", "depth_stats_only", "lr0.0003-do0", "metrics_d.json"),
+                 "depth_stats_only", 3e-4, 0.0, 0.255, 0.46, 0.50)
+        t = e2.summarize(ds, e1, e2r, e2b)
+        missing = e2.summarize(ds, e1, e2r, os.path.join(root, "nothing"))
+    rows = {line.split("|")[1].strip(): line for line in t.splitlines() if line.startswith("| ")}
+    assert "0.2550" in rows["`boxnorm`"]
+    assert "+0.0050" in rows["`boxnorm` − `no_depth`"] and "+0.0150" in rows["`depth_stats_only` − `boxnorm`"]
+    assert "Share of the depth_stats gain kept by `boxnorm` (valid MRR): 0.25" in t
+    assert set(old.splitlines()) <= set(t.splitlines())                  # every E2 line is kept as it was
+    assert "missing" in [x for x in missing.splitlines() if x.startswith("| `boxnorm` |")][0]
+    assert "Share" not in missing
+
+
 if __name__ == "__main__":
     for _name, _fn in list(globals().items()):
         if _name.startswith("test_") and callable(_fn):
