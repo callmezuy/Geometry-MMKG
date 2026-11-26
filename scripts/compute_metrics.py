@@ -3,7 +3,9 @@ Single source of truth for link-prediction metrics (RESEARCH_PLAN.md, section 4,
 
 Every model (GeometryMMKG, NativE, SNAG, MKGformer, ...) writes per-triplet ranks as CSV
     h_id,r_id,t_id,rank_head,rank_tail
-(ids from the dataset's entity2id / relation2id; filtered ranks, head AND tail).
+(ids from the dataset's entity2id / relation2id; filtered ranks, head AND tail). A rank may be fractional:
+ties count at their mean, 1 + #higher + #tied / 2 (the CMR rank file; for continuous scores ties do not occur
+and this is 1 + #higher).
 This script computes, from those files only:
   * overall MRR / MR / Hits@1,3,10 (head and tail ranks pooled, as in OpenKE) + tail / head MRR;
   * the same per relation category (relation_category.tsv: GEOMETRIC / POSSESSIVE / SEMANTIC / MISC)
@@ -32,8 +34,8 @@ def read_ranks(path):
     if not rows or not need <= set(rows[0]):
         raise SystemExit(f"{path}: expected CSV header {sorted(need)}")
     keys = np.array([(int(r["h_id"]), int(r["r_id"]), int(r["t_id"])) for r in rows], dtype=np.int64)
-    rh = np.array([int(r["rank_head"]) for r in rows], dtype=np.float64)
-    rt = np.array([int(r["rank_tail"]) for r in rows], dtype=np.float64)
+    rh = np.array([float(r["rank_head"]) for r in rows], dtype=np.float64)
+    rt = np.array([float(r["rank_tail"]) for r in rows], dtype=np.float64)
     if (rh < 1).any() or (rt < 1).any():
         raise SystemExit(f"{path}: ranks must be >= 1")
     return keys, rh, rt

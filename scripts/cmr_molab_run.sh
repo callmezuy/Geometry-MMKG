@@ -5,7 +5,8 @@
 # - training state (resume.pt, model_best.mdl, log.txt) goes to a private state repo (one per dataset) after every
 #   epoch (history squashed, unused stored files deleted); a new session restores it and continues (--resume), or
 #   goes straight to evaluation when the run had finished
-# - evaluation: valid (no kNN; kNN all lambdas) -> lambda on valid -> test once per variant
+# - evaluation: valid (no kNN; kNN all lambdas) -> lambda on valid -> test once per variant; ranks with ties at
+#   their mean (baselines/patches/CMR.diff, gm_rank)
 TASK=${CMR_TASK:-FB15k237_ind}
 case $TASK in
   FB15k237_ind)   DS=FB15K-237-ind; CK=fb15k237;   export CMR_RESUME_REPO=callmezuy/cmr-resume ;;
@@ -134,18 +135,25 @@ $PY evaluate.py $COMMON --knn_topk 0 > $OUT/eval_valid_noknn.log 2>&1; done_ val
 step valid_knn
 $PY evaluate.py $COMMON --knn_topk 32 > $OUT/eval_valid_knn.log 2>&1; done_ valid_knn $?
 $PY - $OUT/eval_valid_knn.log $OUT/lambda.json <<'PYEOF'
+# lambda = the best valid MRR of the protocol ranks (ties at their mean, the ranks that go to the rank file); CMR's own
+# metric (its sort order decides ties) is kept next to it for reference
 import ast, json, re, sys
 lam, rows = None, []
 for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
     m = re.search(r"knn lambda: ([0-9.]+)", line)
     if m:
-        lam = float(m.group(1))
+        lam, own = float(m.group(1)), None
     m = re.search(r"Averaged metrics text-mm: (\{.*\})", line)
     if m and lam is not None:
-        rows.append((lam, ast.literal_eval(m.group(1))))
+        own = ast.literal_eval(m.group(1))
+    m = re.search(r"\[Geometry-MMKG\] protocol metrics text-mm: (\{.*\})", line)
+    if m and lam is not None:
+        rows.append({"lambda": lam, "protocol": json.loads(m.group(1)), "cmr_own": own})
         lam = None
-best = max(rows, key=lambda x: x[1]["mrr"])
-json.dump({"chosen_lambda": best[0], "valid_text_mm": best[1], "all": rows}, open(sys.argv[2], "w"), indent=1)
+assert len(rows) == 41, f"expected 41 lambdas (0, 0.025, ..., 1), found {len(rows)}"
+best = max(rows, key=lambda x: x["protocol"]["mrr"])
+json.dump({"chosen_lambda": best["lambda"], "valid_text_mm": best["protocol"], "rule": "ties at their mean",
+           "all": rows}, open(sys.argv[2], "w"), indent=1)
 PYEOF
 LAM=$($PY -c "import json; print(json.load(open('$OUT/lambda.json'))['chosen_lambda'])")
 echo "lambda chosen on valid: $LAM" >> $LOG/progress.txt

@@ -1,7 +1,7 @@
 """
-Convert the strict ranks CMR writes (evaluate.py --rank-file, baselines/patches/CMR.diff: tab-separated
-head_id, relation, tail_id, rank_head, rank_tail with CMR's entity ids and relation strings) to the shared format of
-scripts/compute_metrics.py (CSV h_id,r_id,t_id,rank_head,rank_tail with our ids), and check that the rows are
+Convert the filtered ranks CMR writes (evaluate.py --rank-file, baselines/patches/CMR.diff: tab-separated
+head_id, relation, tail_id, rank_head, rank_tail, ties at their mean, with CMR's entity ids and relation strings) to
+the shared format of scripts/compute_metrics.py (CSV h_id,r_id,t_id,rank_head,rank_tail with our ids), and check that the rows are
 exactly our test (or valid) split, in order (RESEARCH_PLAN.md P3.7).
 
   python scripts/cmr_ranks.py --cmr <checkout> --task FB15k237_ind --data data/FB15K-237-ind \
@@ -41,7 +41,7 @@ def convert(cmr, task, data, ranks, out, split="test"):
             raise ValueError(f"{ranks}: unexpected header {header}")
         for line in f:
             h, r, t, rh, rt = line.rstrip("\n").split("\t")
-            rows.append((h, r, t, int(rh), int(rt)))
+            rows.append((h, r, t, rh, rt))   # kept as written: 12 or 12.5 (ties at their mean)
     if [(h, r, t) for h, r, t, _, _ in rows] != expected:
         raise ValueError(f"{ranks}: rows are not the {split} split of data/{task} in order")
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)

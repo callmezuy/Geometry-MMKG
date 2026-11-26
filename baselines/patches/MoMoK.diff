@@ -1,5 +1,5 @@
 diff --git a/train.py b/train.py
-index 2226f47..4bde39f 100644
+index 2226f47..1f00138 100644
 --- a/train.py
 +++ b/train.py
 @@ -1,4 +1,7 @@
@@ -17,7 +17,7 @@ index 2226f47..4bde39f 100644
 -        'txt_dim': 256
 +        'txt_dim': 256,
 +        # [Geometry-MMKG] 'valid' (default): every eval_freq epochs and after the last one, evaluate on VALID with
-+        # strict filtered ranks, keep the best weights, test them once at the end. 'original': the upstream
++        # filtered ranks (ties at their mean), keep the best weights, test them once at the end. 'original': the upstream
 +        # behaviour (evaluate on test every eval_freq epochs, report the best value of each metric).
 +        'select_on': 'valid',
 +        'rank_file': '',
@@ -80,7 +80,7 @@ index 2226f47..4bde39f 100644
 +            print("Epoch {:04d} , average loss {:.4f} , epoch_time {:.4f}\n".format(
 +                epoch + 1, sum(epoch_loss) / len(epoch_loss), time.time() - t))
 +            model.eval()
-+            val_metrics = corpus.get_strict_metrics(model, 'val')
++            val_metrics = corpus.get_protocol_metrics(model, 'val')
 +            if val_metrics['MRR'] > best_val_metrics['MRR']:
 +                best_val_metrics, best_epoch = val_metrics, epoch + 1
 +                best_state = copy.deepcopy({k: v.detach().cpu() for k, v in model.state_dict().items()})
@@ -123,13 +123,13 @@ index 2226f47..4bde39f 100644
 +        # [Geometry-MMKG] restore the best-validation weights and evaluate on test once
 +        model.load_state_dict(best_state)
 +        model.eval()
-+        best_test_metrics = corpus.get_strict_metrics(model, 'test', rank_file=args.rank_file or None)
++        best_test_metrics = corpus.get_protocol_metrics(model, 'test', rank_file=args.rank_file or None)
 +        print('Best valid epoch {}'.format(best_epoch))
      if not best_test_metrics:
          model.eval()
          estimator.eval()
 diff --git a/utils/data_loader.py b/utils/data_loader.py
-index cfdc44b..35ba588 100644
+index cfdc44b..93faa36 100644
 --- a/utils/data_loader.py
 +++ b/utils/data_loader.py
 @@ -93,6 +93,24 @@ class ConvECorpus(Corpus):
@@ -157,14 +157,15 @@ index cfdc44b..35ba588 100644
          if (batch_num + 1) * self.batch_size <= len(self.train_indices):
              batch = self.train_indices[batch_num * self.batch_size: (batch_num+1) * self.batch_size]
          else:
-@@ -122,6 +140,49 @@ class ConvECorpus(Corpus):
+@@ -122,6 +140,53 @@ class ConvECorpus(Corpus):
  
          return batch_indices, batch_values#, index
  
 +    @torch.no_grad()
-+    def get_strict_metrics(self, model, split='test', rank_file=None):
-+        """[Geometry-MMKG] Filtered link prediction with the strict tie rule of the thesis protocol: rank = 1 + number of
-+        candidates scoring strictly higher than the answer, the other true answers (train + valid + test, the
++    def get_protocol_metrics(self, model, split='test', rank_file=None):
++        """[Geometry-MMKG] Filtered link prediction with the tie rule of the thesis protocol: rank = 1 + number of
++        candidates scoring higher than the answer + half the number scoring the same (ties at their mean: the
++        sigmoid scores saturate at exactly 1.0 in float32), the other true answers (train + valid + test, the
 +        same sets as get_validation_pred) excluded; every entity is a candidate; head and tail. The score is the
 +        model's own (mean of the four predictions, as get_validation_pred). rank_file: CSV
 +        h_id,r_id,t_id,rank_head,rank_tail in the order of the split file."""
@@ -190,8 +191,10 @@ index cfdc44b..35ba588 100644
 +                known = torch.zeros_like(score, dtype=torch.bool)
 +                known[torch.from_numpy(rows).to(self.device), torch.from_numpy(cols).to(self.device)] = True
 +                known[b, target] = False
-+                better = (score > score[b, target].unsqueeze(1)) & ~known
-+                out.append((better.sum(dim=1) + 1).cpu())
++                t_score = score[b, target].unsqueeze(1)
++                higher = ((score > t_score) & ~known).sum(dim=1)
++                tied = ((score == t_score) & ~known).sum(dim=1) - 1   # the answer itself is not a tie
++                out.append((1 + higher + 0.5 * tied).double().cpu())
 +            ranks[side] = torch.cat(out).numpy()
 +        r = np.concatenate([ranks['head'], ranks['tail']]).astype(np.float64)
 +        metrics = {"Hits@100": float(np.mean(r <= 100)), "Hits@10": float(np.mean(r <= 10)),
@@ -201,7 +204,8 @@ index cfdc44b..35ba588 100644
 +            with open(rank_file, 'w') as f:
 +                f.write('h_id,r_id,t_id,rank_head,rank_tail\n')
 +                for (h, rel, t), rh, rt in zip(triples, ranks['head'], ranks['tail']):
-+                    f.write(f'{h},{rel},{t},{int(rh)},{int(rt)}\n')
++                    fmt = lambda x: int(x) if x == int(x) else float(x)  # noqa: E731  12 or 12.5
++                    f.write(f'{h},{rel},{t},{fmt(rh)},{fmt(rt)}\n')
 +        return metrics
 +
      def get_validation_pred(self, model, split='test'):

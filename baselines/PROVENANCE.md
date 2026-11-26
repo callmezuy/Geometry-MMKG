@@ -100,7 +100,7 @@ Every change below is outside the architecture (P3 rule) and carries a `[Geometr
 | File | Change | Category |
 |---|---|---|
 | `utils/data_loader.py` `get_batch` | KvsAll label matrix built with torch on the GPU instead of numpy on the CPU (72% / 86% of a step on FB15k-237 / Spatial-VRD). Bit-identical tensor; the original is kept as `get_batch_numpy` and compared in `tests/test_momok_patch.py` | data loading |
-| `utils/data_loader.py` `get_strict_metrics` (new) | filtered head + tail ranks with the strict tie rule on the model's own score (mean of the four predictions), optional rank CSV | evaluation |
+| `utils/data_loader.py` `get_protocol_metrics` (new) | filtered head + tail ranks on the model's own score (mean of the four predictions), ties at their mean (1 + #higher + #tied / 2: the sigmoid scores saturate at exactly 1.0 in float32), optional rank CSV | evaluation |
 | `train.py` | `--select_on valid` (default): validation every `eval_freq` epochs and after the last, best weights kept, test once; `--select_on original`: the upstream behaviour (test every `eval_freq` epochs, best value of each metric) | checkpoint selection |
 | `train.py` | `get_validation_pred` returns `(metrics, attention)`; the released `train.py` indexed it as a dict and failed at its first evaluation | bug fix outside the architecture |
 | `train.py` | `random.seed(args.seed)` (MIEstimator draws experts with `random.sample`) | seed |
@@ -120,7 +120,7 @@ Every change below is outside the architecture (P3 rule) and carries a `[Geometr
 | `trainer.py` | `torch.optim.AdamW(eps=1e-6)` instead of `transformers.AdamW` (removed in transformers 5; 1e-6 is its default eps) | library compatibility |
 | `config.py`, `trainer.py` | `--resume <model_dir>`: after every finished epoch the full training state (model, optimizer, lr scheduler, GradScaler, pre-batch negative buffer, best-so-far, RNG states) goes to `<model_dir>/resume.pt`; a resumed run gives the same results as an uninterrupted one (exact resume is allowed for baselines, decided 25/11/2026) | training state (resume) |
 | `predict.py`, `knowledge_store.py` | evaluation-time `DataLoader`s use `--workers` instead of 1-2 processes (every train / valid / test example is re-encoded with two images; about 4 h per evaluation on FB15K-237-ind with one worker). Same examples, same order (`shuffle=False`) | data loading |
-| `evaluate.py` | strict filtered ranks next to the original ones; `--rank-file`, `--rank-tensor {mm,img}`, `--rank-lambda` (the kNN weight, chosen on valid). The original metrics and their logs are unchanged | evaluation |
+| `evaluate.py` | filtered ranks of our protocol next to the original ones, ties at their mean (`gm_rank`: 1 + #higher + #tied / 2; with kNN weight 1 almost every entity scores exactly 0, and counting only the higher ones put an answer outside the kNN neighbours at rank about 30 instead of about 47,000); their metrics are logged per kNN weight (`[Geometry-MMKG] protocol metrics`), and the weight is chosen on them on valid; `--rank-file`, `--rank-tensor {mm,img}`, `--rank-lambda`. The original metrics and their logs are unchanged | evaluation |
 
 - Data at the data level only: `scripts/prepare_cmr_data.py` writes the split json files, `relations.json`,
   `img_entities.json` (the file `triplet.EntityDict` reads; the released `preprocess.py` writes `entities.json` without
