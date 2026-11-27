@@ -762,7 +762,22 @@ Bảng dưới là các tiêu chí phải đạt trước khi đưa số baselin
       2. Như 1, `--select_on valid`: đặc trưng gốc theo giao thức của mình.
       3. FB15k-237-IMG v0, Control, seed 42; 4. MKG-Y v0, Control, seed 42: lần chạy config gốc để chốt số epoch (P4.0), đồng thời là điểm tune seed 42 của config này (c1).
       - **Lần 1 xong (26/11/2026, Molab, khoảng 4 giờ 40 phút cho 2000 epoch): tái lập đạt.** Test theo cách báo của code gốc (giá trị tốt nhất của từng metric qua các lần đánh giá trên test): MRR **37,83** (bài báo 37,91, lệch −0,08), H@1 35,02 (35,09), H@3 39,34, H@10 43,07. Log ở `geometry-mmkg-results/momok/MKG-Y-sanity/MKG-Y_authors-features_select-original/`. Lần 1 dùng metric gốc của MoMoK, nên luật bằng điểm mới (27/11/2026) không ảnh hưởng.
-      - Lần 2 đã bắt đầu bằng bản vá cũ (chỉ đếm ứng viên cao hơn). Lần 2–4 dùng `get_protocol_metrics` để chọn checkpoint và chấm test, và bản vá chỉ được áp khi script khởi động. Vì vậy lần 2 được chạy lại từ đầu bằng bản vá mới: xoá trạng thái của nó trên `callmezuy/momok-resume`, rồi khởi động lại.
+      - Lần 2 đã bắt đầu bằng bản vá cũ (chỉ đếm ứng viên cao hơn). Lần 2–4 dùng `get_protocol_metrics` để chọn checkpoint và chấm test, và bản vá chỉ được áp khi script khởi động. Vì vậy lần 2 được chạy lại từ đầu bằng bản vá mới (commit `6aab9c3`): xoá trạng thái của nó trên `callmezuy/momok-resume`, rồi khởi động lại.
+      - **Lần 2 xong (26/11/2026, khoảng 37 phút):** chọn trên valid, test một lần, rank của giao thức trên `data/MKG-Y`. Test MRR **0,3759**, MR 2577,2, H@1 0,3479, H@3 0,3900, H@10 0,4241 (2.663 bộ ba). So với lần 1 (0,3783, chọn trên test), cách chọn theo test của code gốc lạc quan hơn 0,24 điểm MRR.
+        - Valid MRR tốt nhất ở **epoch 2000**, tức epoch cuối (0,3468 → 0,3480 → 0,3495 ở epoch 1800 → 1900 → 2000), nên 2000 epoch chưa bão hoà. Cần tính đến điều này khi chốt số epoch (P4.0).
+        - Bằng điểm: 2 trong 5.326 rank là số lẻ x,5 (cả hai quanh hạng 4.000). Số rank lẻ chỉ đếm được các ca có số ứng viên bằng điểm là số lẻ, nên đây là cận dưới; ảnh hưởng tới MRR không đáng kể.
+        - Kết quả ở `geometry-mmkg-results/momok/MKG-Y-sanity/MKG-Y_authors-features_select-valid/`.
+      - **Lần 3 và 4 xong (26/11/2026; v0, Control, config README của MKG-Y, seed 42, chọn trên valid, test một lần):**
+
+        | Lần | Thời gian | Valid MRR tốt nhất | Test MRR | MR | H@1 | H@3 | H@10 |
+        |---|---|---|---|---|---|---|---|
+        | 3. FB15k-237-IMG (20.466 bộ ba test) | khoảng 3 giờ 28 phút (6,1 giây/epoch) | 0,3631 ở **epoch 600** | **0,3579** | 165,3 | 0,2646 | 0,3935 | 0,5458 |
+        | 4. MKG-Y (2.663 bộ ba test) | khoảng 34 phút | 0,3492 ở **epoch 2000** | **0,3770** | 2634,6 | 0,3494 | 0,3887 | 0,4266 |
+
+        - Số epoch tốt nhất khác nhau theo dataset. FB15k-237-IMG đạt đỉnh ở epoch 600, sau đó valid không tăng nữa trong 1.400 epoch còn lại. MKG-Y vẫn tăng tới epoch cuối, giống lần 2. Đây là dữ liệu cho việc chốt số epoch (P4.0).
+        - MKG-Y v0 (đặc trưng của mình) cho test MRR 0,3770, gần bằng đặc trưng gốc của tác giả (0,3759, lần 2).
+        - Bằng điểm: FB15k-237-IMG không có rank x,5 nào trong 40.932 rank; MKG-Y có 3 trong 5.326.
+        - Kết quả ở `geometry-mmkg-results/momok/{FB15k-237-IMG,MKG-Y}/<run>/`. Hàng đợi 4 lần chạy đã xong.
       - Split và id MKG-Y trong repo MoMoK trùng hoàn toàn với MKG-Y v0 (kiểm 26/11/2026), nên rank của lần 2 tính bằng `compute_metrics.py` trên `data/MKG-Y`. Chạy thử trên máy với đặc trưng gốc (2 epoch, cả hai chế độ chọn): chạy được, rank khớp log của MoMoK.
       - Trạng thái chạy tiếp lên repo private `callmezuy/momok-resume` sau mỗi lần đánh giá (`scripts/momok_hf.py`, khoảng 1,9 GB mỗi lần chạy, chỉ giữ bản mới nhất); kết quả lên `geometry-mmkg-results/momok/<dataset>/<run>/`.
   - **Đọc code (22/11/2026, commit `99c2df1` ngày 12/06/2025, trong scratchpad):**
@@ -807,7 +822,15 @@ Bảng dưới là các tiêu chí phải đạt trước khi đưa số baselin
       - Train mất 2 giờ 15 phút (khoảng 4,2 phút/epoch). Dừng sớm sau epoch 31; epoch tốt nhất là 27 (valid Acc@1 trong batch 3,70, trong khi train khoảng 24). Sandbox khởi động lại sau khi train xong; bản chạy tiếp nạp checkpoint tốt nhất rồi đánh giá, không train lại.
       - Valid (theo metric của code CMR): không kNN MRR 0,012. Có kNN thì MRR tăng dần theo λ, tốt nhất ở **λ = 1,0** (mép lưới, tức điểm chỉ còn từ bộ nhớ kNN), MRR 0,189.
       - Test, rank theo luật cũ (chỉ đếm ứng viên cao hơn): không kNN MRR 0,0112, H@10 0,024, MR 8148; kNN λ = 1,0 MRR 0,1943, H@1 0,141, H@10 0,225, **MR 23,1**. Code CMR tự chấm bản kNN được MRR 0,158, MR 62.148. **Số kNN này sai:** luật cũ xếp đáp án nằm ngoài khoảng 32 hàng xóm kNN (điểm 0, bằng với hơn 93 nghìn thực thể khác) ngay sau các hàng xóm (rank lớn nhất 33). Từ đó có luật bằng điểm mới (dưới bảng tiêu chí ở P3); số trên không đưa vào bài.
-      - **Việc tiếp theo:** chạy lại chỉ bước đánh giá với bản vá mới (checkpoint ở `geometry-mmkg-results/cmr/Spatial-VRD/spatialvrd_ind-20261126-133038/` và repo trạng thái), cho cả Spatial-VRD và FB15K-237-ind (kiểm tra số FB không đổi).
+      - **Đánh giá lại với luật bằng điểm mới (26/11/2026, commit `6aab9c3`, cùng checkpoint, không train lại).** λ chọn trên valid theo rank của giao thức vẫn là 1,0 (MRR valid 0,1831; theo metric của code CMR là 0,1885). Test, 21.486 bộ ba:
+
+        | Bản | MRR | MR | H@1 | H@3 | H@10 |
+        |---|---|---|---|---|---|
+        | CMR + kNN (λ = 1,0) | **0,1533** | 34.589 | 0,1087 | 0,1749 | 0,2206 |
+        | CMR không kNN | 0,0112 | 8148 | 0,0022 | 0,0084 | 0,0236 |
+
+        Luật cũ cho bản kNN MRR 0,1943, tức phồng 0,041. Bản không kNN không đổi (điểm liên tục). Kết quả ghi đè ở `geometry-mmkg-results/cmr/Spatial-VRD/spatialvrd_ind-20261126-133038/eval/`.
+      - **FB15K-237-ind đánh giá lại cùng lúc:** λ vẫn là 0,975, và cả hai bản test giữ nguyên số đến 4 chữ số (kNN 0,3681, không kNN 0,2581). Đúng như dự kiến, vì ở λ < 1 điểm là liên tục.
       - Nhận xét cho bài: bản thân mô hình CMR gần như không học được trên Spatial-VRD (MRR không kNN 0,011). Một giả thuyết, chưa kiểm: nhiều thực thể là vật cùng loại có cùng tên (chẳng hạn rất nhiều "person"), nên phần text không phân biệt được. Phần lớn MRR của bản kNN đến từ bộ nhớ chứa cả bộ ba test.
     - **Thực thể thiếu ảnh (quyết định 25/11/2026): một ảnh nhiễu dùng chung** cho mọi thực thể thiếu ảnh (249 ở FB15K-237-ind; 2 box ở Spatial-VRD), sinh một lần với seed cố định và lưu kèm mã hash. Lý do: gần nhất với câu "padded with random values" của bài báo, và vẫn là một hằng số như quy tắc chung cho baseline (mục 3.2), nên không thành một tín hiệu định danh riêng cho từng thực thể. Không dùng bộ ảnh BaiduNetDisk của tác giả cho lần chạy chính: README nói tác giả crawl bù ảnh từ Wikidata và Google / Bing, bộ ảnh được upload ngày 20/02/2025 (sau bài báo), không có hash; cho riêng CMR thêm ảnh thì không còn cùng kho ảnh với các mô hình khác. Chỉ dùng nếu tải được, và chỉ cho lần kiểm tái lập (ghi rõ khác biệt về ảnh khi so với MRR 0,371).
   - **Đọc code (22/11/2026, commit `bcd23a6` ngày 20/02/2025, trong scratchpad):**
