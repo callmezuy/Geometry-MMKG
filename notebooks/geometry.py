@@ -57,6 +57,10 @@ def _():
         **E2b** (P6.0, chỉ Spatial-VRD và Spatial-VRD-Trans): grid9 chuẩn hoá theo từng box thay vì theo ảnh (mỗi vật
         một thang riêng, như thực thể MMKG), cùng `depth_stats_only`, tune như E2, chỉ valid; bảng dựng ở máy và tải
         từ repo kết quả; kết quả ở `geometry-e2b/<dataset>/boxnorm/depth_stats_only/<cấu hình>/`.
+
+        **E3** (P6.0, mọi dataset): chạy chính thức trên test, mỗi ô dùng cấu hình đã chọn khi tune, 3 seed (MKG-Y và
+        Spatial-VG 1 seed). Seed 42 phải lặp lại lần tune trước khi được đánh giá test (`--expect-valid`). Kết quả ở
+        `geometry-e3/<dataset>/<ô>/`. Số trong bài lấy từ đây; ô train thủ công ở trên (`geometry/`) không dùng cho bài.
         """
     )
     return HfApi, json, mo, os, shutil, snapshot_download, subprocess, sys, torch
@@ -556,12 +560,14 @@ def _(DATASET, HAS_DEPTH_STATS, VARIANT_NAMES, mo):
     # 0,2967; mean 0,2959; gate 0,2895). constant_fixed (vector hằng, giữ cách gộp fixed) bỏ ở Spatial-VG: chỉ 6 box
     # thiếu ảnh trên 1,44 triệu thực thể, nên nó gần như trùng fixed mà mỗi lần chạy rất đắt.
     # Bảng 2 x 2 của depth (24/11/2026): depth_map_only và depth_stats_only chỉ ở Spatial-VRD và Spatial-VRD-Trans.
-    # Bộ KG không có depth_stats (depth_map_only trùng fixed, depth_stats_only không chạy được); VG quá đắt để tune.
+    # Bộ KG không có depth_stats (depth_map_only trùng fixed, depth_stats_only không chạy được). Spatial-VG: không có
+    # 2 x 2 (quá đắt), nhưng tune depth_stats_only, mô hình chính trên MMSG (E3, thiết kế 27/11/2026 mục 5.2).
     _fusion = "fixed"
     _split = ["depth_map_only", "depth_stats_only"]
     _ablation = DATASET in ("FB15k-237-IMG", "Spatial-VRD")
     _main = [_fusion, "no_depth"] + ([] if DATASET == "Spatial-VG" else ["constant_fixed"])
     _main += _split if DATASET == "Spatial-VRD-Trans" else []
+    _main += ["depth_stats_only"] if DATASET == "Spatial-VG" else []
     _all = [_v for _v in VARIANT_NAMES if _v not in _split or DATASET == "Spatial-VRD"]
     tune_variants_ui = mo.ui.multiselect(options=[_v for _v in VARIANT_NAMES if _v not in _split or HAS_DEPTH_STATS],
                                          value=_all if _ablation else _main,
@@ -865,6 +871,57 @@ def _(
 
 
 @app.cell
+def _(DATASET, DATA_DIR, DATA_REVISION, REPO_ROOT, RESULTS_REPO, WORK_DIR, os, snapshot_download, subprocess, sys):
+    # Bảng dùng chung cho E2, E2b và E3 (thiết kế E3 mục 5.6): bảng box dựng lại từ annotation của Spatial-VRD (tag v0)
+    # và kiểm với bản dựng ở máy (box_geometry.EXPECTED); bảng boxnorm (E2b) dựng ở máy, tải từ repo kết quả, kiểm sha256.
+    E2B_SHA256 = {
+        "Spatial-VRD": "894bc531eab150a8ebd5a696ba80d28f7c00dd89b1d2e4a4162c0b0b26f5c990",
+        "Spatial-VRD-Trans": "94caf01b7bba34dc2bc7337040be121b4ca7d106348125faa0f1056197c564bc",
+    }
+
+    def build_box_table():
+        """Path of the box table of DATASET, built here and checked; RuntimeError (message in Vietnamese) otherwise."""
+        sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
+        import box_geometry as _bg
+
+        if DATASET not in _bg.EXPECTED:
+            raise RuntimeError("bảng box chỉ có cho Spatial-VRD và Spatial-VRD-Trans.")
+        # VRD-Trans shares the entity names of Spatial-VRD, so both read the Spatial-VRD annotations
+        _ann = os.path.join(WORK_DIR, "e2", "annotations")
+        snapshot_download(repo_id="callmezuy/spatial-vrd", repo_type="dataset", revision=DATA_REVISION,
+                          local_dir=_ann, allow_patterns=list(_bg.ANNOTATIONS))
+        _table = os.path.join(WORK_DIR, "e2", DATASET, "box_geometry.pt")
+        _rc = subprocess.run([sys.executable, os.path.join(REPO_ROOT, "scripts", "box_geometry.py"), "--data",
+                              DATA_DIR, "--annotations", _ann, "--out", _table, "--check"],
+                             text=True, capture_output=True)
+        print(_rc.stdout + _rc.stderr, flush=True)
+        if _rc.returncode != 0:
+            raise RuntimeError(f"bảng box không khớp bản dựng ở máy:\n\n```\n{_rc.stdout[-1500:]}\n```")
+        return _table
+
+    def fetch_boxnorm_table(token):
+        """(path, sha256) of the E2b boxnorm table of DATASET, downloaded and checked; RuntimeError otherwise."""
+        import hashlib as _hashlib
+
+        if DATASET not in E2B_SHA256:
+            raise RuntimeError("bảng boxnorm chỉ có cho Spatial-VRD và Spatial-VRD-Trans.")
+        _dir = os.path.join(WORK_DIR, "e2b_tables")
+        snapshot_download(RESULTS_REPO, repo_type="dataset", token=token, local_dir=_dir,
+                          allow_patterns=[f"geometry-e2b/{DATASET}/depth_stats_boxnorm.*"])
+        _table = os.path.join(_dir, "geometry-e2b", DATASET, "depth_stats_boxnorm.pt")
+        if not os.path.exists(_table):
+            raise RuntimeError(f"chưa có bảng `geometry-e2b/{DATASET}/depth_stats_boxnorm.pt` trên repo kết quả.")
+        with open(_table, "rb") as _f:
+            _sha = _hashlib.sha256(_f.read()).hexdigest()
+        print(f"{_table}: sha256 {_sha}", flush=True)
+        if _sha != E2B_SHA256[DATASET]:
+            raise RuntimeError(f"sha256 của bảng không khớp bản dựng ở máy: `{_sha}`")
+        return _table, _sha
+
+    return E2B_SHA256, build_box_table, fetch_boxnorm_table
+
+
+@app.cell
 def _(DATASET, mo):
     # E2 (RESEARCH_PLAN P6.0, duyệt 26/11/2026, cách A): đối chứng bằng box. depth_stats_only nhận bảng box
     # (scripts/box_geometry.py) thay cho grid9, tune đủ như P2.10, chỉ valid.
@@ -885,37 +942,20 @@ def _(DATASET, mo):
 
 @app.cell
 def _(
-    DATASET,
-    DATA_DIR,
-    DATA_REVISION,
-    REPO_ROOT,
-    WORK_DIR,
+    build_box_table,
     e2_arms_ui,
     e2_btn,
     hf_token_ui,
     mo,
-    os,
-    snapshot_download,
-    subprocess,
-    sys,
     tune_depth_stats_arm,
 ):
     mo.stop(not e2_btn.value, mo.md("⏸ Bấm **▶ Chạy E2** để bắt đầu."))
     _token = hf_token_ui.value.strip()
     mo.stop(not _token, mo.md("⚠ Chưa nhập HF token ở ô phía trên."))
-    sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
-    import box_geometry as _bg
-
-    mo.stop(DATASET not in _bg.EXPECTED, mo.md("E2 chỉ có cho Spatial-VRD và Spatial-VRD-Trans."))
-    # box table: Spatial-VRD annotations (VRD-Trans shares the entity names), checked against the local build
-    _ann = os.path.join(WORK_DIR, "e2", "annotations")
-    snapshot_download(repo_id="callmezuy/spatial-vrd", repo_type="dataset", revision=DATA_REVISION,
-                      local_dir=_ann, allow_patterns=list(_bg.ANNOTATIONS))
-    _table = os.path.join(WORK_DIR, "e2", DATASET, "box_geometry.pt")
-    _rc = subprocess.run([sys.executable, os.path.join(REPO_ROOT, "scripts", "box_geometry.py"), "--data", DATA_DIR,
-                          "--annotations", _ann, "--out", _table, "--check"], text=True, capture_output=True)
-    print(_rc.stdout + _rc.stderr, flush=True)
-    mo.stop(_rc.returncode != 0, mo.md(f"⚠ Bảng box không khớp bản dựng ở máy:\n\n```\n{_rc.stdout[-1500:]}\n```"))
+    try:
+        _table = build_box_table()
+    except RuntimeError as _e:
+        mo.stop(True, mo.md(f"⚠ E2: {_e}"))
 
     e2_status = {}
     for _arm in e2_arms_ui.value:
@@ -951,11 +991,7 @@ def _(DATASET, REPO_ROOT, RESULTS_REPO, WORK_DIR, e2_status, hf_token_ui, mo, os
 @app.cell
 def _(DATASET, mo):
     # E2b (RESEARCH_PLAN P6.0, duyệt 26/11/2026): grid9 chuẩn hoá min-max theo từng box (scripts/depth_stats_boxnorm.py),
-    # cùng depth_stats_only, tune như E2, chỉ valid. Bảng dựng ở máy, tải từ repo kết quả, kiểm sha256.
-    E2B_SHA256 = {
-        "Spatial-VRD": "894bc531eab150a8ebd5a696ba80d28f7c00dd89b1d2e4a4162c0b0b26f5c990",
-        "Spatial-VRD-Trans": "94caf01b7bba34dc2bc7337040be121b4ca7d106348125faa0f1056197c564bc",
-    }
+    # cùng depth_stats_only, tune như E2, chỉ valid. Bảng dựng ở máy, tải từ repo kết quả, kiểm sha256 (E2B_SHA256).
     e2b_btn = mo.ui.run_button(label="▶ Chạy E2b")
     mo.vstack([
         mo.md(f"### E2b `{DATASET}`: thang độ sâu chung\n\n"
@@ -966,38 +1002,24 @@ def _(DATASET, mo):
               "<cấu hình>/`; điểm đã có thì bỏ qua. Chỉ có cho Spatial-VRD và Spatial-VRD-Trans."),
         e2b_btn,
     ])
-    return E2B_SHA256, e2b_btn
+    return (e2b_btn,)
 
 
 @app.cell
 def _(
-    DATASET,
-    E2B_SHA256,
-    RESULTS_REPO,
-    WORK_DIR,
     e2b_btn,
+    fetch_boxnorm_table,
     hf_token_ui,
     mo,
-    os,
-    snapshot_download,
     tune_depth_stats_arm,
 ):
     mo.stop(not e2b_btn.value, mo.md("⏸ Bấm **▶ Chạy E2b** để bắt đầu."))
     _token = hf_token_ui.value.strip()
     mo.stop(not _token, mo.md("⚠ Chưa nhập HF token ở ô phía trên."))
-    mo.stop(DATASET not in E2B_SHA256, mo.md("E2b chỉ có cho Spatial-VRD và Spatial-VRD-Trans."))
-    import hashlib as _hashlib
-
-    _dir = os.path.join(WORK_DIR, "e2b_tables")
-    snapshot_download(RESULTS_REPO, repo_type="dataset", token=_token, local_dir=_dir,
-                      allow_patterns=[f"geometry-e2b/{DATASET}/depth_stats_boxnorm.*"])
-    _table = os.path.join(_dir, "geometry-e2b", DATASET, "depth_stats_boxnorm.pt")
-    mo.stop(not os.path.exists(_table), mo.md(f"⚠ Chưa có bảng `geometry-e2b/{DATASET}/depth_stats_boxnorm.pt` "
-                                              "trên repo kết quả."))
-    with open(_table, "rb") as _f:
-        _sha = _hashlib.sha256(_f.read()).hexdigest()
-    print(f"{_table}: sha256 {_sha}", flush=True)
-    mo.stop(_sha != E2B_SHA256[DATASET], mo.md(f"⚠ sha256 của bảng không khớp bản dựng ở máy: `{_sha}`"))
+    try:
+        _table, _ = fetch_boxnorm_table(_token)
+    except RuntimeError as _e:
+        mo.stop(True, mo.md(f"⚠ E2b: {_e}"))
 
     e2b_status = {}
     tune_depth_stats_arm("geometry-e2b", "boxnorm", f"{_table}:grid9", "inorm-ddrop0.3-tproj-dstat_boxnorm_grid9",
@@ -1028,6 +1050,177 @@ def _(DATASET, REPO_ROOT, RESULTS_REPO, WORK_DIR, e2b_status, hf_token_ui, mo, o
     mo.md(_e2s.summarize(DATASET, os.path.join(_local, "geometry-e1", DATASET),
                          os.path.join(_local, "geometry-e2", DATASET), os.path.join(_local, "geometry-e2b", DATASET)))
     return
+
+
+@app.cell
+def _(DATASET, REPO_ROOT, mo, os, sys):
+    # E3 (RESEARCH_PLAN P6.0; docs/superpowers/specs/2026-11-27-e3-official-runs-design.md): chạy chính thức trên test.
+    sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
+    import e3_cells as e3c
+
+    _cells = list(e3c.CELLS.get(DATASET, ()))
+    _seeds = [str(_s) for _s in e3c.SEEDS.get(DATASET, ())]
+    e3_cells_ui = mo.ui.multiselect(options=_cells, value=_cells, label="Ô")
+    e3_seeds_ui = mo.ui.multiselect(options=_seeds, value=_seeds, label="Seed")
+    e3_btn = mo.ui.run_button(label="▶ Chạy E3")
+    mo.vstack([
+        mo.md(f"### E3 `{DATASET}`: chạy chính thức trên test\n\n"
+              "Mỗi ô dùng cấu hình chọn khi tune (`tune_summary.choose` trên `geometry-tune/`, `geometry-e2/` hoặc "
+              "`geometry-e2b/`), đúng ngân sách epoch của lần được chọn. Seed 42 chạy trước với `--expect-valid`: "
+              "nếu epoch tốt nhất khác lần tune hoặc MRR valid lệch quá 0,0005 thì **không** đánh giá test, ô đó "
+              "dừng. Seed 43, 44 chỉ chạy khi seed 42 đã xong. Cấu hình và bảng của ô ghi trong `e3_cell.json`; "
+              "seed sau thấy khác thì dừng. Kết quả: `geometry-e3/<dataset>/<ô>/`; seed đã có test thì bỏ qua, nên "
+              "bấm lại sau khi bị ngắt sẽ chạy tiếp phần còn thiếu."),
+        mo.hstack([e3_cells_ui, e3_seeds_ui]),
+        e3_btn,
+    ])
+    return e3_btn, e3_cells_ui, e3_seeds_ui, e3c
+
+
+@app.cell
+def _(
+    CODE_COMMIT,
+    DATASET,
+    DATA_DIR,
+    REPO_ROOT,
+    RESULTS_REPO,
+    WORK_DIR,
+    build_box_table,
+    e3_btn,
+    e3_cells_ui,
+    e3_seeds_ui,
+    e3c,
+    fetch_boxnorm_table,
+    hf_token_ui,
+    json,
+    mo,
+    os,
+    push_results,
+    resume_min_ui,
+    run_resumable,
+    snapshot_download,
+    sys,
+):
+    mo.stop(not e3_btn.value, mo.md("⏸ Bấm **▶ Chạy E3** để bắt đầu."))
+    _token = hf_token_ui.value.strip()
+    mo.stop(not _token, mo.md("⚠ Chưa nhập HF token ở ô phía trên."))
+    sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
+    from train import EXPECT_MISMATCH_EXIT as _MISMATCH
+
+    _hf = os.path.join(WORK_DIR, "hf_results")
+    snapshot_download(RESULTS_REPO, repo_type="dataset", token=_token, local_dir=_hf, allow_patterns=[
+        f"geometry-tune/{DATASET}/*/*/metrics_*.json", f"geometry-e2/{DATASET}/*/*/*/metrics_*.json",
+        f"geometry-e2b/{DATASET}/*/*/*/metrics_*.json", f"geometry-e3/{DATASET}/*/{e3c.RECORD}",
+        f"geometry-e3/{DATASET}/*/metrics_*.json"])
+    e3_status = {}
+    _seeds = sorted(int(_s) for _s in e3_seeds_ui.value)
+    _box = None
+
+    def _metrics_of(sub, out, name):
+        """The metrics json of one seed, from this session or from HF (None if neither has it)."""
+        for _p in (os.path.join(out, name), os.path.join(_hf, *sub.split("/"), name)):
+            if os.path.exists(_p):
+                return e3c.read_json(_p)
+        return None
+
+    for _cell in [_c for _c in e3c.CELLS[DATASET] if _c in e3_cells_ui.value]:
+        try:
+            _r = e3c.resolve(_hf, DATASET, _cell)
+        except ValueError as _e:
+            e3_status[_cell] = f"chưa tune xong, bỏ qua ({_e})"
+            continue
+        _spec, _sha = None, None
+        try:
+            if _cell in e3c.BOX_CELLS:
+                _box = _box or build_box_table()
+                _spec, _sha = f"{_box}:{_cell}", e3c.table_digest(_box, (_cell,))
+            elif _cell == e3c.BOXNORM_CELL:
+                _t, _sha = fetch_boxnorm_table(_token)
+                _spec = f"{_t}:grid9"
+        except RuntimeError as _e:
+            e3_status[_cell] = f"bảng không qua kiểm tra, bỏ qua: {_e}"
+            continue
+        _sub = f"geometry-e3/{DATASET}/{_cell}"
+        _out = os.path.join(WORK_DIR, "results", *_sub.split("/"))
+        os.makedirs(_out, exist_ok=True)
+        _rec = e3c.cell_record(_r, _spec, _sha, CODE_COMMIT)
+        _old = _metrics_of(_sub, _out, e3c.RECORD)
+        if _old is not None:
+            try:
+                e3c.check_cell_record(_old, _rec)
+            except ValueError as _e:
+                e3_status[_cell] = f"cấu hình / bảng khác lần trước, dừng: {_e}"
+                continue
+        if not os.path.exists(os.path.join(_out, e3c.RECORD)):
+            with open(os.path.join(_out, e3c.RECORD), "w", encoding="utf-8") as _f:
+                json.dump(_old if _old is not None else _rec, _f, indent=2)
+        print(f"=== E3 {DATASET} {_cell}: lr {_r['lr']:g}, dropout {_r['dropout']:g}, {_r['epochs']} epochs; "
+              f"expected valid MRR {_r['expected']['valid_mrr']:.4f} at epoch {_r['expected']['best_epoch']}; "
+              f"code {CODE_COMMIT} ===", flush=True)
+        for _s in _seeds:
+            _key = f"{_cell} seed {_s}"
+            _stem = e3c.stem(DATASET, _r["variant"], _r["options_tag"], _s)
+            _name = f"metrics_{_stem}.json"
+            _state = e3c.seed_state(_metrics_of(_sub, _out, _name))
+            if _state == "done":
+                e3_status[_key] = "đã có"
+                continue
+            if _state == "mismatch":
+                _ev = _metrics_of(_sub, _out, _name)["expect_valid"]
+                e3_status[_key] = (f"lệch, dừng (MRR {_ev['got_mrr']:.4f} / {_ev['mrr']:.4f}, epoch "
+                                   f"{_ev['got_epoch']} / {_ev['epoch']})")
+                break
+            if _s != 42:
+                _stem42 = e3c.stem(DATASET, _r["variant"], _r["options_tag"], 42)
+                if e3c.seed_state(_metrics_of(_sub, _out, f"metrics_{_stem42}.json")) != "done":
+                    e3_status[_key] = "chờ seed 42 xong"
+                    break
+            _code = run_resumable(
+                ["python", os.path.join(REPO_ROOT, "scripts", "train.py"),
+                 *e3c.train_args(_r, DATA_DIR, _s, _out, _spec)],
+                REPO_ROOT, _out, _sub, _stem, _token, int(resume_min_ui.value))
+            _m = _metrics_of(_sub, _out, _name) if os.path.exists(os.path.join(_out, _name)) else None
+            if _code == _MISMATCH and _m is not None:
+                _ev = _m["expect_valid"]
+                e3_status[_key] = (f"lệch, dừng (MRR {_ev['got_mrr']:.4f} / {_ev['mrr']:.4f}, epoch "
+                                   f"{_ev['got_epoch']} / {_ev['epoch']})")
+            elif _code != 0:
+                e3_status[_key] = f"lỗi (exit {_code})"
+            elif _m is None or _m.get("options_tag") != _r["options_tag"]:
+                e3_status[_key] = f"sai tag: không thấy {_name} (tag của lần tune `{_r['options_tag']}`)"
+            else:
+                e3_status[_key] = f"xong (test MRR {_m['test']['mrr']:.4f})"
+            push_results(_out, _sub, _token)
+            if not e3_status[_key].startswith("xong"):
+                break
+    mo.md("### E3\n\n" + ("\n".join(f"- `{_k}`: {_v}" for _k, _v in e3_status.items())
+                           or "Không có ô nào được chọn."))
+    return (e3_status,)
+
+
+@app.cell
+def _(DATASET, DATA_DIR, REPO_ROOT, RESULTS_REPO, WORK_DIR, e3_status, hf_token_ui, mo, os, snapshot_download, sys):
+    # Bảng E3 (scripts/e3_summary.py) của dataset đang chọn: mean ± std qua seed, Δ, bootstrap, phán quyết.
+    _ = e3_status
+    _token = hf_token_ui.value.strip()
+    mo.stop(not _token, mo.md("Nhập HF token để xem bảng E3."))
+    sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
+    import e3_summary as _e3s
+
+    _local = os.path.join(WORK_DIR, "hf_results")
+    try:
+        snapshot_download(RESULTS_REPO, repo_type="dataset", token=_token, local_dir=_local,
+                          allow_patterns=[f"geometry-e3/{DATASET}/*/e3_cell.json",
+                                          f"geometry-e3/{DATASET}/*/metrics_*.json",
+                                          f"geometry-e3/{DATASET}/*/ranks_*_test*.csv"])
+    except Exception as _e:
+        print(f"Không tải được kết quả E3 từ HF: {_e}")
+    _root = os.path.join(_local, "geometry-e3")
+    mo.stop(not os.path.isdir(os.path.join(_root, DATASET)), mo.md("Chưa có lần chạy E3 nào."))
+    _md, _ = _e3s.summarize(_root, os.path.dirname(DATA_DIR), [DATASET])
+    mo.md(_md)
+    return
+
 
 if __name__ == "__main__":
     app.run()

@@ -116,7 +116,7 @@ Kết quả kỳ vọng: Δdepth ≈ 0 ở hàng MMKG và Δdepth > 0 ở hàng 
    - **Chỉ 1 seed (42):** kiểm tra tái lập paper (P3.0b), ablation fusion phụ (RQ2) nếu thiếu GPU, MKG-Y, Spatial-VG, và baseline ở ô inductive.
    - Lý do: khoảng tin cậy bootstrap chỉ phản ánh dao động do mẫu test, không phản ánh dao động do huấn luyện.
 9. Ghi rõ trong bài: VG validation dùng tập con 5.000 mẫu (GeometryMMKG).
-10. Với dataset có thực thể thiếu ảnh: báo trên test đầy đủ, kèm bảng chia nhóm theo số đầu bộ ba có ảnh (cả hai / một / không). Nhóm **"không"** là đối chứng âm: Δdepth ở đó phải xấp xỉ 0. Chỉ kết luận từ nhóm "không" khi nhóm đủ lớn: FB15k-237-IMG chỉ có 14 triplet test ở nhóm này, MKG-Y chỉ có 2 (P0.1, P0.3), nên nhóm so sánh chính là nhóm "một" (FB15k-237-IMG: 1.247 triplet). **Cần quyết định** (hoãn): tạo nhóm "không" lúc test bằng cách che ảnh (đặt mask = 0, dùng vector thay thế) của cả hai đầu trên toàn bộ test, rồi đo Δdepth. Việc này chỉ đổi cách đánh giá, không đụng dữ liệu, đặc trưng hay huấn luyện. Hạn quyết: trước khi chạy đánh giá các cấu hình chính. FB15k-237-IMG báo thêm Δdepth trên thực thể vật lý so với thực thể trừu tượng (ảnh Bing của khái niệm trừu tượng ít mang thông tin hình học).
+10. Với dataset có thực thể thiếu ảnh: báo trên test đầy đủ, kèm bảng chia nhóm theo số đầu bộ ba có ảnh (cả hai / một / không). Nhóm **"không"** là đối chứng âm: Δdepth ở đó phải xấp xỉ 0. Chỉ kết luận từ nhóm "không" khi nhóm đủ lớn: FB15k-237-IMG chỉ có 14 triplet test ở nhóm này, MKG-Y chỉ có 2 (P0.1, P0.3), nên nhóm so sánh chính là nhóm "một" (FB15k-237-IMG: 1.247 triplet). **Đối chứng che ảnh (quyết định 27/11/2026, người dùng duyệt, trước khi có số test; thiết kế E3 mục 5.8 và 6.4):** đánh giá lại checkpoint E3 của 3 bộ MMKG (`no_depth`, `fixed`, mọi seed) trên test với mask = 0 cho **toàn bộ** bảng thực thể (mọi thực thể dùng `v_miss`; che riêng hai đầu thì đáp án mất ảnh còn ứng viên khác vẫn có, hạng bị kéo xuống giả tạo), `scripts/e3_mask_eval.py`. Δ_mask = `fixed` − `no_depth`; phán quyết theo luật E3 (mục 6.1 của thiết kế) không phải "có" thì đối chứng sạch, ngược lại Δdepth trên test đầy đủ của bộ đó phải đọc so với Δ_mask. Chỉ đổi cách đánh giá, không đụng dữ liệu, đặc trưng, huấn luyện hay việc chọn checkpoint; bài ghi rõ test được đánh giá thêm lần này và MRR tuyệt đối khi che không có nghĩa (đầu vào lệch phân phối lúc train). FB15k-237-IMG báo thêm Δdepth trên thực thể vật lý so với thực thể trừu tượng (ảnh Bing của khái niệm trừu tượng ít mang thông tin hình học).
 
 ---
 
@@ -210,7 +210,8 @@ Sáu bộ, mỗi bộ một repo HF public, tag `v0`; cấu trúc file, lệnh d
 - [ ] **P2.4** Log trọng số gate (phần dành cho Depth) theo từng triplet test để phân tích ở P5.
 - [ ] **P2.5** *(Tùy chọn)* Modality BBox geometry (x, y, w, h chuẩn hóa, diện tích).
 - [x] **P2.6** Thiếu ảnh: đọc `ent_img_mask.pt`; với `learned_mask`, vision v của thực thể có mặt nạ 0 được thay bằng **một** vector học được `v_miss`, sau bước gộp RGB–depth. RGB và depth thiếu cùng lúc (cùng nguồn ảnh) nên một vector ở tầng vision là đủ, và thực thể thiếu ảnh đi qua đúng cùng một phép tính ở mọi biến thể; đặt hai vector riêng trước gate thì bản có và không có depth sẽ cho đầu ra khác nhau. Biến thể `constant` bỏ qua mặt nạ, đọc bảng đã điền vector hằng như baseline. Kiểm tra `tests/test_missing_modality.py`: cùng tham số chung thì thực thể thiếu ảnh cho đầu ra giống hệt giữa `no_depth` và mọi `fusion_mode`; đầu ra không phụ thuộc giá trị RGB/depth của dòng thiếu; `constant` thì có; batch toàn thực thể thiếu ảnh không tạo gradient cho phần gộp RGB–depth. (Loss căn chỉnh đã bỏ, xem đầu mục P2.)
-- [x] **P2.7** `notebooks/geometry.py` (Molab, theo mẫu `native.py`): chọn 1 trong 6 dataset, tải `v0` từ HF (chỉ file `*2id`, bảng đặc trưng, mặt nạ, `relation_category.tsv`), kiểm tra bảng đặc trưng; ô HF token dạng mật khẩu; chọn biến thể, seed, tham số; mỗi biến thể chạy `scripts/train.py`, xong là đẩy log, rank, metric, checkpoint lên `geometry-mmkg-results/geometry/<dataset>/<variant>/`; biến thể đã có metric của seed đó thì bỏ qua. Cell cuối chạy `compute_metrics.py` so với `no_depth` (Δdepth). `marimo check` sạch. **Chưa chạy trên Molab.**
+- [x] **P2.7** `notebooks/geometry.py` (Molab, theo mẫu `native.py`): chọn 1 trong 6 dataset, tải `v0` từ HF (chỉ file `*2id`, bảng đặc trưng, mặt nạ, `relation_category.tsv`), kiểm tra bảng đặc trưng; ô HF token dạng mật khẩu; chọn biến thể, seed, tham số; mỗi biến thể chạy `scripts/train.py`, xong là đẩy log, rank, metric, checkpoint lên `geometry-mmkg-results/geometry/<dataset>/<variant>/`; biến thể đã có metric của seed đó thì bỏ qua. Cell cuối chạy `compute_metrics.py` so với `no_depth` (Δdepth). `marimo check` sạch. **Chưa chạy trên Molab.** Số chính thức trong bài **không** lấy từ `geometry/` (ô train thủ
+  công dùng một cấu hình chung cho mọi biến thể) mà từ `geometry-e3/` (ô E3, P6.0).
 - [ ] **P2.8** Hoàn thiện thiết kế trước khi tune (thứ tự: thiết kế → đóng băng → tune → chạy chính thức; quyết định 19/11/2026).
   - **Lần chạy thử** (seed 42, cấu hình mặc định, 100 epoch, code `0455091`, còn lỗi đánh giá ở P1.1):
 
@@ -604,6 +605,28 @@ Sáu bộ, mỗi bộ một repo HF public, tag `v0`; cấu trúc file, lệnh d
         chênh lệch với baseline không thể quy cho cách xử lý thiếu ảnh.
       - **Dropout tốt nhất khác theo loại dữ liệu:** 0 trên hai bộ VRD (Spatial-VG: 0,1 trong lưới gốc, điểm 0 chưa chạy),
         0,1 trên FB15k-237-IMG, 0,3 trên MKG-Y và FB15K-237-ind. Đây là lý do phải tune riêng từng dataset.
+    - **Mở rộng biên FB15K-237-ind và Spatial-VG (xong; kiểm 27/11/2026 từ metric trên HF):** 10 lần, tất cả `--tune`,
+      không có số test, commit `55a27f7` (FB15K-237-ind) và `2f12eab` (Spatial-VG); mọi biến thể giờ "final".
+      - FB15K-237-ind: `fixed` 3e-4 / 0,5 → **0,2563** (epoch 80 / 200), thành cấu hình chọn (dropout 0,5 là đầu thang,
+        dừng ở đó). `no_depth`: 1e-3 / 0,5 → 0,2539 và 3e-3 / 0,3 → 0,2521, giữ 1e-3 / 0,3 (0,2557). `constant_fixed`:
+        1e-3 / 0,5 → 0,2545 và 3e-3 / 0,3 → 0,2508, giữ 1e-3 / 0,3 (0,2551).
+      - Spatial-VG: dropout 0 thắng ở cả hai. `fixed` 3e-4 / 0 → **0,3314** (epoch 70 / 100). `no_depth` 3e-4 / 0 →
+        0,3214 ở epoch 100 / 100, chạy lại 200 epoch theo luật hội tụ → **0,3216** (epoch 170 / 200, hội tụ). Như ở hai
+        bộ VRD, ở dropout 0 chỉ thử một lr.
+      - Spatial-VG `depth_stats_only` (mô hình chính trên MMSG) được tune thêm cho E3 (thiết kế E3 mục 5.2), cùng lưới
+        và cùng luật; kết quả ghi ở đây khi xong.
+    - **Tổng hợp cuối (MRR valid của cấu hình chọn, 27/11/2026):**
+
+      | Dataset | fixed | no_depth | constant_fixed | Δdepth (fixed − no_depth) |
+      |---|---|---|---|---|
+      | FB15k-237-IMG | 0,3302 | 0,3302 | 0,3300 | 0,000 |
+      | MKG-Y | 0,3785 | 0,3770 | 0,3777 | +0,0015 |
+      | FB15K-237-ind | 0,2563 | 0,2557 | 0,2551 | +0,0006 |
+      | Spatial-VRD | 0,2650 | 0,2560 | 0,2649 | +0,009 |
+      | Spatial-VRD-Trans | 0,3611 | 0,3503 | 0,3565 | +0,011 (+0,006 nếu cùng 100 epoch) |
+      | Spatial-VG | 0,3314 | 0,3216 | — (không chạy) | +0,0098 |
+
+      Kết luận không đổi so với bảng 25/11: 3 bộ MMKG trong cỡ nhiễu (0 đến +0,0015), 3 bộ MMSG +0,009 đến +0,011.
   - **Bảng 2 × 2 của depth trên scene graph (quyết định 24/11/2026, người dùng duyệt).**
     - **Vấn đề:** trên scene graph, "có depth" gồm hai phần: vector depth (DINOv2 của ảnh depth) và các số độ sâu theo
       vùng (`depth_stats`, P2.9). Trên MMKG chỉ có vector depth. Probe P2.9 cho thấy vector depth gần như không thêm gì,
@@ -1131,7 +1154,24 @@ Bảng dưới là các tiêu chí phải đạt trước khi đưa số baselin
       `depth_stats_only` (mô hình chính, quyết định ở E2); bảng 2 × 2 (`depth_map_only`, `fixed`), hai nhánh box
       (`box`, `box_grid9`, cấu hình chọn ở E2) và `boxnorm` (cấu hình chọn ở E2b; luật mục 6 của thiết kế E2b áp lại trên
       trung bình 3 seed) trên 2 bộ VRD.
-    - **E4. Kiểm định:** bootstrap ghép cặp theo truy vấn trong từng seed, kiểm định ghép cặp giữa các seed.
+      - **Thiết kế (duyệt 27/11/2026, từng điểm):** `docs/superpowers/specs/2026-11-27-e3-official-runs-design.md`.
+        59 lần chạy (MKG-Y, Spatial-VG 1 seed); Spatial-VG thêm `depth_stats_only` (tune đủ trước, như P2.10) và giữ
+        `fixed`. Mỗi ô dùng cấu hình `tune_summary.choose` chọn và đúng ngân sách epoch của lần được chọn; seed 43, 44
+        không chạy lại theo luật hội tụ. Cận dưới: VRD-Trans `depth_stats_only`, `fixed`, `boxnorm` (epoch tốt nhất
+        200 / 200 sau khi nhân đôi).
+      - **Seed 42 phải lặp lại lần tune trước khi đọc test:** `train.py --expect-valid MRR:EPOCH`: cùng epoch tốt
+        nhất, MRR valid lệch ≤ 0,0005; lệch thì ghi checkpoint và metric valid, không đánh giá test, ô dừng.
+      - Code: `scripts/e3_cells.py` (danh sách ô, cấu hình, `e3_cell.json`), ô notebook "E3" (kết quả ở
+        `geometry-e3/<dataset>/<ô>/`), `scripts/e3_summary.py` (bảng, kiểm định, luật đọc), `scripts/e3_mask_eval.py`
+        (đối chứng che ảnh, mục 4.10).
+      - **Luật đọc (đặt trước, ngưỡng 0,003, chỉ MRR test chính):** "có" khi Δ̄ > 0,003, cả 3 seed cùng dấu và khoảng
+        tin cậy bootstrap 95 % loại 0 ở cả 3 seed; "bằng" khi |Δ̄| ≤ 0,003; còn lại "chưa rõ" (1 seed: |Δ| > 0,003 và
+        khoảng tin cậy loại 0). C2: `fixed` − `no_depth` "bằng" trên cả 3 bộ MMKG. C3: phần lợi của `depth_stats` "có"
+        ở cả hai cặp trên cả hai bộ VRD, vector depth không "có" ở cặp nào. C4: `box_grid9` − `box` "có" cả hai bộ →
+        có; "bằng" cả hai → không; còn lại chưa nhất quán. E2b: luật mục 6 của thiết kế E2b trên Δ̄; hai bộ vẫn khác
+        nhau thì kết luận cuối "chưa nhất quán". Nhóm theo ảnh (MMKG): không phán quyết nhóm dưới 500 bộ ba.
+    - **E4. Kiểm định:** gộp vào E3 (`scripts/e3_summary.py`): bootstrap ghép cặp theo truy vấn trong từng seed (10.000
+      lần), t-test ghép cặp giữa seed (chỉ báo, 2 bậc tự do).
     - **E5. Baseline** theo P3 / P4, có bản +D. Không cấp box cho baseline (box chỉ là đối chứng, E2). Còn quyết định: có
       cấp thêm `depth_stats` ở tầng dữ liệu không.
     - **E6. Phân tích theo nhóm quan hệ** (P5). Tách riêng nhóm GEOMETRIC cho hai nhánh box của E3: nếu mức tăng của box so
