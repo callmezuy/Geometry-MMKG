@@ -29,6 +29,9 @@ section 4).
 * E1 auxiliary metrics (Spatial-VRD, Spatial-VRD-Trans): every evaluation also reports in-image ranking and
   relation prediction (core/models/evaluation.py), stored next to the main metrics as "in_image" / "relation";
   reported only, never used for model selection. Off for the MMKG datasets and relation-conditioned models.
+* --expect-valid MRR:EPOCH (official runs, E3 seed-42 check): test is evaluated only if the run repeats the tune
+  run (same best epoch, best valid MRR within EXPECT_VALID_TOL); otherwise the checkpoint and the valid metrics are
+  written (metrics "expect_valid", no "test", no ranks) and the run exits EXPECT_MISMATCH_EXIT.
 * --dev: model development (P2.8). Valid only: test is never evaluated, no ranks, no checkpoint.
 * --tune: one point of the P2.10 grid (implies --dev); the stem and folder carry the configuration
   (lr<lr>-do<dropout>), default folder results/geometry-tune/<dataset>/<variant>/<config>/.
@@ -84,6 +87,21 @@ GATE_SAMPLE = 4096          # entities (with an image) used for the gate statist
 # Feature-TransE (P3.1): variant -> use_depth. Its folders / stems use this prefix instead of "geometry".
 FT_VARIANTS = {"no_depth": False, "depth": True}
 MODEL_PREFIX = {"geometry": "geometry", "feature_transe": "feature-transe"}
+# E3 seed-42 gate (docs/superpowers/specs/2026-11-27-e3-official-runs-design.md 5.3): the official run must repeat
+# the tune run (same best epoch, best valid MRR within EXPECT_VALID_TOL) before test is evaluated.
+EXPECT_VALID_TOL = 5e-4
+EXPECT_MISMATCH_EXIT = 3
+
+
+def parse_expect_valid(s):
+    """'<valid MRR>:<best epoch>' -> (float, int), for --expect-valid."""
+    mrr, sep, epoch = s.partition(":")
+    try:
+        if not sep:
+            raise ValueError
+        return float(mrr), int(epoch)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected <valid MRR>:<best epoch>, got {s!r}") from None
 
 
 def parse_args(argv=None):
@@ -126,7 +144,13 @@ def parse_args(argv=None):
     p.add_argument("--out", default=None, help="output folder (default: see above)")
     p.add_argument("--no-ckpt", action="store_true", help="do not write the best checkpoint")
     p.add_argument("--no-resume", action="store_true", help="do not read or write <out>/resume_<stem>.pt")
+    p.add_argument("--expect-valid", type=parse_expect_valid, default=None, metavar="MRR:EPOCH",
+                   help="official runs only: evaluate test only if the best valid epoch equals EPOCH and the best "
+                        f"valid MRR is within {EXPECT_VALID_TOL:g} of MRR (E3 seed-42 check); otherwise write the "
+                        f"checkpoint and the valid metrics and exit {EXPECT_MISMATCH_EXIT}")
     args = p.parse_args(argv)
+    if args.expect_valid is not None and (args.dev or args.tune):
+        p.error("--expect-valid gates the test evaluation; it has no meaning with --dev / --tune")
     variants = VARIANTS if args.model == "geometry" else FT_VARIANTS
     if args.variant is None:
         args.variant = "full" if args.model == "geometry" else "no_depth"
@@ -211,7 +235,7 @@ def depth_stats_name(spec):
     return f"{stem}_{key}"
 
 
-RESUME_IGNORED_ARGS = ("data", "out", "keep_on_gpu", "eval_batch_size", "no_ckpt", "no_resume")
+RESUME_IGNORED_ARGS = ("data", "out", "keep_on_gpu", "eval_batch_size", "no_ckpt", "no_resume", "expect_valid")
 
 
 def resume_key(args):
@@ -487,8 +511,24 @@ def main(argv=None):
         "best_epoch": best["epoch"], "best_valid": best["valid"], "best_gate": best["gate"],
         "resumed_at": resumed_at,
     }
+    mismatch = False
+    if args.expect_valid is not None:
+        want_mrr, want_epoch = args.expect_valid
+        ok = best["epoch"] == want_epoch and abs(best["mrr"] - want_mrr) <= EXPECT_VALID_TOL
+        metrics["expect_valid"] = {"mrr": want_mrr, "epoch": want_epoch, "got_mrr": best["mrr"],
+                                   "got_epoch": best["epoch"], "tol": EXPECT_VALID_TOL, "ok": ok}
+        mismatch = not ok
+        print(f"expect-valid: best epoch {best['epoch']} (expected {want_epoch}), valid MRR {best['mrr']:.6f} "
+              f"(expected {want_mrr:.6f}, tolerance {EXPECT_VALID_TOL:g}): {'ok' if ok else 'MISMATCH'}", flush=True)
     if args.dev:
         print(f"[dev] best epoch {best['epoch']}, valid MRR {best['mrr']:.4f}; test not evaluated.", flush=True)
+    elif mismatch:
+        print("The run does not repeat the expected valid result: test NOT evaluated; checkpoint and valid metrics "
+              "are written for the investigation.", flush=True)
+        if not args.no_ckpt:
+            torch.save({"state_dict": best["state"], "variant": args.variant, "model_kwargs": model_kwargs,
+                        "options": options, "args": vars(args), "epoch": best["epoch"]},
+                       os.path.join(out_dir, f"ckpt_{stem}.pt"))
     else:
         model.load_state_dict(best["state"])
         print(f"Best epoch {best['epoch']} (valid MRR {best['mrr']:.4f}); evaluating on test once.", flush=True)
@@ -510,8 +550,10 @@ def main(argv=None):
         json.dump(metrics, f, indent=2)
     if os.path.exists(resume_path):
         os.remove(resume_path)   # finished: the metrics (and the best checkpoint) are the result
-    print(f"Wrote metrics{'' if args.dev else ' / ranks' + ('' if args.no_ckpt else ' / checkpoint')} to "
-          f"{out_dir} ({(time.time() - t_start) / 60:.1f} min)", flush=True)
+    print(f"Wrote metrics{'' if args.dev else ('' if mismatch else ' / ranks') + ('' if args.no_ckpt else ' / checkpoint')} "
+          f"to {out_dir} ({(time.time() - t_start) / 60:.1f} min)", flush=True)
+    if mismatch:
+        raise SystemExit(EXPECT_MISMATCH_EXIT)
 
 
 if __name__ == "__main__":

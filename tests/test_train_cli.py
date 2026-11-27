@@ -166,6 +166,65 @@ def test_format_aux_metrics():
     assert format_aux_metrics({}) == ""
 
 
+def test_parse_expect_valid():
+    import argparse
+    assert train.parse_expect_valid("0.3:7") == (0.3, 7)
+    assert train.parse_expect_valid("0.33021234:170") == (0.33021234, 170)
+    for bad in ("0.3", "x:1", "0.3:x", ""):
+        try:
+            train.parse_expect_valid(bad)
+            raise AssertionError(f"{bad!r} must be refused")
+        except argparse.ArgumentTypeError:
+            pass
+    assert "expect_valid" in train.RESUME_IGNORED_ARGS   # it does not change training: a resumed run keeps it
+    for mode in ("--dev", "--tune"):
+        try:
+            train.parse_args(["--data", "x", mode, "--expect-valid", "0.3:7"])
+            raise AssertionError(f"--expect-valid with {mode} must be refused")
+        except SystemExit as e:
+            assert e.code == 2
+
+
+def test_expect_valid_gates_the_test_evaluation():
+    import json
+    from test_feature_transe import _tiny_dataset
+    with tempfile.TemporaryDirectory() as root:
+        data = os.path.join(root, "Tiny")
+        os.makedirs(data)
+        _tiny_dataset(data)
+        base = ["--data", data, "--variant", "fixed", "--epochs", "2", "--valid-every", "1", "--batch-size", "8",
+                "--no-resume"]
+        stem = "geometry_Tiny_fixed_inorm-ddrop0.3-tproj_seed42"
+
+        def run(name, *extra):
+            out = os.path.join(root, name)
+            code = 0
+            try:
+                train.main(base + ["--out", out, *extra])
+            except SystemExit as e:
+                code = e.code
+            m = json.load(open(os.path.join(out, f"metrics_{stem}.json"), encoding="utf-8"))
+            return code, m, sorted(os.listdir(out))
+
+        _, dev, _ = run("dev", "--dev")
+        mrr, epoch = dev["best_valid"]["mrr"], dev["best_epoch"]
+        code, m, files = run("ok", "--expect-valid", f"{mrr!r}:{epoch}")
+        assert code == 0 and "test" in m and m["expect_valid"]["ok"] is True, (code, m.get("expect_valid"))
+        assert f"ranks_{stem}_test.csv" in files and f"ckpt_{stem}.pt" in files
+        code, m, files = run("near", "--expect-valid", f"{mrr + 0.0004!r}:{epoch}")
+        assert code == 0 and "test" in m and m["expect_valid"]["ok"] is True
+        for name, spec in (("mrr", f"{mrr + 0.001!r}:{epoch}"), ("epoch", f"{mrr!r}:{epoch + 1}")):
+            code, m, files = run(name, "--expect-valid", spec)
+            assert code == train.EXPECT_MISMATCH_EXIT == 3, code
+            ev = m["expect_valid"]
+            assert "test" not in m and ev["ok"] is False and ev["got_mrr"] == mrr and ev["got_epoch"] == epoch, ev
+            assert ev["tol"] == train.EXPECT_VALID_TOL == 5e-4
+            assert not any(f.startswith(("ranks_", "resume_")) for f in files), files
+            assert f"ckpt_{stem}.pt" in files
+        _, m, _ = run("plain")
+        assert "expect_valid" not in m and "test" in m
+
+
 if __name__ == "__main__":
     for _name, _fn in list(globals().items()):
         if _name.startswith("test_") and callable(_fn):
