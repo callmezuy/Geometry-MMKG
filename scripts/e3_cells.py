@@ -61,6 +61,9 @@ def resolve(results_dir, dataset, cell):
     c = ts.choose(runs).get(variant)
     if c is None:
         raise ValueError(f"{dataset} {cell}: no tune run of {variant} in {src}")
+    if c["mixed_options_tags"]:
+        raise ValueError(f"{dataset} {cell}: the tune runs of {variant} in {src} mix options tags "
+                         f"{c['mixed_options_tags']}; the choice is ambiguous")
     if not c["final"]:
         raise ValueError(f"{dataset} {cell}: the tune choice is not final ({c['action']}; edge points "
                          f"{c['edge_points']})")
@@ -117,6 +120,15 @@ def train_args(resolved, data_dir, seed, out, depth_stats_spec=None):
         e = resolved["expected"]
         a += ["--expect-valid", f"{e['valid_mrr']!r}:{e['best_epoch']}"]
     return a
+
+
+def predicted_options_tag(args_list):
+    """The options tag (file / stem tag) train.py will give a run started with args_list."""
+    import train
+    a = train.parse_args(args_list)
+    dataset = os.path.basename(os.path.normpath(a.data))
+    a.depth_stats = train.resolve_depth_stats(a.depth_stats, a.data, dataset)
+    return train.options_tag(a)
 
 
 def seed_state(metrics):

@@ -107,11 +107,11 @@ def _keys():
     return np.stack([i % N_ENT, i // N_ENT, (i * 7 + 3) % N_ENT], axis=1)      # (h, r, t), unique
 
 
-def _write_cell(root, cell, seeds, better=0, drop=None, maskall=False):
+def _write_cell(root, cell, seeds, better=0, drop=None, maskall=False, expect=None):
     import json
     d = os.path.join(root, TINY, cell)
     os.makedirs(d, exist_ok=True)
-    rec = {"dataset": TINY, "cell": cell, "variant": cell, "lower_bound": cell == "fixed"}
+    rec = {"dataset": TINY, "cell": cell, "variant": cell, "options_tag": "tag", "lower_bound": cell == "fixed"}
     json.dump(rec, open(os.path.join(d, "e3_cell.json"), "w"))
     for s in seeds:
         rng = np.random.default_rng(s)
@@ -123,6 +123,11 @@ def _write_cell(root, cell, seeds, better=0, drop=None, maskall=False):
         stem = f"geometry_{TINY}_{cell}_tag_seed{s}"
         m = {"seed": s, "variant": cell, "best_epoch": 190 if s == 44 else 50, "epoch_budget": {"epochs": 200},
              "test": {"mrr": 0.3 + 0.01 * better, "mr": 20.0, "hits@1": 0.2, "hits@3": 0.3, "hits@10": 0.5}}
+        if expect is not None and s == 42:
+            m["expect_valid"] = {"mrr": 0.25, "epoch": 50, "got_mrr": 0.25 + expect, "got_epoch": 50, "tol": 5e-4,
+                                 "ok": abs(expect) <= 5e-4}
+            if not m["expect_valid"]["ok"]:
+                del m["test"]
         json.dump(m, open(os.path.join(d, f"metrics_{stem}.json"), "w"))
         rows = "".join(f"{h},{r},{t},{a},{b}\n" for (h, r, t), a, b in zip(keys, rh, rt))
         for suffix in ("_test",) + (("_test_maskall",) if maskall else ()):
@@ -202,6 +207,60 @@ def test_triple_sets_must_match():
             raise AssertionError("different triple sets must stop the summary")
         except ValueError as e:
             assert "triple" in str(e)
+
+
+def test_chunked_bootstrap_matches_compute_metrics():
+    from compute_metrics import paired_bootstrap
+    rng = np.random.default_rng(3)
+    a, b = rng.random(700), rng.random(700)
+    want = paired_bootstrap(a, b, 300, 0)
+    got = es.bootstrap(a - b, 300, 0, chunk=70)
+    assert np.allclose(want, got), (want, got)
+
+
+def test_load_cell_refuses_duplicates_and_other_stems():
+    import json
+    import shutil
+    import tempfile
+    with tempfile.TemporaryDirectory() as root:
+        e3root = os.path.join(root, "e3")
+        _write_cell(e3root, "fixed", (42, 43, 44))
+        d = os.path.join(e3root, TINY, "fixed")
+        src = os.path.join(d, f"metrics_geometry_{TINY}_fixed_tag_seed43.json")
+        shutil.copy(src, os.path.join(d, f"metrics_geometry_{TINY}_fixed_othertag_seed43.json"))
+        shutil.copy(os.path.join(d, f"ranks_geometry_{TINY}_fixed_tag_seed43_test.csv"),
+                    os.path.join(d, f"ranks_geometry_{TINY}_fixed_othertag_seed43_test.csv"))
+        try:
+            es.load_cell(os.path.join(e3root, TINY), "fixed")
+            raise AssertionError("a metrics file with another stem must be refused")
+        except ValueError as e:
+            assert "othertag" in str(e)
+        # without a record: two files of one seed are refused too
+        os.remove(os.path.join(d, "e3_cell.json"))
+        try:
+            es.load_cell(os.path.join(e3root, TINY), "fixed")
+            raise AssertionError("two metrics files of one seed must be refused")
+        except ValueError as e:
+            assert "seed 43" in str(e)
+        json.dumps({})
+
+
+def test_seed42_check_and_group_mrr_in_the_summary():
+    import tempfile
+    with tempfile.TemporaryDirectory() as root:
+        data_root, _ = _data_root(root)
+        e3root = os.path.join(root, "e3")
+        _write_cell(e3root, "no_depth", (42, 43, 44), expect=0.0002)
+        _write_cell(e3root, "fixed", (42,), expect=0.003)             # stopped by the gate
+        md, data = _summarize(root, data_root)
+        chk = data[TINY]["cells"]["no_depth"]["seed42_check"]
+        assert abs(chk["d_mrr"] - 0.0002) < 1e-12 and chk["got_epoch"] == chk["epoch"] == 50 and chk["ok"] is True
+        assert "seed-42 check" in md and "+0.0002" in md
+        assert "stopped by the seed-42 check" in md and "fixed" not in data[TINY]["cells"]
+        _write_cell(e3root, "fixed", (42, 43, 44), better=3)
+        md, data = _summarize(root, data_root)
+        g = data[TINY]["groups"]["both"]
+        assert set(g["mrr"]) == {"fixed", "no_depth"} and g["mrr"]["fixed"] > g["mrr"]["no_depth"]
 
 
 if __name__ == "__main__":

@@ -1151,9 +1151,15 @@ def _(
             except ValueError as _e:
                 e3_status[_cell] = f"cấu hình / bảng khác lần trước, dừng: {_e}"
                 continue
+        _tag = e3c.predicted_options_tag(e3c.train_args(_r, DATA_DIR, 42, _out, _spec))
+        if _tag != _r["options_tag"]:
+            e3_status[_cell] = f"sai tag, không chạy: train.py sẽ ghi `{_tag}`, lần tune là `{_r['options_tag']}`"
+            continue
         if not os.path.exists(os.path.join(_out, e3c.RECORD)):
             with open(os.path.join(_out, e3c.RECORD), "w", encoding="utf-8") as _f:
                 json.dump(_old if _old is not None else _rec, _f, indent=2)
+        if _old is None:
+            push_results(_out, _sub, _token)   # the record goes up before the first run (spec 5.5)
         print(f"=== E3 {DATASET} {_cell}: lr {_r['lr']:g}, dropout {_r['dropout']:g}, {_r['epochs']} epochs; "
               f"expected valid MRR {_r['expected']['valid_mrr']:.4f} at epoch {_r['expected']['best_epoch']}; "
               f"code {CODE_COMMIT} ===", flush=True)

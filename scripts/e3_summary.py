@@ -23,13 +23,13 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from compute_metrics import paired_bootstrap  # noqa: E402
 
 THRESHOLD = 0.003
 N_BOOT = 10000
 BOOT_SEED = 0
 MIN_GROUP = 500
 EPS = 1e-12               # float slack on the threshold comparisons
+BOOT_CHUNK = 500          # resamples drawn at once (memory: chunk x n triples x 16 bytes)
 MMKG_SETS = ("FB15k-237-IMG", "FB15K-237-ind", "MKG-Y")
 VRD_SETS = ("Spatial-VRD", "Spatial-VRD-Trans")
 KINDS = {**{d: "mmkg" for d in MMKG_SETS}, **{d: "vrd" for d in VRD_SETS}, "Spatial-VG": "vg"}
@@ -66,6 +66,22 @@ def verdict(deltas, cis, thr=THRESHOLD):
     return "unclear"
 
 
+def bootstrap(d, n_boot=N_BOOT, seed=BOOT_SEED, chunk=BOOT_CHUNK):
+    """compute_metrics.paired_bootstrap on the per-triple differences d, drawn in chunks of resamples from one
+    generator (the same index stream as one draw), so 10,000 resamples of 138k triples fit in memory.
+    Returns (delta, lo, hi, p)."""
+    d = np.asarray(d, dtype=np.float64)
+    n = len(d)
+    if n == 0:
+        return np.nan, np.nan, np.nan, np.nan
+    rng = np.random.default_rng(seed)
+    boots = np.concatenate([d[rng.integers(0, n, size=(min(chunk, n_boot - i), n))].mean(axis=1)
+                            for i in range(0, n_boot, chunk)])
+    lo, hi = np.percentile(boots, [2.5, 97.5])
+    p = 2 * min(np.mean(boots <= 0), np.mean(boots >= 0))
+    return d.mean(), lo, hi, min(p, 1.0)
+
+
 def pair_stats(rr_a, rr_b, n_boot=N_BOOT):
     """rr_a / rr_b: {seed: per-triple reciprocal rank}, aligned on the same triples within a seed."""
     if set(rr_a) != set(rr_b):
@@ -75,7 +91,7 @@ def pair_stats(rr_a, rr_b, n_boot=N_BOOT):
     for s in seeds:
         if len(rr_a[s]) != len(rr_b[s]):
             raise ValueError(f"seed {s}: {len(rr_a[s])} vs {len(rr_b[s])} triples")
-        delta, lo, hi, p = paired_bootstrap(np.asarray(rr_a[s]), np.asarray(rr_b[s]), n_boot, BOOT_SEED)
+        delta, lo, hi, p = bootstrap(np.asarray(rr_a[s]) - np.asarray(rr_b[s]), n_boot, BOOT_SEED)
         per[s] = {"delta": float(delta), "lo": float(lo), "hi": float(hi), "p": float(p)}
     deltas = [per[s]["delta"] for s in seeds]
     out = {"seeds": per, "mean": float(np.mean(deltas)), "std": None, "t": None, "p_t": None}
@@ -191,16 +207,27 @@ def load_cell(root, cell):
     d = os.path.join(root, cell)
     if not os.path.isdir(d):
         return None
-    rec_path = os.path.join(d, "e3_cell.json")
-    out = {"record": json.load(open(rec_path, encoding="utf-8")) if os.path.exists(rec_path) else None,
-           "seeds": {}, "skipped": []}
+    import e3_cells
+    rec_path = os.path.join(d, e3_cells.RECORD)
+    rec = e3_cells.read_json(rec_path) if os.path.exists(rec_path) else None
+    out = {"record": rec, "seeds": {}, "skipped": [], "gate": {}}
+    seen = {}
     for fn in sorted(os.listdir(d)):
         if not (fn.startswith("metrics_") and fn.endswith(".json")) or fn.endswith("_maskall.json"):
             continue
         stem = fn[len("metrics_"):-len(".json")]
-        m = json.load(open(os.path.join(d, fn), encoding="utf-8"))
+        m = e3_cells.read_json(os.path.join(d, fn))
+        seed = m.get("seed")
+        if rec is not None and stem != e3_cells.stem(rec["dataset"], rec["variant"], rec["options_tag"], seed):
+            raise ValueError(f"{cell}: {fn} does not belong to the cell's record (dataset / variant / options tag "
+                             f"{rec['dataset']} / {rec['variant']} / {rec['options_tag']})")
+        if seed in seen:
+            raise ValueError(f"{cell}: two metrics files for seed {seed}: {seen[seed]}, {fn}")
+        seen[seed] = fn
+        if m.get("expect_valid") is not None:
+            out["gate"][seed] = m["expect_valid"]
         if "test" not in m:
-            out["skipped"].append(m.get("seed"))
+            out["skipped"].append(seed)
             continue
         keys, rr = _rr(os.path.join(d, f"ranks_{stem}_test.csv"))
         s = {"metrics": m, "keys": keys, "rr": rr}
@@ -255,6 +282,7 @@ def summarize(e3_root, data_root, datasets, cells=None, seeds=None, kinds=None, 
     for ds in datasets:
         kind = kinds[ds]
         loaded = {c: load_cell(os.path.join(e3_root, ds), c) for c in cells[ds]}
+        stopped = {c: v for c, v in loaded.items() if v is not None and not v["seeds"] and v["gate"]}
         loaded = {c: v for c, v in loaded.items() if v is not None and v["seeds"]}
         ref = None
         for c, v in loaded.items():
@@ -274,6 +302,12 @@ def summarize(e3_root, data_root, datasets, cells=None, seeds=None, kinds=None, 
                "|" + "---|" * (head.count("|") - 1)]
         for c in cells[ds]:
             v = loaded.get(c)
+            if v is None and c in stopped:
+                ev = stopped[c]["gate"].get(42) or {}
+                md.append(f"| `{c}` | 0 / {len(planned)} | stopped by the seed-42 check: valid MRR "
+                          f"{ev.get('got_mrr', float('nan')):.4f} vs {ev.get('mrr', float('nan')):.4f}, best epoch "
+                          f"{ev.get('got_epoch')} vs {ev.get('epoch')} |" + " |" * (head.count("|") - 4))
+                continue
             if v is None:
                 md.append(f"| `{c}` | 0 / {len(planned)} | missing |" + " |" * (head.count("|") - 4))
                 continue
@@ -283,8 +317,15 @@ def summarize(e3_root, data_root, datasets, cells=None, seeds=None, kinds=None, 
                    **{k: [m["test"].get(k) for m in ms] for _, k, _ in CELL_COLUMNS}}
             if kind == "vrd":
                 row.update({"/".join(p): [_get(m["test"], p) for m in ms] for _, p, _ in AUX_COLUMNS})
+            ev = v["gate"].get(42)
+            if ev is not None:
+                row["seed42_check"] = {"d_mrr": ev["got_mrr"] - ev["mrr"], "got_epoch": ev["got_epoch"],
+                                       "epoch": ev["epoch"], "ok": ev["ok"]}
             d["cells"][c] = row
             note = ["lower bound (late best epoch after the doubled budget)"] if c in lower else []
+            if ev is not None:
+                note.append(f"seed-42 check: valid MRR {ev['got_mrr'] - ev['mrr']:+.4f} vs tune, best epoch "
+                            f"{ev['got_epoch']} ({ev['epoch']} in the tune run)")
             if late:
                 note.append(f"{late} seed(s) with the best epoch in the last 10%")
             if v["skipped"]:
@@ -317,8 +358,11 @@ def summarize(e3_root, data_root, datasets, cells=None, seeds=None, kinds=None, 
                                 {s: loaded["no_depth"]["seeds"][s]["rr"][sel] for s in planned}, n_boot)
                 if sel.sum() < MIN_GROUP:
                     st["verdict"] = "—"
-                d["groups"][name] = {"n": int(sel.sum()), "pair": st}
-                md.append(_pair_row(f"group '{name}' ({int(sel.sum())} triples)", "fixed", "no_depth", st))
+                mrr = {c: float(np.mean([loaded[c]["seeds"][s]["rr"][sel].mean() for s in planned]))
+                       for c in ("fixed", "no_depth")}
+                d["groups"][name] = {"n": int(sel.sum()), "mrr": mrr, "pair": st}
+                md.append(_pair_row(f"group '{name}' ({int(sel.sum())} triples; MRR `fixed` {mrr['fixed']:.4f}, "
+                                    f"`no_depth` {mrr['no_depth']:.4f})", "fixed", "no_depth", st))
             if all("rr_mask" in loaded[c]["seeds"][s] for c in ("fixed", "no_depth") for s in planned):
                 st = pair_stats({s: loaded["fixed"]["seeds"][s]["rr_mask"] for s in planned},
                                 {s: loaded["no_depth"]["seeds"][s]["rr_mask"] for s in planned}, n_boot)

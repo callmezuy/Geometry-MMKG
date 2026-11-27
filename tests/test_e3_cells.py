@@ -149,6 +149,32 @@ def test_seed_state():
         pass
 
 
+def test_resolve_refuses_mixed_tags():
+    with tempfile.TemporaryDirectory() as hf:
+        root = os.path.join(hf, "geometry-tune", "Spatial-VRD")
+        _grid(root, "fixed", (3e-4, 0.1))
+        _run(root, "fixed", 3e-4, 0.0, 0.25, tag="inorm-tproj-dstat")          # an ablation run in the same folder
+        try:
+            e3.resolve(hf, "Spatial-VRD", "fixed")
+            raise AssertionError("mixed options tags must be refused")
+        except ValueError as err:
+            assert "tag" in str(err)
+
+
+def test_predicted_options_tag():
+    r = _resolved()
+    with tempfile.TemporaryDirectory() as root:
+        vrd, kg = os.path.join(root, "Spatial-VRD"), os.path.join(root, "FB15k-237-IMG")
+        os.makedirs(vrd)
+        os.makedirs(kg)
+        torch.save(torch.zeros(2, 9), os.path.join(vrd, "ent_depth_stats.pt"))
+        plain = {**r, "variant": "fixed"}
+        assert e3.predicted_options_tag(e3.train_args(plain, vrd, 42, "/o")) == "inorm-ddrop0.3-tproj-dstat"
+        assert e3.predicted_options_tag(e3.train_args(plain, kg, 43, "/o")) == "inorm-ddrop0.3-tproj"
+        assert e3.predicted_options_tag(e3.train_args(r, vrd, 42, "/o", "/w/e2/Spatial-VRD/box_geometry.pt:box"))             == "inorm-ddrop0.3-tproj-dstat_box_geometry_box"
+        assert e3.predicted_options_tag(e3.train_args(r, vrd, 42, "/o", "/w/depth_stats_boxnorm.pt:grid9"))             == "inorm-ddrop0.3-tproj-dstat_boxnorm_grid9"
+
+
 if __name__ == "__main__":
     for _name, _fn in list(globals().items()):
         if _name.startswith("test_") and callable(_fn):
