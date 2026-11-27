@@ -801,6 +801,7 @@ Bảng dưới là các tiêu chí phải đạt trước khi đưa số baselin
         - MKG-Y v0 (đặc trưng của mình) cho test MRR 0,3770, gần bằng đặc trưng gốc của tác giả (0,3759, lần 2).
         - Bằng điểm: FB15k-237-IMG không có rank x,5 nào trong 40.932 rank; MKG-Y có 3 trong 5.326.
         - Kết quả ở `geometry-mmkg-results/momok/{FB15k-237-IMG,MKG-Y}/<run>/`. Hàng đợi 4 lần chạy đã xong.
+      - **Thêm vào hàng đợi (27/11/2026, cho ngân sách epoch ở P4.0):** 5. MKG-Y v0, Control, seed 42, **4000 epoch** (`MKG-Y_control_author-config_seed42_ep4000`); 6. Spatial-VRD-Trans v0, Control, config gốc, seed 42 (`Spatial-VRD-Trans_control_author-config_seed42`). Các lần đã xong được bỏ qua khi bấm ▶.
       - Split và id MKG-Y trong repo MoMoK trùng hoàn toàn với MKG-Y v0 (kiểm 26/11/2026), nên rank của lần 2 tính bằng `compute_metrics.py` trên `data/MKG-Y`. Chạy thử trên máy với đặc trưng gốc (2 epoch, cả hai chế độ chọn): chạy được, rank khớp log của MoMoK.
       - Trạng thái chạy tiếp lên repo private `callmezuy/momok-resume` sau mỗi lần đánh giá (`scripts/momok_hf.py`, khoảng 1,9 GB mỗi lần chạy, chỉ giữ bản mới nhất); kết quả lên `geometry-mmkg-results/momok/<dataset>/<run>/`.
   - **Đọc code (22/11/2026, commit `99c2df1` ngày 12/06/2025, trong scratchpad):**
@@ -955,6 +956,26 @@ Bảng dưới là các tiêu chí phải đạt trước khi đưa số baselin
     - Ngân sách: **(a) + (c1) + (c2)**, không dùng (b), không cần cache ảnh (c3) vì MKGformer và CMR bị nghẽn ở GPU. Thêm (f): đánh giá valid theo lô trong `ValidSelector` (code của mình; kết quả phải giống hệt, kiểm bằng `tests/test_valid_selector.py`).
     - Tổng (giữa, với ngân sách epoch đoán trước cho MoMoK 2000 → 1000): khoảng **600 giờ GPU** (500–1.035), không lần chạy nào vượt 12 giờ. Ngân sách epoch thật chốt sau một lần chạy config gốc cho mỗi (baseline, dataset).
   - Việc tiếp theo: đưa MoMoK và CMR vào `baselines/` (cách đưa vào: hỏi trước), áp các thay đổi ngoài kiến trúc ở P3.6 / P3.7, chạy tái lập (CMR trên FB15K-237-ind, MoMoK trên MKG-Y bằng đặc trưng gốc), rồi chạy config gốc để chốt ngân sách epoch.
+  - **Ngân sách epoch của MoMoK (chốt 27/11/2026, từ đường valid của các lần chạy config gốc ở P3.6, trước mọi lần tune):**
+    - **Luật**, áp như nhau cho mọi dataset của MoMoK. Ngân sách B là giá trị nhỏ nhất trong thang 500 / 1000 / 2000 / 4000 / 8000 sao cho B ≥ 1,5 × E. E là epoch đầu tiên mà valid MRR của lần chạy config gốc cách valid MRR lớn nhất của nó không quá 0,002 (cỡ nhiễu giữa các lần chạy lại, P2.8).
+      - Chỉ áp được khi lần chạy config gốc đã hội tụ, tức epoch tốt nhất không nằm trong 10% cuối.
+      - Hệ số 1,5 chừa chỗ cho các cấu hình tune đạt đỉnh muộn hơn (chẳng hạn lr nhỏ hơn).
+      - Mọi lần tune vẫn theo luật hội tụ chung: epoch tốt nhất trong 10% cuối thì chạy lại với ngân sách gấp đôi, một lần.
+    - **Vì sao cắt được:** lr của MoMoK không đổi theo epoch (`ExponentialLR` với gamma 1,0; `lr_reduce_freq` khai báo nhưng không dùng). Vì vậy lần chạy B epoch đúng là B epoch đầu của lần chạy 2000 epoch. Cắt chỉ bỏ phần đuôi, checkpoint vẫn chọn theo valid.
+    - **FB15k-237-IMG:**
+      - Valid MRR mỗi 100 epoch: 0,078 / 0,272 / 0,339 / 0,358 / 0,362 / **0,3631** (epoch 600) / 0,362 / 0,362 / 0,360 / 0,359, rồi giảm dần còn 0,356 ở epoch 2000.
+      - E = 500 (0,3620 ≥ 0,3611), nên **B = 1000**.
+      - Ở B = 1000, chính lần chạy này vẫn chọn epoch 600 (test MRR 0,3579 như cũ). Mỗi lần chạy mất khoảng 1,7 giờ GPU thay vì 3,5.
+    - **MKG-Y:**
+      - Valid MRR dưới 0,04 suốt 1.000 epoch đầu, bật lên ở epoch 1.100–1.300 (0,12 → 0,32), rồi tăng chậm khoảng +0,001 mỗi 100 epoch tới epoch 2000 (0,3492).
+      - Với đặc trưng gốc của tác giả (lần 2) cũng y như vậy, nên đây không phải do đặc trưng của mình.
+      - Chưa hội tụ ở 2000, nên không cắt được. Kiểm tra bằng một lần 4000 epoch (lần 5 ở P3.6, khoảng 70 phút, vì MKG-Y chỉ khoảng 1 giây/epoch), rồi áp luật trên: B = 4000 nếu E ≤ 2.666, ngược lại B = 8000.
+    - **Spatial-VRD-Trans:** chưa có lần chạy config gốc. Lần 6 ở P3.6 (khoảng 8,5 giờ) sẽ cho đường valid để áp luật.
+    - **FB15K-237-ind, Spatial-VRD** (ô inductive: 1 seed, config gốc, không tune): chạy đúng 2000 epoch như config gốc, không cắt.
+  - **CMR: không chốt ngân sách epoch (27/11/2026).** Giữ config gốc (tối đa 50 epoch, dừng sớm sau 3 epoch valid không tăng), vì:
+    - Cả hai lần chạy ở P3.7 dừng sớm xa mốc 50 (FB15K-237-ind: epoch tốt nhất 28, dừng sau 32; Spatial-VRD: 27, dừng sau 31), tức đã hội tụ.
+    - lr giảm tuyến tính theo tổng số bước của 50 epoch (`get_linear_schedule_with_warmup`, `num_training_steps = epochs × số bước`), nên đổi số epoch là đổi lịch lr, không còn là config gốc.
+    - CMR chỉ chạy config gốc, không tune; hai lần chạy ở P3.7 là kết quả cuối.
 
 Ưu tiên theo thứ tự:
 

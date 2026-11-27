@@ -10,6 +10,8 @@
 #   3. FB15k-237-IMG v0 Control, the README MKG-Y config, seed 42: the author-config run that fixes the epoch budget
 #      (P4.0), and the seed-42 tune point of that config (c1)
 #   4. MKG-Y v0 Control (our features), the same
+#   5. as 4 with 4000 epochs: MKG-Y was still rising at epoch 2000 (epoch budget, P4.0)
+#   6. Spatial-VRD-Trans v0 Control, the README MKG-Y config, seed 42: the author-config run for its epoch budget
 RUNS=/marimo/runs/momok
 LOG=$RUNS
 M=/marimo/baselines/MoMoK
@@ -47,7 +49,7 @@ for f in ('img_features.pth', 'text_features.pth'):
 " &&
   mkdir -p $M/checkpoint/MKG-Y &&
   # our v0 data, Control image table (scripts/prepare_momok_data.py: name with FB15K-237, the authors' 768/768 branch)
-  for ds in fb15k237-img:FB15k-237-IMG mkg-y:MKG-Y; do
+  for ds in fb15k237-img:FB15k-237-IMG mkg-y:MKG-Y spatial-vrd-trans:Spatial-VRD-Trans; do
     $PY -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='callmezuy/${ds%%:*}', repo_type='dataset', revision='v0', local_dir='/marimo/data/${ds##*:}', allow_patterns=['*2id.txt','ent_rgb_emb.pt','ent_text_emb.pt','relation_category.tsv'])" &&
     $PY $R/scripts/prepare_momok_data.py --data /marimo/data/${ds##*:} --momok $M --visual rgb || exit 1
   done
@@ -61,6 +63,10 @@ QUEUE=(
   "MKG-Y_authors-features_select-valid|MKG-Y|$AUTHOR --select_on valid|/marimo/data/MKG-Y"
   "FB15k-237-IMG_control_author-config_seed42|FB15K-237-branch-FB15k-237-IMG-v0|$AUTHOR --select_on valid --seed 42|/marimo/data/FB15k-237-IMG"
   "MKG-Y_control_author-config_seed42|FB15K-237-branch-mkg-Y-v0|$AUTHOR --select_on valid --seed 42|/marimo/data/MKG-Y"
+  # epoch budget (P4.0, 27/11/2026): MKG-Y was still rising at epoch 2000 (the lr is constant, gamma 1.0, so a
+  # longer run extends the same trajectory); VRD-Trans has no author-config run yet
+  "MKG-Y_control_author-config_seed42_ep4000|FB15K-237-branch-mkg-Y-v0|${AUTHOR/--epochs 2000/--epochs 4000} --select_on valid --seed 42|/marimo/data/MKG-Y"
+  "Spatial-VRD-Trans_control_author-config_seed42|FB15K-237-branch-Spatial-VRD-Trans-v0|$AUTHOR --select_on valid --seed 42|/marimo/data/Spatial-VRD-Trans"
 )
 
 cd $M
@@ -92,7 +98,7 @@ for entry in "${QUEUE[@]}"; do
 import os
 from huggingface_hub import HfApi
 ds = {"MKG-Y": "MKG-Y-sanity", "FB15K-237-branch-FB15k-237-IMG-v0": "FB15k-237-IMG",
-      "FB15K-237-branch-mkg-Y-v0": "MKG-Y"}["$DSET"]
+      "FB15K-237-branch-mkg-Y-v0": "MKG-Y", "FB15K-237-branch-Spatial-VRD-Trans-v0": "Spatial-VRD-Trans"}["$DSET"]
 HfApi(token=os.environ["HF_TOKEN"]).upload_folder(
     repo_id="callmezuy/geometry-mmkg-results", repo_type="dataset", folder_path="$D",
     path_in_repo=f"momok/{ds}/$NAME", allow_patterns=["train.log", "ranks_test.csv", "metrics_test.md", "metrics.log"],

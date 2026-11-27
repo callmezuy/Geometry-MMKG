@@ -19,13 +19,15 @@ def _():
         commit cố định cộng diff của mình (`baselines/patches/MoMoK.diff`: ma trận nhãn dựng trên GPU, chọn
         checkpoint theo valid, rank chặt, chạy tiếp khi bị ngắt; bảng thay đổi trong `baselines/PROVENANCE.md`).
 
-        `scripts/momok_molab_run.sh` chạy lần lượt 4 lần chạy (lệnh README của MKG-Y: lr 5e-4, mu 1e-4, dim 300,
-        2000 epoch):
+        `scripts/momok_molab_run.sh` chạy lần lượt 6 lần chạy (lệnh README của MKG-Y: lr 5e-4, mu 1e-4, dim 300,
+        2000 epoch trừ lần 5):
         1. MKG-Y, đặc trưng gốc của tác giả, `--select_on original` (như code gốc: lấy giá trị tốt nhất của từng
            metric qua các lần đánh giá trên test). Đối chiếu bài báo: MRR 37,91, H@1 35,09.
         2. Như 1 nhưng `--select_on valid`: đặc trưng gốc, giao thức của mình (chọn trên valid, rank chặt).
         3. FB15k-237-IMG v0, Control, seed 42: lần chạy config gốc để chốt số epoch.
         4. MKG-Y v0 (đặc trưng của mình), Control, seed 42: như 3.
+        5. Như 4 nhưng 4000 epoch: ở lần 4, valid của MKG-Y vẫn còn tăng ở epoch 2000.
+        6. Spatial-VRD-Trans v0, Control, seed 42: lần chạy config gốc để chốt số epoch cho bộ này (khoảng 8,5 giờ).
 
         Mỗi lần chạy lưu trạng thái lên repo private `callmezuy/momok-resume` sau mỗi lần đánh giá (100 epoch).
         Kết quả (log, rank, metric) lên `geometry-mmkg-results/momok/<dataset>/<run>/`.
@@ -111,11 +113,11 @@ def _(mo, os, re, refresh):
         if not os.path.exists(_f):
             continue
         _txt = open(_f, encoding="utf-8", errors="replace").read()
-        _ep = re.findall(r"(\d+)/2000 \[", _txt)
+        _ep = re.findall(r"(\d+)/(\d+) \[", _txt)
         _evals = re.findall(r"Epoch: (\d+)\n((?:val|test)_[^\n]*)", _txt)
         _lines = [f"epoch {e}: {m[:160]}" for e, m in _evals[-4:]]
         _res = _txt[_txt.rfind("Test set results:"):].splitlines()[:2] if "Test set results:" in _txt else []
-        _parts.append(f"**{_run}** (epoch {_ep[-1] if _ep else '?'} / 2000)\n```\n" + "\n".join(_lines + _res) + "\n```")
+        _parts.append(f"**{_run}** (epoch {'%s / %s' % _ep[-1] if _ep else '?'})\n```\n" + "\n".join(_lines + _res) + "\n```")
     _backup = open(f"{_root}/backup.log").read().splitlines()[-3:] if os.path.exists(f"{_root}/backup.log") else []
     mo.md(
         "### Các bước\n```\n" + _steps + "\n```\n### Các lần chạy\n" + "\n\n".join(_parts)
