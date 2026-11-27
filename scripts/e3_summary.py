@@ -166,3 +166,217 @@ def lower_bound_note(a, b, lower_bound_cells):
     if lb:
         return f"`{b}` is a lower bound: the difference would shrink if it were higher"
     return ""
+
+
+# ---------------------------------------------------------------- loading, tables, CLI
+GROUP_NAMES = {2: "both", 1: "one", 0: "none"}
+LATE_FRACTION = 0.9
+CELL_COLUMNS = [("MRR", "mrr", ".4f"), ("MR", "mr", ".1f"), ("H@1", "hits@1", ".4f"), ("H@3", "hits@3", ".4f"),
+                ("H@10", "hits@10", ".4f")]
+AUX_COLUMNS = [("in-image MRR", ("in_image", "mrr"), ".4f"), ("in-image H@1", ("in_image", "hits@1"), ".4f"),
+               ("image-first", ("in_image", "image_first"), ".3f"), ("relation MRR", ("relation", "mrr"), ".4f"),
+               ("relation H@1", ("relation", "hits@1"), ".4f")]
+
+
+def _rr(path):
+    """(keys sorted by (h, r, t), per-triple RR = (1 / rank_head + 1 / rank_tail) / 2 in that order)."""
+    from compute_metrics import read_ranks
+    keys, rh, rt = read_ranks(path)
+    order = np.lexsort((keys[:, 2], keys[:, 1], keys[:, 0]))
+    return keys[order], ((1 / rh + 1 / rt) / 2)[order]
+
+
+def load_cell(root, cell):
+    """{record, seeds: {seed: {metrics, keys, rr[, rr_mask]}}, skipped: [seeds without test]} or None."""
+    d = os.path.join(root, cell)
+    if not os.path.isdir(d):
+        return None
+    rec_path = os.path.join(d, "e3_cell.json")
+    out = {"record": json.load(open(rec_path, encoding="utf-8")) if os.path.exists(rec_path) else None,
+           "seeds": {}, "skipped": []}
+    for fn in sorted(os.listdir(d)):
+        if not (fn.startswith("metrics_") and fn.endswith(".json")) or fn.endswith("_maskall.json"):
+            continue
+        stem = fn[len("metrics_"):-len(".json")]
+        m = json.load(open(os.path.join(d, fn), encoding="utf-8"))
+        if "test" not in m:
+            out["skipped"].append(m.get("seed"))
+            continue
+        keys, rr = _rr(os.path.join(d, f"ranks_{stem}_test.csv"))
+        s = {"metrics": m, "keys": keys, "rr": rr}
+        mask_path = os.path.join(d, f"ranks_{stem}_test_maskall.csv")
+        if os.path.exists(mask_path):
+            mkeys, s["rr_mask"] = _rr(mask_path)
+            if not np.array_equal(mkeys, keys):
+                raise ValueError(f"{cell} seed {m['seed']}: the masked rank file has other triples")
+        out["seeds"][m["seed"]] = s
+    return out
+
+
+def image_groups(keys, mask):
+    """Number of ends of each (h, r, t) triple that have an image (0, 1, 2)."""
+    mask = np.asarray(mask, dtype=bool)
+    return mask[keys[:, 0]].astype(int) + mask[keys[:, 2]].astype(int)
+
+
+def _ms(xs, fmt):
+    xs = [x for x in xs if x is not None]
+    if not xs:
+        return "–"
+    if len(xs) == 1:
+        return format(xs[0], fmt)
+    return f"{format(float(np.mean(xs)), fmt)} ± {format(float(np.std(xs, ddof=1)), fmt)}"
+
+
+def _get(m, path):
+    for k in path:
+        m = (m or {}).get(k)
+    return m
+
+
+def _pair_row(label, a, b, st, note=""):
+    seeds = " / ".join(f"{v['delta']:+.4f} [{v['lo']:+.4f}, {v['hi']:+.4f}]" for _, v in sorted(st["seeds"].items()))
+    t = "–" if st["t"] is None else f"{st['t']:.2f} (p {st['p_t']:.3f})"
+    std = "" if st["std"] is None else f" ± {st['std']:.4f}"
+    return f"| `{a}` − `{b}` | {label} | {st['mean']:+.4f}{std} | {seeds} | {t} | **{st['verdict']}** | {note} |"
+
+
+PAIR_HEAD = ["| Pair | Reading | Mean Δ MRR | Δ per seed [95% CI] | t-test over seeds | Verdict | Note |",
+             "|---|---|---|---|---|---|---|"]
+
+
+def summarize(e3_root, data_root, datasets, cells=None, seeds=None, kinds=None, n_boot=N_BOOT):
+    """(markdown, data) for the datasets given; cells / seeds / kinds default to e3_cells.CELLS / SEEDS / KINDS."""
+    import e3_cells
+    cells = cells or e3_cells.CELLS
+    seeds = seeds or e3_cells.SEEDS
+    kinds = kinds or KINDS
+    md, data = [], {}
+    for ds in datasets:
+        kind = kinds[ds]
+        loaded = {c: load_cell(os.path.join(e3_root, ds), c) for c in cells[ds]}
+        loaded = {c: v for c, v in loaded.items() if v is not None and v["seeds"]}
+        ref = None
+        for c, v in loaded.items():
+            for s, x in v["seeds"].items():
+                if ref is None:
+                    ref = (c, s, x["keys"])
+                elif not np.array_equal(ref[2], x["keys"]):
+                    raise ValueError(f"{ds}: {c} seed {s} was evaluated on other test triples than {ref[0]} seed "
+                                     f"{ref[1]}")
+        planned = tuple(seeds[ds])
+        complete = {c for c, v in loaded.items() if tuple(sorted(v["seeds"])) == planned}
+        lower = {c for c, v in loaded.items() if (v["record"] or {}).get("lower_bound")}
+        d = {"cells": {}, "pairs": {}, "groups": {}, "masked": None}
+        head = "| Cell | Seeds | " + " | ".join(c[0] for c in CELL_COLUMNS) + (
+            " | " + " | ".join(c[0] for c in AUX_COLUMNS) if kind == "vrd" else "") + " | Note |"
+        md += [f"## E3 `{ds}` (test; {len(planned)} seed{'s' if len(planned) > 1 else ''})", "", head,
+               "|" + "---|" * (head.count("|") - 1)]
+        for c in cells[ds]:
+            v = loaded.get(c)
+            if v is None:
+                md.append(f"| `{c}` | 0 / {len(planned)} | missing |" + " |" * (head.count("|") - 4))
+                continue
+            ms = [x["metrics"] for _, x in sorted(v["seeds"].items())]
+            late = sum(m["best_epoch"] > LATE_FRACTION * m["epoch_budget"]["epochs"] for m in ms)
+            row = {"n_seeds": len(ms), "late_seeds": late, "lower_bound": c in lower,
+                   **{k: [m["test"].get(k) for m in ms] for _, k, _ in CELL_COLUMNS}}
+            if kind == "vrd":
+                row.update({"/".join(p): [_get(m["test"], p) for m in ms] for _, p, _ in AUX_COLUMNS})
+            d["cells"][c] = row
+            note = ["lower bound (late best epoch after the doubled budget)"] if c in lower else []
+            if late:
+                note.append(f"{late} seed(s) with the best epoch in the last 10%")
+            if v["skipped"]:
+                note.append(f"seeds without test: {v['skipped']}")
+            cols = [_ms(row[k], f) for _, k, f in CELL_COLUMNS]
+            if kind == "vrd":
+                cols += [_ms(row["/".join(p)], f) for _, p, f in AUX_COLUMNS]
+            md.append(f"| `{c}` | {len(ms)} / {len(planned)} | " + " | ".join(cols) + f" | {'; '.join(note)} |")
+        md += ["", *PAIR_HEAD]
+        for a, b, label in PAIRS[kind]:
+            if a not in complete or b not in complete:
+                if a in cells[ds] and b in cells[ds]:
+                    md.append(f"| `{a}` − `{b}` | {label} | incomplete (needs seeds {list(planned)} of both) | | | | |")
+                continue
+            st = pair_stats({s: loaded[a]["seeds"][s]["rr"] for s in planned},
+                            {s: loaded[b]["seeds"][s]["rr"] for s in planned}, n_boot)
+            d["pairs"][f"{a} - {b}"] = st
+            md.append(_pair_row(label, a, b, st, lower_bound_note(a, b, lower)))
+        if kind == "mmkg" and {"fixed", "no_depth"} <= complete:
+            import torch
+            mask = torch.load(os.path.join(data_root, ds, "ent_img_mask.pt"), weights_only=True).numpy()
+            g = image_groups(ref[2], mask)
+            md += ["", f"### Image groups (ends of the triple with an image; no verdict below {MIN_GROUP} triples)",
+                   "", *PAIR_HEAD]
+            for k, name in GROUP_NAMES.items():
+                sel = g == k
+                if not sel.any():
+                    continue
+                st = pair_stats({s: loaded["fixed"]["seeds"][s]["rr"][sel] for s in planned},
+                                {s: loaded["no_depth"]["seeds"][s]["rr"][sel] for s in planned}, n_boot)
+                if sel.sum() < MIN_GROUP:
+                    st["verdict"] = "—"
+                d["groups"][name] = {"n": int(sel.sum()), "pair": st}
+                md.append(_pair_row(f"group '{name}' ({int(sel.sum())} triples)", "fixed", "no_depth", st))
+            if all("rr_mask" in loaded[c]["seeds"][s] for c in ("fixed", "no_depth") for s in planned):
+                st = pair_stats({s: loaded["fixed"]["seeds"][s]["rr_mask"] for s in planned},
+                                {s: loaded["no_depth"]["seeds"][s]["rr_mask"] for s in planned}, n_boot)
+                d["masked"] = st
+                clean = "clean control" if st["verdict"] != "yes" and st["verdict"] != "yes (negative)" else (
+                    "NOT clean: read the full-test Δdepth against this")
+                md += ["", "### Every image masked at test (spec 6.4)", "", *PAIR_HEAD,
+                       _pair_row(f"masked: {clean}", "fixed", "no_depth", st)]
+        md.append("")
+        data[ds] = d
+    md += _claims(data, datasets, kinds)
+    return "\n".join(md) + "\n", data
+
+
+def _claims(data, datasets, kinds):
+    verdict_of = lambda ds, a, b: (data.get(ds, {}).get("pairs", {}).get(f"{a} - {b}") or {}).get("verdict")  # noqa
+    have = lambda ds, a, b: verdict_of(ds, a, b) is not None  # noqa: E731
+    lines = []
+    if any(kinds.get(d) == "mmkg" for d in datasets):
+        lines.append(read_c2({d: verdict_of(d, "fixed", "no_depth") for d in MMKG_SETS
+                              if have(d, "fixed", "no_depth")}))
+    if any(kinds.get(d) == "vrd" for d in datasets):
+        lines.append(read_c3({d: {p: verdict_of(d, *p) for p in DEPTH_STATS_PAIRS + VECTOR_PAIRS}
+                              for d in VRD_SETS if all(have(d, *p) for p in DEPTH_STATS_PAIRS + VECTOR_PAIRS)}))
+        lines.append(read_c4({d: verdict_of(d, "box_grid9", "box") for d in VRD_SETS
+                              if have(d, "box_grid9", "box")}))
+        means = {}
+        for d in VRD_SETS:
+            p = data.get(d, {}).get("pairs", {})
+            if all(k in p for k in ("boxnorm - no_depth", "depth_stats_only - boxnorm", "depth_stats_only - no_depth")):
+                gain = p["depth_stats_only - no_depth"]["mean"]
+                share = float("nan") if abs(gain) < EPS else p["boxnorm - no_depth"]["mean"] / gain
+                means[d] = (p["boxnorm - no_depth"]["mean"], p["depth_stats_only - boxnorm"]["mean"], share)
+        lines.append(read_e2b(means))
+    if not lines:
+        return []
+    return ["## Claims (pre-registered rules, spec 6.2)", ""] + [f"- **{s}**: {t}" for s, t in lines] + [""]
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--root", required=True, help="local copy of geometry-e3/ (<root>/<dataset>/<cell>/)")
+    p.add_argument("--data-root", required=True, help="folder with <dataset>/ent_img_mask.pt")
+    p.add_argument("--datasets", nargs="+", default=None, help="default: every dataset folder under --root")
+    p.add_argument("--n-boot", type=int, default=N_BOOT)
+    p.add_argument("--out", default=None, help="output prefix (.md and .json)")
+    a = p.parse_args(argv)
+    datasets = a.datasets or [d for d in KINDS if os.path.isdir(os.path.join(a.root, d))]
+    md, data = summarize(a.root, a.data_root, datasets, n_boot=a.n_boot)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    print(md)
+    if a.out:
+        with open(a.out + ".md", "w", encoding="utf-8", newline="\n") as f:
+            f.write(md)
+        with open(a.out + ".json", "w", encoding="utf-8", newline="\n") as f:
+            json.dump(data, f, indent=2)
+
+
+if __name__ == "__main__":
+    main()

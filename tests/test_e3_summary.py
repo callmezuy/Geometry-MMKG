@@ -98,6 +98,112 @@ def test_lower_bound_note():
     assert "unknown" in es.lower_bound_note("depth_stats_only", "boxnorm", {"boxnorm", "depth_stats_only"})
 
 
+N_ENT, N_TRIPLES = 100, 600
+TINY = "Tiny-MMKG"
+
+
+def _keys():
+    i = np.arange(N_TRIPLES)
+    return np.stack([i % N_ENT, i // N_ENT, (i * 7 + 3) % N_ENT], axis=1)      # (h, r, t), unique
+
+
+def _write_cell(root, cell, seeds, better=0, drop=None, maskall=False):
+    import json
+    d = os.path.join(root, TINY, cell)
+    os.makedirs(d, exist_ok=True)
+    rec = {"dataset": TINY, "cell": cell, "variant": cell, "lower_bound": cell == "fixed"}
+    json.dump(rec, open(os.path.join(d, "e3_cell.json"), "w"))
+    for s in seeds:
+        rng = np.random.default_rng(s)
+        keys = _keys()
+        rh = rng.integers(1, 50, N_TRIPLES)
+        rt = np.maximum(1, rng.integers(1, 50, N_TRIPLES) - better)
+        if drop is not None and s == drop:
+            keys, rh, rt = keys[1:], rh[1:], rt[1:]
+        stem = f"geometry_{TINY}_{cell}_tag_seed{s}"
+        m = {"seed": s, "variant": cell, "best_epoch": 190 if s == 44 else 50, "epoch_budget": {"epochs": 200},
+             "test": {"mrr": 0.3 + 0.01 * better, "mr": 20.0, "hits@1": 0.2, "hits@3": 0.3, "hits@10": 0.5}}
+        json.dump(m, open(os.path.join(d, f"metrics_{stem}.json"), "w"))
+        rows = "".join(f"{h},{r},{t},{a},{b}\n" for (h, r, t), a, b in zip(keys, rh, rt))
+        for suffix in ("_test",) + (("_test_maskall",) if maskall else ()):
+            with open(os.path.join(d, f"ranks_{stem}{suffix}.csv"), "w") as f:
+                f.write("h_id,r_id,t_id,rank_head,rank_tail\n" + rows)
+        if maskall:
+            json.dump({"masked": "all entities"}, open(os.path.join(d, f"metrics_{stem}_maskall.json"), "w"))
+
+
+def _data_root(root):
+    import torch
+    d = os.path.join(root, "data", TINY)
+    os.makedirs(d, exist_ok=True)
+    mask = torch.ones(N_ENT, dtype=torch.bool)
+    mask[::5] = False                                                          # 20% without an image
+    torch.save(mask, os.path.join(d, "ent_img_mask.pt"))
+    return os.path.join(root, "data"), mask.numpy()
+
+
+def _summarize(root, data_root):
+    return es.summarize(os.path.join(root, "e3"), data_root, [TINY], cells={TINY: ("no_depth", "fixed")},
+                        seeds={TINY: (42, 43, 44)}, kinds={TINY: "mmkg"}, n_boot=200)
+
+
+def test_image_groups():
+    keys = np.array([[0, 0, 1], [0, 1, 2], [2, 0, 3], [1, 0, 3]])
+    mask = np.array([True, False, True, False])
+    assert es.image_groups(keys, mask).tolist() == [1, 2, 1, 0]
+    assert es.image_groups(np.array([[0, 0, 2]]), mask).tolist() == [2]
+
+
+def test_summarize_tiny():
+    import tempfile
+    with tempfile.TemporaryDirectory() as root:
+        data_root, mask = _data_root(root)
+        e3root = os.path.join(root, "e3")
+        _write_cell(e3root, "no_depth", (42, 43, 44))
+        _write_cell(e3root, "fixed", (42, 43, 44), better=3)
+        md, data = _summarize(root, data_root)
+        d = data[TINY]
+        assert set(d["cells"]) == {"no_depth", "fixed"} and d["cells"]["fixed"]["n_seeds"] == 3
+        assert d["cells"]["fixed"]["late_seeds"] == 1                          # seed 44: best epoch 190 / 200
+        assert d["pairs"]["fixed - no_depth"]["verdict"] in ("yes", "unclear", "equal", "yes (negative)")
+        groups = es.image_groups(_keys(), mask)
+        assert {g: d["groups"][g]["n"] for g in d["groups"]} == {
+            name: int((groups == k).sum()) for k, name in es.GROUP_NAMES.items() if (groups == k).any()}
+        assert sum(d["groups"][g]["n"] for g in d["groups"]) == N_TRIPLES
+        small = [g for g in d["groups"] if d["groups"][g]["n"] < es.MIN_GROUP]
+        assert small and all(d["groups"][g]["pair"]["verdict"] == "—" for g in small)
+        assert d["masked"] is None and "`fixed` − `no_depth`" in md and "lower bound" in md
+        assert "| `fixed` |" in md and "image group" in md.lower()
+        # the masked control appears once every seed of both cells has it
+        _write_cell(e3root, "no_depth", (42, 43, 44), maskall=True)
+        _write_cell(e3root, "fixed", (42, 43, 44), better=3, maskall=True)
+        md, data = _summarize(root, data_root)
+        assert data[TINY]["masked"] is not None and "masked" in md.lower()
+
+
+def test_incomplete_cell_gives_no_verdict():
+    import tempfile
+    with tempfile.TemporaryDirectory() as root:
+        data_root, _ = _data_root(root)
+        _write_cell(os.path.join(root, "e3"), "no_depth", (42, 43, 44))
+        _write_cell(os.path.join(root, "e3"), "fixed", (42, 43))
+        md, data = _summarize(root, data_root)
+        assert "fixed - no_depth" not in data[TINY]["pairs"] and "incomplete" in md
+
+
+def test_triple_sets_must_match():
+    import tempfile
+    with tempfile.TemporaryDirectory() as root:
+        data_root, _ = _data_root(root)
+        _write_cell(os.path.join(root, "e3"), "no_depth", (42, 43, 44))
+        _write_cell(os.path.join(root, "e3"), "fixed", (42, 43, 44), drop=43)
+        try:
+            _summarize(root, data_root)
+            raise AssertionError("different triple sets must stop the summary")
+        except ValueError as e:
+            assert "triple" in str(e)
+
+
 if __name__ == "__main__":
     for _name, _fn in list(globals().items()):
         if _name.startswith("test_") and callable(_fn):
