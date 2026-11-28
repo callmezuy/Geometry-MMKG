@@ -69,14 +69,28 @@ Kết quả kỳ vọng: Δdepth ≈ 0 ở hàng MMKG và Δdepth > 0 ở hàng 
 
 | Baseline | FB15k-237-IMG, MKG-Y | VRD-Trans | FB15K-237-ind, VRD / VG (inductive) | Δdepth? |
 |---|---|---|---|---|
-| NativE (Control / +D mean / +D concat) | Nguyên bản | Nguyên bản | Nguyên bản trên FB15K-237-ind và Spatial-VRD, 1 seed; không chạy VG | Có, tầng dữ liệu |
-| SNAG (COLING 2025) | Nguyên bản | Nguyên bản | Như NativE | Có, tầng dữ liệu |
+| NativE (Control / +D mean; +Dstat chỉ trên VRD-Trans) | Nguyên bản | Nguyên bản | Nguyên bản trên FB15K-237-ind và Spatial-VRD, 1 seed; không chạy VG | Có, tầng dữ liệu |
+| SNAG (COLING 2025) | Nguyên bản | Nguyên bản | Như NativE | Có, tầng dữ liệu (chỉ +D mean) |
 | MoMoK (ICLR 2025) | Nguyên bản | Nguyên bản | Như NativE | Chỉ +D mean, tầng dữ liệu (không thêm expert). +D concat không chạy được: số chiều gắn cứng theo tên dataset (P3.6) |
 | MKGformer (SIGIR 2022) | Nguyên bản (FB15k-237-IMG là dataset gốc; so với số arXiv v5 đã sửa lỗi: H@1 0,256 · H@3 0,367 · H@10 0,504 · MR 221, paper không báo MRR) | Nguyên bản | Không chạy; giải thích: entity-as-token, không inductive, không mở rộng tới 1,44M | Không: đọc ảnh thô, làm mốc tham chiếu |
 | CMR (SIGIR 2024) | Không bắt buộc | Không bắt buộc | Nguyên bản trên FB15K-237-ind (số paper: MRR 0,371 · H@1 0,269 · H@10 0,567) và Spatial-VRD; VG không chạy (bi-encoder PLM + ViT trên 1,44M thực thể quá nặng) | Không: đọc ảnh thô, làm mốc tham chiếu. Code CMR bắt buộc mỗi thực thể có đúng một ảnh (tác giả tự crawl bù ảnh còn thiếu, P0.2); cách cấp ảnh cho thực thể thiếu ảnh quyết định ở P3.7 |
-| Feature-TransE (RGB+Text / RGB+Depth+Text, MLP) | Có | Có | Có: baseline đơn giản cùng đặc trưng, cô lập đóng góp của Router | Có |
+| Feature-TransE (RGB+Text / RGB+Depth+Text, MLP; trên 3 bộ MMSG thêm RGB+dstat+Text) | Có | Có | Có: baseline đơn giản cùng đặc trưng, cô lập đóng góp của Router | Có |
 
 Δdepth giữa các mô hình được kiểm chứng trên NativE, SNAG, MoMoK, Feature-TransE và GeometryMMKG. MKGformer và CMR là mốc so sánh với mặt bằng chung của lĩnh vực, không có bản thêm depth.
+
+**Cách cấp depth cho baseline (quyết định 28/11/2026, người dùng duyệt, sau E3 và trước mọi lần tune baseline):**
+1. **Bỏ +D concat ở mọi ô** (NativE, SNAG, kể cả ô inductive). +D chỉ còn một dạng, **+D mean**, chung cho cả ba baseline. Lý do,
+   không dựa trên số nào của baseline: C6 (cách gộp RGB với depth không quan trọng), E3 (vector depth "bằng" ngay cả trên MMSG),
+   và MoMoK chỉ nhận được +D mean (P3.6). Các lần +D concat đã chạy (NativE config gốc trên FB15k-237-IMG và Spatial-VRD) giữ
+   lại, chỉ báo như số phụ. Bài ghi vào giới hạn: lấy trung bình có thể làm loãng depth.
+2. **Thêm +Dstat**, bản tương ứng với `depth_stats_only`: bảng RGB của Control nối 9 số grid9 (`ent_depth_stats.pt`, chuẩn hoá
+   theo thực thể train có ảnh như Feature-TransE; thực thể không có số nhận 0, tức trung bình, khớp quy tắc thiếu ảnh 1), không
+   kèm vector depth. Tune riêng như mọi cách cấp khác. Chạy trên: **NativE ở VRD-Trans**; **Feature-TransE ở Spatial-VRD,
+   VRD-Trans và Spatial-VG** (P3.1).
+3. Không chạy +Dstat cho SNAG, MoMoK (khoảng 60–180 giờ GPU), và không chạy ở ô inductive cho baseline có embedding ID (C1: mô
+   hình đã thất bại ở đó, Δ không có nghĩa). MKGformer và CMR đọc ảnh thô, không cấp được ở tầng dữ liệu.
+4. **Luật đọc (đặt trước):** +Dstat − Control "có" theo luật E3 → C3 có thêm một họ mô hình. "Bằng" → không bác bỏ C3 (có thể do
+   cách cấp ở tầng dữ liệu, 9 số cạnh 768 chiều), báo nguyên trạng.
 
 **Mức 2 (chỉ làm nếu còn GPU; 1 seed):** AdaMF-MAT (COLING 2024; sinh vector đối kháng cho modality thiếu), IKRL và TBKGC (đã có sẵn trong `baselines/NativE/mmkgc/module/model/`), BLP-TransE (mốc chỉ dùng text cho FB15K-237-ind). MyGO lên mức 2 nếu code tách token đã được phát hành.
 
@@ -728,7 +742,7 @@ Bảng dưới là các tiêu chí phải đạt trước khi đưa số baselin
 | 4 | Cùng feature (`ent_*_emb.pt`, 768 chiều) cho mọi model; ghi rõ là không dùng feature gốc của baseline | [x] dữ liệu; [ ] ghi trong bài |
 | 5 | Tuning siêu tham số với **cùng ngân sách** trên valid cho mọi model, kể cả GeometryMMKG; xuất phát từ config gốc của tác giả | [ ] |
 | 6 | 3 seed cho các ô chính, báo mean ± std; Δ kèm khoảng tin cậy bootstrap | [ ] |
-| 7 | Đặt tên phân biệt: `NativE` (gốc) / `NativE+D(mean)`, `NativE+D(concat)` (depth đưa vào ô ảnh ở tầng dữ liệu); tương tự cho SNAG, MoMoK | [ ] |
+| 7 | Đặt tên phân biệt: `NativE` (gốc) / `NativE+D(mean)` / `NativE+Dstat` (depth đưa vào ô ảnh ở tầng dữ liệu); tương tự cho SNAG, MoMoK. `+D(concat)` bỏ từ 28/11/2026 (mục 3.2), chỉ còn ở các lần đã chạy | [ ] |
 
 **Luật bằng điểm (27/11/2026).** Rank = 1 + số ứng viên điểm cao hơn + ½ số ứng viên bằng điểm (đáp án không tính; các đáp án đúng khác đã lọc ra). Đây là rank kỳ vọng khi xếp ngẫu nhiên các ứng viên bằng điểm ("realistic rank", Berrendorf và cs. 2020; Sun và cs., ACL 2020 chỉ ra luật chỉ đếm ứng viên cao hơn làm phồng số của mô hình cho nhiều điểm bằng nhau). Với điểm liên tục thì gần như không có bằng điểm, và luật này cho đúng số của luật cũ (1 + số cao hơn).
 - Lý do đổi: CMR + kNN trên Spatial-VRD chọn λ = 1, tức điểm chỉ còn từ bộ nhớ kNN. Mỗi câu hỏi chỉ khoảng 32 thực thể có điểm khác 0, hơn 93 nghìn thực thể còn lại bằng 0. Luật cũ xếp đáp án ngoài nhóm kNN ở khoảng hạng 30 thay vì khoảng 47 nghìn (rank lớn nhất trong file test là 33, MR 23,1), làm MRR test phồng lên 0,194 so với 0,158 theo thứ tự sắp xếp của chính code CMR (P3.7).
@@ -768,6 +782,11 @@ Bảng dưới là các tiêu chí phải đạt trước khi đưa số baselin
   - **Kết quả của cộng tác viên (19/11/2026, ngoài giao thức tune):** FB15k-237-IMG, 100 epoch, batch 512, lr 1e-4, dropout 0,1; test MRR `no_depth` 0,2825 / 0,2842 / 0,2846 (seed 42 / 43 / 44, trung bình 0,2838), `depth` 0,2801 / 0,2811 / 0,2818 (0,2810). Δdepth −0,0028 [−0,0041; −0,0015]. Chỉ là một điểm lưới với batch khác quy trình chung, nên chỉ dùng tham khảo.
   - **Số độ sâu theo vùng (quyết định 25/11/2026):** trên 3 bộ scene graph, bản `depth` nối thêm 9 số độ sâu (`ent_depth_stats.pt`, chuẩn hoá theo thực thể train có ảnh; thực thể thiếu ảnh nhận 0, tức một hằng số) vào đầu vào, để nhận đúng thông tin depth như GeometryMMKG (`--depth-stats auto`; tag `dstat` trong tên). Trên FB15k / MKG-Y mô hình giữ nguyên từng tham số như bản của cộng tác viên. Kiểm tra trong `tests/test_feature_transe.py`.
   - **Kiểm tra bản đưa vào (25/11/2026, Molab, code `2f12eab`):** chạy lại đúng config của cộng tác viên (FB15k-237-IMG, `no_depth`, seed 42, batch 512, 100 epoch) qua `train.py --model feature_transe`. MRR valid trùng tới 6 chữ số ở cả 10 lần đánh giá, cùng epoch tốt nhất 40 (0,289223); test MRR 0,2825 · MR 180,6 · H@1 0,2004 · H@3 0,3047 · H@10 0,4480, giống hệt lần chạy cũ. Loss in ra lệch ở chữ số thứ tư chỉ do cách lấy trung bình (theo batch / theo bộ ba). 7,6 giây/epoch.
+  - **Biến thể `depth_stats_only` trên 3 bộ MMSG (quyết định 28/11/2026, mục 3.2):** `[text; RGB; 9 số độ sâu]`, không vector
+    depth, để tách vector depth và `depth_stats` như C3. Bản `depth` hiện có (`[text; RGB; depth; 9 số]`) ứng với `fixed`.
+    Kiến trúc giữ nguyên (nối đầu vào → MLP), chỉ đổi đầu vào; code hiện chặn số độ sâu khi không có vector depth (`ValueError`
+    trong `FeatureTransE.__init__`), nên cần nới chỗ này và thêm biến thể vào `train.py`, kèm test. Tune đủ trên Spatial-VRD,
+    VRD-Trans (3 seed) và Spatial-VG (1 seed). Thêm khoảng 7–9 giờ GPU (khoảng 0,13 giờ mỗi lần trên hai bộ VRD, 0,6 giờ trên VG).
   - Còn làm: thêm Feature-TransE vào notebook tune.
 - [ ] **P3.3** SNAG: notebook trên dữ liệu v0 (dùng `prepare_snag_data.py`), chạy nguyên bản trên mọi ô trừ Spatial-VG.
   - Kiểm lại (22/11/2026): embedding ID `nn.Embedding(N, 2·dim)`; số chiều ảnh và text lấy từ tensor (`-use_pool 0` cho tên không chứa "MKG"); bảng đặc trưng đóng băng. Tham số (dim 128, 1 lớp Mformer; dựng trên CPU): FB15k-237-IMG 27,1 triệu tổng / 4,8 triệu train được (+D concat 38,5 / 5,0), Spatial-VRD 169 / 25 triệu. Config gốc `run_base.sh`: 8000 epoch, batch 1024, 32 mẫu âm, margin 12, lr 1e-4, dừng sớm 10 lần đánh giá. Chọn theo valid: đã có (P3.0a).
@@ -979,12 +998,16 @@ Bảng dưới là các tiêu chí phải đạt trước khi đưa số baselin
     - Cả hai lần chạy ở P3.7 dừng sớm xa mốc 50 (FB15K-237-ind: epoch tốt nhất 28, dừng sau 32; Spatial-VRD: 27, dừng sau 31), tức đã hội tụ.
     - lr giảm tuyến tính theo tổng số bước của 50 epoch (`get_linear_schedule_with_warmup`, `num_training_steps = epochs × số bước`), nên đổi số epoch là đổi lịch lr, không còn là config gốc.
     - CMR chỉ chạy config gốc, không tune; hai lần chạy ở P3.7 là kết quả cuối.
+  - **Đổi cách cấp depth (28/11/2026, mục 3.2):** bỏ +D concat của NativE và SNAG ở mọi ô, tiết kiệm khoảng 115–310 giờ GPU (ước
+    lượng: NativE khoảng 35 giờ trên FB15k + MKG-Y và khoảng 13 giờ trên VRD-Trans; SNAG khoảng 45–170 giờ và 23–94 giờ; cộng phần
+    ô inductive). Thêm +Dstat: NativE trên VRD-Trans khoảng 13 giờ, Feature-TransE `depth_stats_only` khoảng 7–9 giờ. Bảng kế
+    hoạch phía trên chưa tính lại theo thay đổi này; tổng mới khoảng 300–500 giờ.
 
 Ưu tiên theo thứ tự:
 
 - [ ] **P4.1** FB15k-237-IMG: GeometryMMKG + ablation; NativE; SNAG; MoMoK; MKGformer; Feature-TransE. MKG-Y: GeometryMMKG (full, w/o Depth); NativE; SNAG; MoMoK; Feature-TransE.
 - [ ] **P4.1b** FB15K-237-ind: GeometryMMKG (full, w/o Depth); CMR nguyên bản; NativE/SNAG/MoMoK nguyên bản (1 seed); Feature-TransE.
-- [ ] **P4.2** VRD-Trans: GeometryMMKG (full, w/o Depth); NativE 3 kịch bản (Control / +D mean / +D concat); SNAG; MoMoK; MKGformer; Feature-TransE.
+- [ ] **P4.2** VRD-Trans: GeometryMMKG (full, w/o Depth); NativE 3 kịch bản (Control / +D mean / +Dstat; +D concat bỏ 28/11/2026); SNAG; MoMoK; MKGformer; Feature-TransE (thêm `depth_stats_only`).
 - [ ] **P4.3** VRD inductive: GeometryMMKG + ablation; NativE/SNAG/MoMoK nguyên bản (1 seed); CMR nguyên bản; Feature-TransE.
 - [ ] **P4.4** VG inductive: GeometryMMKG (full, w/o Depth); Feature-TransE. Baseline transductive không chạy. Theo dõi RAM/VRAM ở lần eval đầu tiên.
 - [ ] **P4.5** Chạy 3 seed cho các cấu hình chính.
@@ -1259,15 +1282,16 @@ Bảng dưới là các tiêu chí phải đạt trước khi đưa số baselin
             (`fixed` − `depth_stats_only`, `depth_stats_only` − `boxnorm`) không rõ hướng. Ghi vào giới hạn.
     - **E4. Kiểm định:** gộp vào E3 (`scripts/e3_summary.py`): bootstrap ghép cặp theo truy vấn trong từng seed (10.000
       lần), t-test ghép cặp giữa seed (chỉ báo, 2 bậc tự do).
-    - **E5. Baseline** theo P3 / P4, có bản +D. Không cấp box cho baseline (box chỉ là đối chứng, E2). Còn quyết định: có
-      cấp thêm `depth_stats` ở tầng dữ liệu không.
+    - **E5. Baseline** theo P3 / P4, có bản +D. Không cấp box cho baseline (box chỉ là đối chứng, E2). Cấp `depth_stats` ở
+      tầng dữ liệu: **đã quyết 28/11/2026** (mục 3.2): +D chỉ còn +D mean; +Dstat cho NativE trên VRD-Trans và Feature-TransE
+      `depth_stats_only` trên Spatial-VRD, VRD-Trans, Spatial-VG.
     - **E6. Phân tích theo nhóm quan hệ** (P5). Tách riêng nhóm GEOMETRIC cho hai nhánh box của E3: nếu mức tăng của box so
       với `depth_stats_only` tập trung ở nhóm này, đó là phần học lại luật gán nhãn từ vị trí box (giới hạn của E2).
   - **Cắt bỏ:** MoMoK trên hai bộ VRD (khoảng 52 giờ mỗi lần); 2 × 2 và đối chứng box trên Spatial-VG; gate chỉ là
     ablation, không phải đóng góp; phần LLM và việc gộp MMKG với MMSG chỉ ở mục hướng phát triển.
   - **Thứ tự:** E1 → E2 → chọn mô hình chính → E3 + E4 → E5 → E6 → viết bài.
-  - **Quyết định còn mở:** baseline có nhận `depth_stats` ở tầng dữ liệu không. (Mô hình chính đã chọn ở E2:
-    `depth_stats_only` trên MMSG; box không vào mô hình chính và không cấp cho baseline.)
+  - **Quyết định còn mở:** không còn. (Mô hình chính đã chọn ở E2: `depth_stats_only` trên MMSG; box không vào mô hình
+    chính và không cấp cho baseline; cách cấp depth cho baseline chốt 28/11/2026 ở mục 3.2.)
 - [ ] **P6.1** Experimental Setup: hai chế độ (transductive / inductive), giao thức ở mục 4, thống kê split (tỉ lệ thực thể chưa thấy, bậc thực thể, số thực thể trong `entity2id` không xuất hiện trong triplet).
 - [ ] **P6.2** Implementation Details: `type_constrain=False` là **thiết lập gốc của tác giả NativE**; chunked `cdist` và offload để trong phụ lục.
 - [ ] **P6.3** Discussion: Concept (MMKG) vs Instance (MMSG); vai trò của biểu diễn dựa trên đặc trưng cho KG lai.
