@@ -614,7 +614,10 @@ Sáu bộ, mỗi bộ một repo HF public, tag `v0`; cấu trúc file, lệnh d
         0,3214 ở epoch 100 / 100, chạy lại 200 epoch theo luật hội tụ → **0,3216** (epoch 170 / 200, hội tụ). Như ở hai
         bộ VRD, ở dropout 0 chỉ thử một lr.
       - Spatial-VG `depth_stats_only` (mô hình chính trên MMSG) được tune thêm cho E3 (thiết kế E3 mục 5.2), cùng lưới
-        và cùng luật; kết quả ghi ở đây khi xong.
+        và cùng luật. **Xong 28/11/2026** (7 lần, tất cả `--tune`, không có số test, commit `31d7f51`): lưới gốc tốt
+        nhất 3e-4 / 0,1 → 0,3220 (epoch 70); điểm biên 3e-4 / 0 → **0,3295** (epoch 90 / 100), thành cấu hình chọn.
+        "final": lr nằm giữa lưới, dropout 0 là đầu thang, epoch tốt nhất 90 không vượt 90 % ngân sách nên không chạy lại
+        200 epoch. Δ (valid) so với `no_depth` +0,0079.
     - **Tổng hợp cuối (MRR valid của cấu hình chọn, 27/11/2026):**
 
       | Dataset | fixed | no_depth | constant_fixed | Δdepth (fixed − no_depth) |
@@ -1006,12 +1009,12 @@ Bảng dưới là các tiêu chí phải đạt trước khi đưa số baselin
     không phải bài giới thiệu mô hình.
   - **Khẳng định và bằng chứng:**
 
-    | # | Khẳng định | Bằng chứng | Trạng thái (26/11) |
+    | # | Khẳng định | Bằng chứng | Trạng thái (28/11) |
     |---|---|---|---|
     | C1 | Mô hình MMKG có embedding theo ID thất bại trên MMSG inductive vì là mô hình transductive, không phải vì thiếu depth; mô hình dựa trên đặc trưng chạy được ở cả 4 ô | Baseline và mô hình đề xuất trên cả 4 ô; cặp VRD / VRD-Trans | Một phần (NativE) |
-    | C2 | Depth không giúp MMKG | Δdepth trên 3 bộ MMKG trong mức nhiễu, trên ít nhất 2 họ mô hình | 1 seed (mô hình đề xuất); 3 seed Feature-TransE trên FB15k. Chỉ đo qua vector depth, vốn vô dụng cả trên MMSG; E2b kiểm tra luận điểm "depth chỉ giúp khi có thang chung trong cảnh". E2b (1 seed, valid): **nghiêng về luận điểm, chưa kết luận**. Bỏ thang chung mất phần lớn lợi ích của grid9 (chỉ giữ 18 % / 35 %), nên nhánh "không cần thang chung" bị loại trên cả hai bộ; nhưng VRD rơi vào nhánh "cần thang chung", VRD-Trans vào nhánh "một phần", nên theo luật đặt trước phải chờ E3. Suy ra cho MMKG vẫn là lập luận, không phải thí nghiệm trên MMKG |
-    | C3 | Trên MMSG, phần lợi của depth đến từ số độ sâu theo vùng (hiệu độ sâu đầu − đuôi), không đến từ đặc trưng ảnh depth | Bảng 2 × 2 `depth_map_only` / `depth_stats_only` (P2.10), thước đo phụ (E1) | 1 seed, 2 bộ. MRR chính: đúng. Trong ảnh (E1): `depth_stats` +0,007 đến +0,009 trên cả 2 bộ; vector depth +0,010 / +0,012 trên VRD nhưng ≈ 0 trên VRD-Trans, nên viết "không giúp ở MRR chính, trong ảnh chưa nhất quán" cho đến khi có 3 seed. E2: hình học box 2D (gán tay) là tín hiệu mạnh hơn hẳn (box một mình +0,029 trên cả 2 bộ so với `no_depth`, gấp 2,7 / 2,2 lần `depth_stats`), nên viết "`depth_stats` là đường depth duy nhất có ích, nhưng nhỏ hơn hình học 2D". E2b: phần lợi trong ảnh của `depth_stats` cần thang chung của ảnh (chuẩn hoá theo box chỉ còn +0,003 / −0,001 so với `no_depth`, thay vì +0,007 / +0,008), tức cái có ích là độ sâu tương đối giữa các vật cùng cảnh |
-    | C4 | Depth có thêm gì ngoài hình học box 2D không | Đối chứng bằng box (E2) | E2 (1 seed, valid): **có theo luật đặt trước, nhưng nhỏ**: `box_grid9` − `box` +0,005 (VRD, sát ngưỡng nhiễu 0,003) / +0,010 (VRD-Trans). Gần như toàn bộ qua `image_first` (+0,006 / +0,022); trong ảnh ≈ 0 (+0,003 / −0,003); đoán quan hệ giảm (−0,017 / −0,025). Tức depth giúp nhận ra vật thuộc ảnh nào hơn là hiểu quan hệ không gian trong ảnh. Chờ E3 và E6 |
+    | C2 | Depth không giúp MMKG | Δdepth trên 3 bộ MMKG trong mức nhiễu, trên ít nhất 2 họ mô hình | **E3 (test): đúng với GeometryMMKG theo luật đặt trước**: `fixed` − `no_depth` "bằng" trên cả 3 bộ (+0,0011 / +0,0003 / −0,0028; MKG-Y 1 seed); thêm 3 seed Feature-TransE trên FB15k. Họ thứ hai: chờ E5. Hai điều bài phải ghi: (1) đối chứng che ảnh **không sạch** trên FB15k-237-IMG và FB15K-237-ind (Δ_mask +0,0215 / +0,0109; sạch trên MKG-Y), tức hai biến thể đã khác nhau ở phần không thuộc ảnh, nên Δdepth ≈ 0 trên test đầy đủ phải đọc so với Δ_mask; (2) nhóm "một" âm nhưng "chưa rõ" (−0,005 / −0,009, các seed không cùng dấu). Chỉ đo qua vector depth, vốn vô dụng cả trên MMSG; E2b (3 seed) cuối cùng **chưa nhất quán** giữa hai bộ VRD (VRD "cần thang chung", VRD-Trans "một phần"; nhánh "không cần thang chung" bị loại ở cả hai), nên luận điểm "depth chỉ giúp khi có thang chung trong cảnh" vẫn là lập luận, không phải thí nghiệm trên MMKG |
+    | C3 | Trên MMSG, phần lợi của depth đến từ số độ sâu theo vùng (hiệu độ sâu đầu − đuôi), không đến từ đặc trưng ảnh depth | Bảng 2 × 2 `depth_map_only` / `depth_stats_only` (P2.10), thước đo phụ (E1) | **E3 (3 seed, test): đúng theo luật đặt trước** trên cả hai bộ VRD: phần lợi của `depth_stats` "có" ở cả hai cặp (+0,0082 / +0,0052 trên VRD, +0,0124 / +0,0143 trên VRD-Trans), vector depth "bằng" ở cả hai cặp (|Δ̄| ≤ 0,0022). Spatial-VG (1 seed) cùng hướng: `depth_stats_only` − `no_depth` +0,0084 "có", vector depth thêm +0,0009 "bằng". Số phụ: vector depth vẫn tăng MRR trong ảnh trên VRD (+0,008) nhưng chỉ 0 đến +0,003 trên VRD-Trans, và làm giảm đoán quan hệ (−0,02 đến −0,05), nên viết "không giúp ở MRR chính". Hình học box 2D (gán tay) mạnh hơn: `box` − `depth_stats_only` +0,018 / +0,016, nên viết "`depth_stats` là đường depth duy nhất có ích, nhưng nhỏ hơn hình học 2D". E2b: phần lợi của `depth_stats` cần thang chung của ảnh (`depth_stats_only` − `boxnorm` +0,0068 "có" trên cả hai bộ), tức cái có ích là độ sâu tương đối giữa các vật cùng cảnh |
+    | C4 | Depth có thêm gì ngoài hình học box 2D không | Đối chứng bằng box (E2) | **E3 (3 seed, test): có, nhỏ**: `box_grid9` − `box` +0,0060 (VRD) / +0,0113 (VRD-Trans), "có" trên cả hai bộ. Trên VRD-Trans gần như toàn bộ qua `image_first` (+0,019; trong ảnh 0,000), như E2; trên VRD chia đôi (`image_first` +0,004, trong ảnh +0,006). Đoán quan hệ giảm (−0,011 / −0,025). Tức phần depth thêm vào box chủ yếu giúp nhận ra vật thuộc ảnh nào, chỉ một phần nhỏ là hiểu quan hệ trong ảnh. Chờ E6 (nhóm GEOMETRIC) |
     | C5 | MMSG khác MMKG về cấu trúc, và xếp hạng trên toàn bộ thực thể lẫn việc tìm đúng ảnh | Bảng cấu trúc đồ thị; thước đo trong cùng ảnh và đoán quan hệ (E1) | Có bảng cấu trúc và E1 (1 seed, valid): chỉ 26 % (VRD) / 39 % (VRD-Trans) truy vấn có đáp án đứng trên mọi thực thể ảnh khác; MRR trong ảnh 0,45–0,50 so với MRR chính 0,26–0,36 |
     | C6 | Cách gộp RGB với depth không quan trọng; gate không hơn trọng số cố định | Ablation concat / mean / fixed / gate | Có (1 seed) |
 
@@ -1191,6 +1194,69 @@ Bảng dưới là các tiêu chí phải đạt trước khi đưa số baselin
         ở cả hai cặp trên cả hai bộ VRD, vector depth không "có" ở cặp nào. C4: `box_grid9` − `box` "có" cả hai bộ →
         có; "bằng" cả hai → không; còn lại chưa nhất quán. E2b: luật mục 6 của thiết kế E2b trên Δ̄; hai bộ vẫn khác
         nhau thì kết luận cuối "chưa nhất quán". Nhóm theo ảnh (MMKG): không phán quyết nhóm dưới 500 bộ ba.
+      - **Kết quả (xong 28/11/2026; test; code `0aba30a` cho hai bộ VRD, `31d7f51` cho MMKG và Spatial-VG).** Đủ 59
+        lần chạy. Seed 42 của mọi ô lặp lại đúng lần tune (MRR valid lệch 0,0000, cùng epoch tốt nhất). Bảng từ
+        `scripts/e3_summary.py` trên bản sao `geometry-e3/` tải từ HF. Đối chứng che ảnh chạy trên GPU laptop (cùng code
+        `31d7f51`, dữ liệu v0 đã so khớp từng file), không trên Molab: đánh giá lại không che trên laptop cho MRR test trùng
+        số chính thức đến 6 chữ số (vài hạng lệch 1–2 do điểm gần bằng nhau giữa hai GPU); ghi trong phụ lục.
+        - **MMSG, MRR test (trung bình 3 seed; Spatial-VG 1 seed; \* = cận dưới, epoch tốt nhất 200 / 200):**
+
+          | | `no_depth` | `depth_map_only` | `depth_stats_only` | `fixed` | `box` | `box_grid9` | `boxnorm` |
+          |---|---|---|---|---|---|---|---|
+          | **Spatial-VRD** MRR chính | 0,2646 | 0,2654 | 0,2728 | 0,2706 | 0,2906 | 0,2966 | 0,2660 |
+          | MRR trong ảnh | 0,4547 | 0,4625 | 0,4577 | 0,4657 | 0,4796 | 0,4851 | 0,4541 |
+          | `image_first` | 0,273 | 0,269 | 0,284 | 0,273 | 0,299 | 0,303 | 0,274 |
+          | Đoán quan hệ MRR | 0,5026 | 0,4666 | 0,5055 | 0,4561 | 0,5024 | 0,4912 | 0,5057 |
+          | **VRD-Trans** MRR chính | 0,3504 | 0,3492 | 0,3627\* | 0,3635\* | 0,3787 | 0,3900 | 0,3560\* |
+          | MRR trong ảnh | 0,4919 | 0,4935 | 0,4990 | 0,5021 | 0,5238 | 0,5239 | 0,4925 |
+          | `image_first` | 0,387 | 0,383 | 0,406 | 0,404 | 0,413 | 0,432 | 0,401 |
+          | Đoán quan hệ MRR | 0,4759 | 0,4455 | 0,4584 | 0,4361 | 0,4666 | 0,4416 | 0,4726 |
+          | **Spatial-VG** MRR chính | 0,3287 | — | 0,3371 | 0,3380 | — | — | — |
+
+        - **MMSG, các cặp (Δ̄ MRR test chính, phán quyết theo mục 6.1 của thiết kế):**
+
+          | Cặp | Spatial-VRD | VRD-Trans | Spatial-VG (1 seed) |
+          |---|---|---|---|
+          | `depth_stats_only` − `no_depth` (mô hình chính) | +0,0082 có | +0,0124 có | +0,0084 có |
+          | `fixed` − `depth_map_only` (C3) | +0,0052 có | +0,0143 có | — |
+          | `depth_map_only` − `no_depth` (C3) | +0,0008 bằng | −0,0011 bằng | — |
+          | `fixed` − `depth_stats_only` (C3) | −0,0022 bằng | +0,0008 bằng | +0,0009 bằng |
+          | `box_grid9` − `box` (C4) | +0,0060 có | +0,0113 có | — |
+          | `box` − `depth_stats_only` | +0,0178 có | +0,0160 có | — |
+          | `boxnorm` − `no_depth` (E2b) | +0,0014 bằng | +0,0056 có | — |
+          | `depth_stats_only` − `boxnorm` (E2b) | +0,0068 có | +0,0068 có | — |
+
+          Spatial-VG thêm `fixed` − `no_depth` +0,0093 "có".
+
+        - **MMKG (`fixed` − `no_depth`; MKG-Y 1 seed):**
+
+          | | FB15k-237-IMG | FB15K-237-ind | MKG-Y |
+          |---|---|---|---|
+          | MRR `no_depth` / `fixed` | 0,3250 / 0,3261 | 0,2373 / 0,2376 | 0,3980 / 0,3952 |
+          | Δdepth, test đầy đủ | +0,0011 bằng | +0,0003 bằng | −0,0028 bằng |
+          | Nhóm "cả hai" (số bộ ba) | +0,0015 bằng (19.205) | +0,0009 bằng (49.338) | −0,0029 bằng (2.496) |
+          | Nhóm "một" | −0,0050 chưa rõ (1.247) | −0,0087 chưa rõ (3.494) | −0,0010 (165, không phán quyết) |
+          | Nhóm "không" | 14 bộ ba, không phán quyết | 38, không phán quyết | 2, không phán quyết |
+          | Che toàn bộ ảnh: MRR `no_depth` / `fixed` | 0,2381 / 0,2595 | 0,2178 / 0,2287 | 0,2139 / 0,2146 |
+          | Δ_mask | +0,0215 có → không sạch | +0,0109 có → không sạch | +0,0006 bằng → sạch |
+
+        - **Đọc kết quả (theo mục 6.2–6.4 của thiết kế):**
+          - **C2 đúng với GeometryMMKG:** "bằng" trên cả 3 bộ MMKG; họ thứ hai ở E5.
+          - **Δdepth trên MMSG "có" trên cả 3 bộ:** +0,008 đến +0,012, cùng cỡ số valid ở P2.10 / E1. VG (1 seed) chỉ
+            là bằng chứng phụ: khoảng tin cậy chỉ tính dao động giữa các bộ ba, không tính dao động giữa seed.
+          - **C3 đúng:** `depth_stats` "có" ở cả 4 cặp, vector depth "bằng" ở cả 4 cặp; VG cùng hướng.
+          - **C4 = có, nhỏ** (+0,006 / +0,011); "sát ngưỡng" của E2 trên VRD không còn (cả 3 seed có khoảng tin cậy loại
+            0).
+          - **E2b cuối cùng "chưa nhất quán"**, không chạy thêm: VRD "cần thang chung" (phần lợi giữ lại 0,17), VRD-Trans
+            "một phần" (0,45). Nhánh "không cần thang chung" bị loại ở cả hai bộ.
+          - **Đối chứng che ảnh không sạch trên FB15k-237-IMG và FB15K-237-ind:** khi mọi thực thể dùng `v_miss`,
+            `fixed` vẫn hơn `no_depth` +0,02 / +0,01, tức hai biến thể học phần không thuộc ảnh (text, quan hệ) khác nhau.
+            Δdepth ≈ 0 trên test đầy đủ vì thế không có nghĩa "hai mô hình như nhau trừ depth"; bài ghi rõ, và không trừ
+            thẳng hai số (che ảnh là đầu vào lệch phân phối lúc train). MKG-Y sạch.
+          - Nhóm "một" trên hai bộ FB âm nhưng các seed không cùng dấu → "chưa rõ", báo nguyên trạng.
+          - Cận dưới (VRD-Trans `depth_stats_only`, `fixed`, `boxnorm`): cặp chỉ có vế trước là cận dưới (đều "có") chỉ
+            lớn thêm; `box` − `depth_stats_only` có thể nhỏ đi nhưng còn +0,016, xa ngưỡng; hai cặp mà cả hai bên là cận dưới
+            (`fixed` − `depth_stats_only`, `depth_stats_only` − `boxnorm`) không rõ hướng. Ghi vào giới hạn.
     - **E4. Kiểm định:** gộp vào E3 (`scripts/e3_summary.py`): bootstrap ghép cặp theo truy vấn trong từng seed (10.000
       lần), t-test ghép cặp giữa seed (chỉ báo, 2 bậc tự do).
     - **E5. Baseline** theo P3 / P4, có bản +D. Không cấp box cho baseline (box chỉ là đối chứng, E2). Còn quyết định: có
